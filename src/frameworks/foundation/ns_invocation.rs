@@ -40,6 +40,48 @@ struct NSInvocationHostObject {
 }
 impl HostObject for NSInvocationHostObject {}
 
+fn record_invocation_state(
+    env: &mut crate::Environment,
+    action: &'static str,
+    invocation: id,
+    argument_index: i32,
+) {
+    let (target, selector, argument_count, set_mask) = {
+        let host = env.objc.borrow::<NSInvocationHostObject>(invocation);
+        let set_mask =
+            host.arguments
+                .iter()
+                .take(32)
+                .enumerate()
+                .fold(0u32, |mask, (index, argument)| {
+                    if argument.is_some() {
+                        mask | (1u32 << index)
+                    } else {
+                        mask
+                    }
+                });
+        (
+            host.target.to_bits(),
+            host.selector.map_or(0, |selector| {
+                let mut regs = [0];
+                selector.to_regs(&mut regs);
+                regs[0]
+            }),
+            host.arguments.len().try_into().unwrap_or(u32::MAX),
+            set_mask,
+        )
+    };
+    env.diagnostic_invocation_event(
+        action,
+        invocation.to_bits(),
+        target,
+        selector,
+        argument_index,
+        argument_count,
+        set_mask,
+    );
+}
+
 pub const CLASSES: ClassExports = objc_classes! {
 
 (env, this, _cmd);
@@ -70,6 +112,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         copied_strings: Vec::new(),
     });
     let res = env.objc.alloc_object(this, host_object, &mut env.mem);
+    record_invocation_state(env, "create", res, -1);
     autorelease(env, res)
 }
 
@@ -84,11 +127,13 @@ pub const CLASSES: ClassExports = objc_classes! {
         retain(env, target);
         release(env, old_target);
     }
+    record_invocation_state(env, "set-target", this, -1);
 }
 
 - (())setSelector:(SEL)selector {
     assert!(env.objc.borrow_mut::<NSInvocationHostObject>(this).selector.is_none()); // TODO
     env.objc.borrow_mut::<NSInvocationHostObject>(this).selector = Some(selector);
+    record_invocation_state(env, "set-selector", this, -1);
 }
 
 - (())retainArguments {
@@ -127,6 +172,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     host.retained_objects = retained_objects;
     host.copied_strings = copied_strings;
     host.arguments_retained = true;
+    record_invocation_state(env, "retain-arguments", this, -1);
 }
 
 - (())setArgument:(MutVoidPtr)arg_loc
@@ -204,6 +250,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     };
 
     env.objc.borrow_mut::<NSInvocationHostObject>(this).arguments[idx as usize] = Some(new);
+    record_invocation_state(env, "set-argument", this, idx);
 }
 
 - (())invokeWithTarget:(id)target {
@@ -236,6 +283,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())invoke {
+    record_invocation_state(env, "invoke", this, -1);
     // Safeguard: all arguments must be set (except first two)
     let arguments: &Vec<Option<MutVoidPtr>> = env.objc.borrow::<NSInvocationHostObject>(this).arguments.as_ref();
     let set_count = arguments.iter().flatten().count();

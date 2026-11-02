@@ -9,6 +9,7 @@
 //! error.
 
 use crate::frameworks::foundation::ns_string;
+use crate::fs::GuestPath;
 use crate::mem::{ConstVoidPtr, Mem};
 use crate::objc::{id, ObjC};
 use crate::Environment;
@@ -22,7 +23,10 @@ const CRASH_CALLERS: usize = 8;
 const PROVENANCE: usize = 128;
 const BOUNDARY_DETAILS: usize = 8;
 const BUNDLE_CANDIDATES: usize = 16;
+const BUNDLE_DIRECTORY_ENTRIES: usize = 24;
 const COLLECTION_EVENTS: usize = 48;
+const INVOCATION_EVENTS: usize = 32;
+const ARRAY_EVENTS: usize = 48;
 const WATCHED_OBJECTS: usize = 16;
 const OBJECT_LIFETIME_EVENTS: usize = 64;
 const DICTIONARY_ORIGINS: usize = 64;
@@ -30,6 +34,8 @@ const HEALTHY_PRESENT_INTERVAL: Duration = Duration::from_millis(100);
 const SLOW_PRESENT_INTERVAL: Duration = Duration::from_millis(180);
 const HEALTHY_PRESENT_STREAK: u16 = 30;
 const SLOW_PRESENT_STREAK: u8 = 3;
+#[cfg(test)]
+const MAX_RECORDER_BYTES: usize = 192 * 1024;
 
 #[derive(Clone, Copy, Debug)]
 struct Text {
@@ -262,6 +268,35 @@ struct DictionaryOrigin {
     option: u32,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct InvocationEvent {
+    sequence: u64,
+    thread: usize,
+    action: &'static str,
+    invocation: u32,
+    target: u32,
+    selector: u32,
+    argument_index: i32,
+    argument_count: u32,
+    set_mask: u32,
+    pc: u32,
+    lr: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ArrayEvent {
+    sequence: u64,
+    thread: usize,
+    action: &'static str,
+    array: u32,
+    index: u32,
+    object: u32,
+    before: u32,
+    after: u32,
+    pc: u32,
+    lr: u32,
+}
+
 struct Ring<T: Copy + Default, const N: usize> {
     items: [T; N],
     written: u64,
@@ -326,7 +361,10 @@ pub struct Recorder {
     provenance: [Provenance; PROVENANCE],
     boundary_details: Ring<BoundaryDetail, BOUNDARY_DETAILS>,
     bundle_candidates: Ring<Text, BUNDLE_CANDIDATES>,
+    bundle_directory_entries: Ring<Text, BUNDLE_DIRECTORY_ENTRIES>,
     collection_events: Ring<CollectionEvent, COLLECTION_EVENTS>,
+    invocation_events: Ring<InvocationEvent, INVOCATION_EVENTS>,
+    array_events: Ring<ArrayEvent, ARRAY_EVENTS>,
     watched_objects: [u32; WATCHED_OBJECTS],
     object_lifetime_events: Ring<ObjectLifetimeEvent, OBJECT_LIFETIME_EVENTS>,
     dictionary_origins: [DictionaryOrigin; DICTIONARY_ORIGINS],
@@ -360,7 +398,10 @@ impl Recorder {
             provenance: [Provenance::default(); PROVENANCE],
             boundary_details: Ring::default(),
             bundle_candidates: Ring::default(),
+            bundle_directory_entries: Ring::default(),
             collection_events: Ring::default(),
+            invocation_events: Ring::default(),
+            array_events: Ring::default(),
             watched_objects: [0; WATCHED_OBJECTS],
             object_lifetime_events: Ring::default(),
             dictionary_origins: [DictionaryOrigin::default(); DICTIONARY_ORIGINS],
@@ -436,6 +477,19 @@ impl Recorder {
         };
         self.recent.push(event);
         if dictionary_result && Self::tracks_provenance(&call) {
+            // A dictionary obtained from another tracked dictionary inherits
+            // the source container's property-list mutability contract. This
+            // keeps nested-container provenance available even when the
+            // original creation record has rolled out of the fixed table.
+            if matches!(call.name.bytes(), b"objectForKey:" | b"dictionaryForKey:") {
+                if let Some(mut origin) = self.dictionary_origin_for(call.receiver).copied() {
+                    self.dictionary_origin_sequence =
+                        self.dictionary_origin_sequence.saturating_add(1);
+                    origin.sequence = self.dictionary_origin_sequence;
+                    origin.object = result[0];
+                    self.remember_dictionary_origin(origin);
+                }
+            }
             self.remember_provenance(result[0], event);
         }
         if signal {
@@ -523,9 +577,7 @@ impl Recorder {
         if object == 0 {
             return None;
         }
-        self.provenance
-            .iter()
-            .find(|slot| slot.object == object)
+        self.provenance.iter().find(|slot| slot.object == object)
     }
     fn watch_object(&mut self, object: u32) {
         if object == 0 || self.watched_objects.contains(&object) {
@@ -556,6 +608,14 @@ impl Recorder {
             .min_by_key(|slot| slot.sequence)
             .unwrap();
         *slot = origin;
+    }
+    fn dictionary_origin_for(&self, object: u32) -> Option<&DictionaryOrigin> {
+        if object == 0 {
+            return None;
+        }
+        self.dictionary_origins
+            .iter()
+            .find(|origin| origin.object == object)
     }
     fn note_present(&mut self) {
         self.note_present_at(Instant::now());
@@ -694,6 +754,13 @@ impl Recorder {
             echo_no_panic!("flight bundle candidate miss path=\"{}\"", candidate);
         }
         echo_no_panic!(
+            "flight bundle directory samples: newest {BUNDLE_DIRECTORY_ENTRIES}; total={} (bounded names from failed resource directories)",
+            self.bundle_directory_entries.written
+        );
+        for entry in self.bundle_directory_entries.iter() {
+            echo_no_panic!("flight bundle directory entry name=\"{}\"", entry);
+        }
+        echo_no_panic!(
             "flight collection ownership events: newest {COLLECTION_EVENTS}; total={} (bounded observations, not proof of ownership correctness)",
             self.collection_events.written
         );
@@ -710,6 +777,26 @@ impl Recorder {
             echo_no_panic!("flight lifetime #{} tid={} action={} object={:#x} class=\"{}\" refcount={}->{} pc={:#x} lr={:#x}",
                 event.sequence, event.thread, event.action, event.object, event.class,
                 event.before, event.after, event.pc, event.lr);
+        }
+        echo_no_panic!(
+            "flight invocation lifecycle events: newest {INVOCATION_EVENTS}; total={} (bounded creation/configuration/invoke snapshots)",
+            self.invocation_events.written
+        );
+        for event in self.invocation_events.iter() {
+            echo_no_panic!("flight invocation #{} tid={} action={} invocation={:#x} target={:#x} selector={:#x} argument-index={} argument-count={} set-mask={:#010x} pc={:#x} lr={:#x}",
+                event.sequence, event.thread, event.action, event.invocation,
+                event.target, event.selector, event.argument_index,
+                event.argument_count, event.set_mask, event.pc, event.lr);
+        }
+        echo_no_panic!(
+            "flight array mutation events: newest {ARRAY_EVENTS}; total={} (bounded mutations plus invalid accesses; counts are before/after)",
+            self.array_events.written
+        );
+        for event in self.array_events.iter() {
+            echo_no_panic!("flight array #{} tid={} action={} array={:#x} index={} object={:#x} count={}->{} pc={:#x} lr={:#x}",
+                event.sequence, event.thread, event.action, event.array,
+                event.index, event.object, event.before, event.after,
+                event.pc, event.lr);
         }
         if let Some(last) = self
             .recent
@@ -799,8 +886,7 @@ fn describe_object(objc: &ObjC, mem: &Mem, address: u32, include_string: bool) -
         return Text::from_bytes(class_name.as_bytes());
     }
     let mut string = [0; 80];
-    let Some(written) =
-        ns_string::copy_diagnostic_utf8(objc, id::from_bits(address), &mut string)
+    let Some(written) = ns_string::copy_diagnostic_utf8(objc, id::from_bits(address), &mut string)
     else {
         return Text::from_bytes(class_name.as_bytes());
     };
@@ -910,8 +996,8 @@ impl Environment {
         });
         let is_defaults_lookup = class_name == "NSUserDefaults"
             && matches!(name.bytes(), b"objectForKey:" | b"dictionaryForKey:");
-        let is_immutable_dictionary_mutation = class_name == "_touchHLE_NSDictionary"
-            && name.bytes() == b"setObject:forKey:";
+        let is_immutable_dictionary_mutation =
+            class_name == "_touchHLE_NSDictionary" && name.bytes() == b"setObject:forKey:";
         if is_defaults_lookup || is_immutable_dictionary_mutation {
             let arguments = if is_defaults_lookup {
                 [
@@ -957,8 +1043,85 @@ impl Environment {
     /// calling guest code. The fixed-size ring is emitted only with a normal
     /// flight-recorder dump.
     pub fn diagnostic_bundle_candidate_miss(&mut self, path: &str) {
+        if self.diagnostics.is_none() {
+            return;
+        }
+        let mut directory_entries = [Text::default(); 8];
+        let mut directory_entry_count = 0;
+        if let Some((parent, _)) = path.rsplit_once('/') {
+            if let Ok(entries) = self.fs.enumerate(GuestPath::new(parent)) {
+                for (entry, slot) in entries.zip(directory_entries.iter_mut()) {
+                    *slot = Text::from_bytes(entry.as_bytes());
+                    directory_entry_count += 1;
+                }
+            }
+        }
         if let Some(recorder) = &mut self.diagnostics {
             recorder.bundle_candidates.push(Text::path_tail(path));
+            for entry in &directory_entries[..directory_entry_count] {
+                recorder.bundle_directory_entries.push(*entry);
+            }
+        }
+    }
+
+    /// Record the small amount of state needed to reconstruct how an
+    /// NSInvocation was configured. Argument contents are deliberately not
+    /// copied; the bit mask records only which slots were supplied.
+    #[allow(clippy::too_many_arguments)]
+    pub fn diagnostic_invocation_event(
+        &mut self,
+        action: &'static str,
+        invocation: u32,
+        target: u32,
+        selector: u32,
+        argument_index: i32,
+        argument_count: u32,
+        set_mask: u32,
+    ) {
+        let regs = self.cpu.regs();
+        if let Some(recorder) = &mut self.diagnostics {
+            recorder.invocation_events.push(InvocationEvent {
+                sequence: recorder.invocation_events.written.saturating_add(1),
+                thread: self.current_thread,
+                action,
+                invocation,
+                target,
+                selector,
+                argument_index,
+                argument_count,
+                set_mask,
+                pc: regs[15],
+                lr: regs[14],
+            });
+        }
+    }
+
+    /// Record bounded mutable-array transitions and invalid accesses without
+    /// changing collection behavior or retaining any objects.
+    #[allow(clippy::too_many_arguments)]
+    pub fn diagnostic_array_event(
+        &mut self,
+        action: &'static str,
+        array: u32,
+        index: u32,
+        object: u32,
+        before: u32,
+        after: u32,
+    ) {
+        let regs = self.cpu.regs();
+        if let Some(recorder) = &mut self.diagnostics {
+            recorder.array_events.push(ArrayEvent {
+                sequence: recorder.array_events.written.saturating_add(1),
+                thread: self.current_thread,
+                action,
+                array,
+                index,
+                object,
+                before,
+                after,
+                pc: regs[15],
+                lr: regs[14],
+            });
         }
     }
     /// Record only dictionary ownership-relevant transitions. This is a
@@ -989,10 +1152,7 @@ impl Environment {
                 value_retain: callbacks[2],
                 value_release: callbacks[3],
             });
-            if action == "insert-callback-dictionary"
-                && callbacks == [0; 4]
-                && value != 0
-            {
+            if action == "insert-callback-dictionary" && callbacks == [0; 4] && value != 0 {
                 recorder.watch_object(value);
                 recorder.object_lifetime_events.push(ObjectLifetimeEvent {
                     sequence: recorder.object_lifetime_events.written.saturating_add(1),
@@ -1275,7 +1435,7 @@ mod tests {
         }
         assert_eq!(recorder.progress.iter().count(), PROGRESS);
         assert_eq!(recorder.progress.written, 40);
-        assert!(std::mem::size_of::<Recorder>() < 128 * 1024);
+        assert!(std::mem::size_of::<Recorder>() < MAX_RECORDER_BYTES);
         let text = Text::from_bytes(b"name\nforged line");
         assert_eq!(format!("{text}"), "name\\x0aforged line");
     }
@@ -1332,6 +1492,36 @@ mod tests {
     }
 
     #[test]
+    fn nested_dictionary_lookup_inherits_property_list_origin() {
+        let mut recorder = Recorder::new();
+        recorder.dictionary_origin_sequence = 1;
+        recorder.remember_dictionary_origin(DictionaryOrigin {
+            sequence: 1,
+            object: 0x1000,
+            mutable: false,
+            context: "property-list",
+            option: 0,
+        });
+        recorder.finish(
+            Call {
+                name: Text::from_bytes(b"objectForKey:"),
+                receiver: 0x1000,
+                detail: Text::from_bytes(b"_touchHLE_NSDictionary"),
+                ..Call::default()
+            },
+            [0x2000, 0],
+            true,
+            true,
+        );
+
+        let inherited = recorder.dictionary_origin_for(0x2000).unwrap();
+        assert!(!inherited.mutable);
+        assert_eq!(inherited.context, "property-list");
+        assert_eq!(inherited.option, 0);
+        assert!(inherited.sequence > 1);
+    }
+
+    #[test]
     fn decoded_defaults_domain_and_immutable_mutation_are_bounded() {
         use crate::frameworks::foundation::ns_string::from_rust_string;
         use crate::objc::{id, msg_class};
@@ -1376,10 +1566,7 @@ mod tests {
             .bytes()
             .starts_with(b"\"settings/items\""));
 
-        let set_object = env
-            .mem
-            .alloc_and_write_cstr(b"setObject:forKey:")
-            .to_bits();
+        let set_object = env.mem.alloc_and_write_cstr(b"setObject:forKey:").to_bits();
         env.cpu.regs_mut()[0..4].copy_from_slice(&[
             result.to_bits(),
             set_object,
@@ -1402,7 +1589,7 @@ mod tests {
         assert!(detail.arguments[1]
             .bytes()
             .starts_with(b"\"playerchar/gramps\""));
-        assert!(std::mem::size_of::<Recorder>() < 128 * 1024);
+        assert!(std::mem::size_of::<Recorder>() < MAX_RECORDER_BYTES);
     }
     #[test]
     fn first_slow_present_freezes_the_transition_history() {

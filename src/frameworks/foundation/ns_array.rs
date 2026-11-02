@@ -518,6 +518,17 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (id)objectAtIndex:(NSUInteger)index {
     // TODO: throw real exception rather than panic if out-of-bounds?
+    let count: NSUInteger = env.objc.borrow::<ArrayHostObject>(this).array.len().try_into().unwrap();
+    if index >= count {
+        env.diagnostic_array_event(
+            "invalid-access",
+            this.to_bits(),
+            index,
+            0,
+            count,
+            count,
+        );
+    }
     env.objc.borrow::<ArrayHostObject>(this).array[index as usize]
 }
 
@@ -776,6 +787,17 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (id)objectAtIndex:(NSUInteger)index {
     // TODO: throw real exception rather than panic if out-of-bounds?
+    let count: NSUInteger = env.objc.borrow::<ArrayHostObject>(this).array.len().try_into().unwrap();
+    if index >= count {
+        env.diagnostic_array_event(
+            "invalid-access",
+            this.to_bits(),
+            index,
+            0,
+            count,
+            count,
+        );
+    }
     env.objc.borrow::<ArrayHostObject>(this).array[index as usize]
 }
 
@@ -788,14 +810,18 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())insertObject:(id)object
            atIndex:(NSUInteger)index {
     assert_can_grow(env, this);
+    let before: NSUInteger = env.objc.borrow::<ArrayHostObject>(this).array.len().try_into().unwrap();
     retain(env, object);
     env.objc.borrow_mut::<ArrayHostObject>(this).array.insert(index as usize, object);
+    env.diagnostic_array_event("insert", this.to_bits(), index, object.to_bits(), before, before + 1);
 }
 
 - (())addObject:(id)object {
     assert_can_grow(env, this);
+    let before: NSUInteger = env.objc.borrow::<ArrayHostObject>(this).array.len().try_into().unwrap();
     retain(env, object);
     env.objc.borrow_mut::<ArrayHostObject>(this).array.push(object);
+    env.diagnostic_array_event("add", this.to_bits(), before, object.to_bits(), before, before + 1);
 }
 
 - (())removeObject:(id)object {
@@ -809,37 +835,46 @@ pub const CLASSES: ClassExports = objc_classes! {
         }
     }
     // TODO: runtime here is O(n^2), it could be O(n) instead
-    for i in to_remove {
+    // Preserve the original indexes while removing every equal object.
+    for i in to_remove.into_iter().rev() {
         () = msg![env; this removeObjectAtIndex:i];
     }
 }
 
 - (())removeObjectAtIndex:(NSUInteger)index {
+    let before: NSUInteger = env.objc.borrow::<ArrayHostObject>(this).array.len().try_into().unwrap();
     let object = env.objc.borrow_mut::<ArrayHostObject>(this).array.remove(index as usize);
+    env.diagnostic_array_event("remove", this.to_bits(), index, object.to_bits(), before, before - 1);
     release(env, object)
 }
 
 - (())replaceObjectAtIndex:(NSUInteger)index withObject:(id)obj {
+    let count: NSUInteger = env.objc.borrow::<ArrayHostObject>(this).array.len().try_into().unwrap();
     retain(env, obj);
     let object = std::mem::replace(&mut env.objc.borrow_mut::<ArrayHostObject>(this).array[index as usize], obj);
+    env.diagnostic_array_event("replace", this.to_bits(), index, obj.to_bits(), count, count);
     release(env, object);
 }
 
 - (())removeLastObject {
     // Apple's docs say this raises on an empty array, but it does nothing.
+    let before: NSUInteger = env.objc.borrow::<ArrayHostObject>(this).array.len().try_into().unwrap();
     if let Some(object) = env.objc.borrow_mut::<ArrayHostObject>(this).array.pop() {
+        env.diagnostic_array_event("remove-last", this.to_bits(), before - 1, object.to_bits(), before, before - 1);
         release(env, object)
     }
 }
 
 - (())removeAllObjects {
+    let before: NSUInteger = env.objc.borrow::<ArrayHostObject>(this).array.len().try_into().unwrap();
     let host_object: &mut ArrayHostObject = env.objc.borrow_mut(this);
     let array = std::mem::take(&mut host_object.array);
     for object in array {
         release(env, object);
     }
 
-    env.objc.borrow_mut::<ArrayHostObject>(this).array = Vec::new()
+    env.objc.borrow_mut::<ArrayHostObject>(this).array = Vec::new();
+    env.diagnostic_array_event("remove-all", this.to_bits(), 0, 0, before, 0)
 }
 
 - (())removeObjectsInArray:(id)other { // NSArray*
@@ -850,6 +885,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     let host_object: &mut ArrayHostObject = env.objc.borrow_mut(this);
     let array = std::mem::take(&mut host_object.array);
+    let before: NSUInteger = array.len().try_into().unwrap();
 
     // Since removing objects individually has to iterate the whole array
     // for each object (with [array removeObject:obj]), so this just saves some
@@ -866,7 +902,9 @@ pub const CLASSES: ClassExports = objc_classes! {
         }
     }
 
+    let after: NSUInteger = new_array.len().try_into().unwrap();
     env.objc.borrow_mut::<ArrayHostObject>(this).array = new_array;
+    env.diagnostic_array_event("remove-array", this.to_bits(), 0, other.to_bits(), before, after);
     release(env, other_array_set);
 }
 
@@ -1142,10 +1180,7 @@ mod tests {
         let env = &mut env;
         let pool: id = msg_class![env; NSAutoreleasePool new];
         let objects: Vec<id> = (0..6).map(|_| msg_class![env; NSObject new]).collect();
-        let owned_objects = objects
-            .iter()
-            .map(|&object| retain(env, object))
-            .collect();
+        let owned_objects = objects.iter().map(|&object| retain(env, object)).collect();
         let array = mutable_from_vec(env, owned_objects);
         let indexes: id = msg_class![env; NSMutableIndexSet indexSet];
         () = msg![env; indexes addIndex:1u32];
@@ -1171,6 +1206,27 @@ mod tests {
             release(env, object);
         }
         release(env, pool);
+    }
+
+    #[test]
+    fn remove_object_removes_all_equal_entries_without_index_drift() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let object: id = msg_class![env; NSObject new];
+        let owned = vec![
+            retain(env, object),
+            retain(env, object),
+            retain(env, object),
+        ];
+        let array = mutable_from_vec(env, owned);
+
+        () = msg![env; array removeObject:object];
+
+        let count: NSUInteger = msg![env; array count];
+        assert_eq!(count, 0);
+        assert_eq!(env.objc.get_refcount(object).get(), 1);
+        release(env, array);
+        release(env, object);
     }
 
     #[test]

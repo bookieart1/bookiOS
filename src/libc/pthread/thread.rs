@@ -440,6 +440,14 @@ fn pthread_testcancel(_env: &mut Environment) {
     log!("TODO: pthread_testcancel()");
 }
 
+/// Darwin's non-portable predecessor/alias of `sched_yield`. Guest threads are
+/// cooperatively scheduled, so hand control back to the emulator scheduler and
+/// leave the current thread runnable.
+fn pthread_yield_np(env: &mut Environment) -> i32 {
+    env.yield_thread(crate::environment::ThreadBlock::NotBlocked);
+    0
+}
+
 #[allow(non_camel_case_types)]
 type mach_port_t = u32;
 
@@ -530,6 +538,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(pthread_setcancelstate(_, _)),
     export_c_func!(pthread_setcanceltype(_, _)),
     export_c_func!(pthread_testcancel()),
+    export_c_func!(pthread_yield_np()),
     export_c_func!(pthread_mach_thread_np(_)),
     export_c_func!(pthread_get_stackaddr_np(_)),
     export_c_func!(pthread_get_stacksize_np(_)),

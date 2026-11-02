@@ -444,14 +444,12 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
         input_stream_format
             .unwrap_or(output_stream_format.unwrap_or(audio_unit_host_object.global_stream_format))
     };
-    let sample_rate = if let Some(input_stream_format) = input_stream_format {
-        input_stream_format.sample_rate
-    } else {
-        assert!(output_stream_format.is_some());
-        // TODO: confirm that this is the general behaviour
-        // (and not only RE4 thing)
-        current_hardware_sample_rate
-    };
+    let sample_rate = render_sample_rate(
+        input_stream_format.as_ref(),
+        output_stream_format.as_ref(),
+        &audio_unit_host_object.global_stream_format,
+        current_hardware_sample_rate,
+    );
 
     assert!(is_supported_audio_format(&stream_format));
 
@@ -549,7 +547,8 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
         flags: kAudioTimeStampSampleTimeValid | kAudioTimeStampHostTimeValid,
         ..Default::default()
     });
-    env.mem.write(action_flags, kAudioUnitRenderAction_PreRender);
+    env.mem
+        .write(action_flags, kAudioUnitRenderAction_PreRender);
     for notify in render_notifies.iter().copied() {
         // AURenderCallbackStruct has the guest's packed ABI. Copy its fields
         // before invoking a method so Rust never creates an aligned reference
@@ -665,6 +664,27 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
     audio_unit_host_object.is_running_handler = false;
 }
 
+fn render_sample_rate(
+    input_stream_format: Option<&AudioStreamBasicDescription>,
+    output_stream_format: Option<&AudioStreamBasicDescription>,
+    global_stream_format: &AudioStreamBasicDescription,
+    current_hardware_sample_rate: f64,
+) -> f64 {
+    if let Some(input_stream_format) = input_stream_format {
+        input_stream_format.sample_rate
+    } else if output_stream_format.is_some() {
+        // TODO: confirm that this is the general behaviour
+        // (and not only RE4 thing)
+        current_hardware_sample_rate
+    } else {
+        // A newly-created RemoteIO unit already has a valid global stream
+        // format. Apps are not required to install an input/output bus
+        // override before starting it, so render that default at its own
+        // sample rate rather than asserting that an override exists.
+        global_stream_format.sample_rate
+    }
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(AudioUnitInitialize(_)),
     export_c_func!(AudioUnitUninitialize(_)),
@@ -675,3 +695,17 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(AudioOutputUnitStart(_)),
     export_c_func!(AudioOutputUnitStop(_)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_remote_io_format_supplies_render_sample_rate() {
+        let host = audio_components::AudioComponentInstanceHostObject::default();
+        assert_eq!(
+            render_sample_rate(None, None, &host.global_stream_format, 48_000.0),
+            host.global_stream_format.sample_rate
+        );
+    }
+}
