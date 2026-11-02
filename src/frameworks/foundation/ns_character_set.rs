@@ -301,6 +301,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 mod tests {
     use super::*;
     use crate::objc::msg_class;
+    use crate::Environment;
 
     #[test]
     fn decimal_digit_set_contains_unicode_decimal_digits_only() {
