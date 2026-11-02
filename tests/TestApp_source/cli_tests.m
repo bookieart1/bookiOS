@@ -8684,6 +8684,28 @@ int test_AudioUnit_invalid_instance_contract() {
 #endif
 }
 
+int test_AudioUnit_ClassInfo_scope_contract() {
+#ifdef DEFINE_ME_WHEN_BUILDING_ON_MACOS
+  return 0;
+#else
+  AudioComponentDescription description = {
+      'auou', 'rioc', 'appl', 0, 0,
+  };
+  AudioComponent component = AudioComponentFindNext(NULL, &description);
+  AudioUnit unit = NULL;
+  if (component == NULL || AudioComponentInstanceNew(component, &unit) != 0 ||
+      unit == NULL)
+    return -1;
+
+  CFDictionaryRef class_info = NULL;
+  OSStatus status = AudioUnitSetProperty(
+      unit, 1 /* kAudioUnitProperty_ClassInfo */,
+      1 /* kAudioUnitScope_Input */, 0, &class_info, sizeof(class_info));
+  AudioComponentInstanceDispose(unit);
+  return status == -10866 /* kAudioUnitErr_InvalidScope */ ? 0 : -2;
+#endif
+}
+
 int test_NSBundle_localized_resource_lookup() {
 #ifdef DEFINE_ME_WHEN_BUILDING_ON_MACOS
   return 0;
@@ -8956,6 +8978,7 @@ struct {
     FUNC_DEF(test_sigaltstack_contract),
     FUNC_DEF(test_AudioUnit_render_notify_registration),
     FUNC_DEF(test_AudioUnit_invalid_instance_contract),
+    FUNC_DEF(test_AudioUnit_ClassInfo_scope_contract),
     FUNC_DEF(test_NSBundle_localized_resource_lookup),
     FUNC_DEF(test_rmdir_contract),
     FUNC_DEF(test_NSFileManager_directory_permissions),

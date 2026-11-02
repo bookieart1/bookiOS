@@ -136,6 +136,10 @@ pub const ARRAYS: &[ArrayInfo] = &[
     },
 ];
 
+fn is_matrix_palette_array(array: GLenum) -> bool {
+    array == gl21::MATRIX_INDEX_ARRAY_ARB || array == gl21::WEIGHT_ARRAY_ARB
+}
+
 /// Table of `glGet` parameters shared by OpenGL ES 1.1 and OpenGL 2.1.
 const GET_PARAMS: ParamTable = ParamTable(&[
     (gl21::ACTIVE_TEXTURE, ParamType::Int, 1),
@@ -771,7 +775,10 @@ impl GLES for GLES1OnGL2<'_> {
                 array
             );
         } else {
-            assert!(ARRAYS.iter().any(|&ArrayInfo { name, .. }| name == array));
+            assert!(
+                ARRAYS.iter().any(|&ArrayInfo { name, .. }| name == array)
+                    || is_matrix_palette_array(array)
+            );
         }
         gl21::EnableClientState(array);
     }
@@ -782,7 +789,10 @@ impl GLES for GLES1OnGL2<'_> {
                 array
             );
         } else {
-            assert!(ARRAYS.iter().any(|&ArrayInfo { name, .. }| name == array));
+            assert!(
+                ARRAYS.iter().any(|&ArrayInfo { name, .. }| name == array)
+                    || is_matrix_palette_array(array)
+            );
         }
         gl21::DisableClientState(array);
     }
@@ -1379,6 +1389,42 @@ impl GLES for GLES1OnGL2<'_> {
             self.state.pointer_is_fixed_point[3] = false;
             gl21::VertexPointer(size, type_, stride, pointer)
         }
+    }
+
+    // OES_matrix_palette maps directly to the corresponding desktop
+    // ARB_matrix_palette and ARB_vertex_blend entry points. The palette-load
+    // helper is the sole OES function without an ARB equivalent, so preserve
+    // the current matrix mode while copying the model-view matrix into the
+    // currently selected palette matrix.
+    unsafe fn CurrentPaletteMatrixOES(&mut self, matrix_palette_index: GLuint) {
+        gl21::CurrentPaletteMatrixARB(matrix_palette_index as GLint)
+    }
+    unsafe fn LoadPaletteFromModelViewMatrixOES(&mut self) {
+        let mut previous_mode: GLint = 0;
+        let mut model_view = [0.0f32; 16];
+        gl21::GetIntegerv(gl21::MATRIX_MODE, &mut previous_mode);
+        gl21::GetFloatv(gl21::MODELVIEW_MATRIX, model_view.as_mut_ptr());
+        gl21::MatrixMode(gl21::MATRIX_PALETTE_ARB);
+        gl21::LoadMatrixf(model_view.as_ptr());
+        gl21::MatrixMode(previous_mode as GLenum);
+    }
+    unsafe fn MatrixIndexPointerOES(
+        &mut self,
+        size: GLint,
+        type_: GLenum,
+        stride: GLsizei,
+        pointer: *const GLvoid,
+    ) {
+        gl21::MatrixIndexPointerARB(size, type_, stride, pointer)
+    }
+    unsafe fn WeightPointerOES(
+        &mut self,
+        size: GLint,
+        type_: GLenum,
+        stride: GLsizei,
+        pointer: *const GLvoid,
+    ) {
+        gl21::WeightPointerARB(size, type_, stride, pointer)
     }
 
     // Drawing

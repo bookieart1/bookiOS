@@ -32,6 +32,10 @@ use std::collections::HashMap;
 pub struct State {
     /// Permanently allocated, null-terminated Objective-C type encodings.
     objc_type_encodings: HashMap<u8, ConstPtr<u8>>,
+    /// Apple's Core Foundation keeps canonical integer objects for -1...12.
+    /// NSNumber and CFNumber are toll-free bridged, so Foundation factory and
+    /// initializer paths must share the same process-lifetime objects.
+    small_integer_cache: HashMap<i32, id>,
 }
 
 #[derive(Debug)]
@@ -110,6 +114,58 @@ impl NSNumberHostObject {
     impl_AsValue!(as_unsigned_short, u16);
     impl_AsValue!(as_char, i8);
     impl_AsValue!(as_i128, i128);
+}
+
+const MIN_CACHED_INTEGER: i32 = -1;
+const MAX_CACHED_INTEGER: i32 = 12;
+
+/// Return Apple's process-lifetime cached integer object when applicable.
+///
+/// CFNumber canonicalizes cached integers to its signed 32-bit storage class,
+/// regardless of the integer initializer that first requested the value.  Do
+/// the same here.  The exact range comes from Apple's open-source CFNumber
+/// implementation and is observable through object lifetime and identity.
+fn cached_small_integer(env: &mut Environment, class: Class, value: i64) -> Option<id> {
+    let value: i32 = value.try_into().ok()?;
+    if !(MIN_CACHED_INTEGER..=MAX_CACHED_INTEGER).contains(&value) {
+        return None;
+    }
+
+    let ns_number = env.objc.get_known_class("NSNumber", &mut env.mem);
+    if class != ns_number {
+        // Preserve subclass construction semantics rather than returning a
+        // base-class singleton from an inherited initializer.
+        return None;
+    }
+
+    if let Some(&number) = env
+        .framework_state
+        .foundation
+        .ns_value
+        .small_integer_cache
+        .get(&value)
+    {
+        return Some(number);
+    }
+
+    let number = env.objc.alloc_static_object(
+        ns_number,
+        Box::new(NSNumberHostObject::Int(value)),
+        &mut env.mem,
+    );
+    env.framework_state
+        .foundation
+        .ns_value
+        .small_integer_cache
+        .insert(value, number);
+    Some(number)
+}
+
+fn replace_with_cached_small_integer(env: &mut Environment, this: id, value: i64) -> Option<id> {
+    let class: Class = msg![env; this class];
+    let cached = cached_small_integer(env, class, value)?;
+    release(env, this);
+    Some(cached)
 }
 
 /// Return the canonical Core Foundation storage type for this NSNumber.
@@ -443,56 +499,91 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)initWithLongLong:(i64)value {
+    if let Some(cached) = replace_with_cached_small_integer(env, this, value) {
+        return cached;
+    }
     *env.objc.borrow_mut(this) = NSNumberHostObject::LongLong(value);
     this
 }
 
 - (id)initWithUnsignedInt:(u32)value {
+    if let Some(cached) = replace_with_cached_small_integer(env, this, value.into()) {
+        return cached;
+    }
     *env.objc.borrow_mut(this) = NSNumberHostObject::UnsignedInt(value);
     this
 }
 
 - (id)initWithUnsignedLong:(u32)value {
+    if let Some(cached) = replace_with_cached_small_integer(env, this, value.into()) {
+        return cached;
+    }
     *env.objc.borrow_mut(this) = NSNumberHostObject::UnsignedInt(value);
     this
 }
 
 - (id)initWithInt:(i32)value {
+    if let Some(cached) = replace_with_cached_small_integer(env, this, value.into()) {
+        return cached;
+    }
     *env.objc.borrow_mut(this) = NSNumberHostObject::Int(value);
     this
 }
 
 - (id)initWithLong:(i32)value {
+    if let Some(cached) = replace_with_cached_small_integer(env, this, value.into()) {
+        return cached;
+    }
     *env.objc.borrow_mut(this) = NSNumberHostObject::Int(value);
     this
 }
 
 - (id)initWithInteger:(NSInteger)value {
+    if let Some(cached) = replace_with_cached_small_integer(env, this, value.into()) {
+        return cached;
+    }
     *env.objc.borrow_mut(this) = NSNumberHostObject::Int(value);
     this
 }
 
 - (id)initWithUnsignedInteger:(NSUInteger)value {
+    if let Some(cached) = replace_with_cached_small_integer(env, this, value.into()) {
+        return cached;
+    }
     *env.objc.borrow_mut(this) = NSNumberHostObject::UnsignedInt(value);
     this
 }
 
 - (id)initWithUnsignedLongLong:(u64)value {
+    if value <= i64::MAX as u64 {
+        if let Some(cached) = replace_with_cached_small_integer(env, this, value as i64) {
+            return cached;
+        }
+    }
     *env.objc.borrow_mut(this) = NSNumberHostObject::UnsignedLongLong(value);
     this
 }
 
 - (id)initWithShort:(i16)value {
+    if let Some(cached) = replace_with_cached_small_integer(env, this, value.into()) {
+        return cached;
+    }
     *env.objc.borrow_mut(this) = NSNumberHostObject::Short(value);
     this
 }
 
 - (id)initWithUnsignedShort:(u16)value {
+    if let Some(cached) = replace_with_cached_small_integer(env, this, value.into()) {
+        return cached;
+    }
     *env.objc.borrow_mut(this) = NSNumberHostObject::UnsignedShort(value);
     this
 }
 
 - (id)initWithChar:(i8)value {
+    if let Some(cached) = replace_with_cached_small_integer(env, this, value.into()) {
+        return cached;
+    }
     *env.objc.borrow_mut(this) = NSNumberHostObject::Char(value);
     this
 }
@@ -719,5 +810,25 @@ mod tests {
         assert_eq!(unsigned_int, u32::MAX);
         let string: id = msg![env; number stringValue];
         assert_eq!(to_rust_string(env, string), "4294967295");
+    }
+
+    #[test]
+    fn small_integer_cache_matches_core_foundation_range_and_lifetime() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+
+        for value in MIN_CACHED_INTEGER..=MAX_CACHED_INTEGER {
+            let first: id = msg_class![env; NSNumber numberWithInt:value];
+            let second: id = msg_class![env; NSNumber numberWithLongLong:(value as i64)];
+            assert_eq!(first, second);
+            assert!(env.objc.has_static_lifetime(first));
+            let round_trip: i32 = msg![env; first intValue];
+            assert_eq!(round_trip, value);
+        }
+
+        let below: id = msg_class![env; NSNumber numberWithInt:(MIN_CACHED_INTEGER - 1)];
+        let above: id = msg_class![env; NSNumber numberWithInt:(MAX_CACHED_INTEGER + 1)];
+        assert!(!env.objc.has_static_lifetime(below));
+        assert!(!env.objc.has_static_lifetime(above));
     }
 }

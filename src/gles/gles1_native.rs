@@ -393,6 +393,32 @@ impl GLES for GLES1Native<'_> {
         gles11::VertexPointer(size, type_, stride, pointer)
     }
 
+    // OES_matrix_palette
+    unsafe fn CurrentPaletteMatrixOES(&mut self, matrix_palette_index: GLuint) {
+        gles11::CurrentPaletteMatrixOES(matrix_palette_index)
+    }
+    unsafe fn LoadPaletteFromModelViewMatrixOES(&mut self) {
+        gles11::LoadPaletteFromModelViewMatrixOES()
+    }
+    unsafe fn MatrixIndexPointerOES(
+        &mut self,
+        size: GLint,
+        type_: GLenum,
+        stride: GLsizei,
+        pointer: *const GLvoid,
+    ) {
+        gles11::MatrixIndexPointerOES(size, type_, stride, pointer)
+    }
+    unsafe fn WeightPointerOES(
+        &mut self,
+        size: GLint,
+        type_: GLenum,
+        stride: GLsizei,
+        pointer: *const GLvoid,
+    ) {
+        gles11::WeightPointerOES(size, type_, stride, pointer)
+    }
+
     // Drawing
     unsafe fn DrawArrays(&mut self, mode: GLenum, first: GLint, count: GLsizei) {
         gles11::DrawArrays(mode, first, count)

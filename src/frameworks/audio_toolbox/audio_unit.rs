@@ -58,6 +58,7 @@ const kAudioUnitScope_Global: AudioUnitScope = 0;
 const kAudioUnitScope_Input: AudioUnitScope = 1;
 const kAudioUnitScope_Output: AudioUnitScope = 2;
 
+const kAudioUnitProperty_ClassInfo: AudioUnitPropertyID = 1;
 const kAudioUnitProperty_SampleRate: AudioUnitPropertyID = 2;
 const kAudioUnitProperty_SetRenderCallback: AudioUnitPropertyID = 23;
 const kAudioUnitProperty_MaximumFramesPerSlice: AudioUnitPropertyID = 14;
@@ -67,6 +68,10 @@ const kAudioUnitProperty_ShouldAllocateBuffer: AudioUnitPropertyID = 51;
 
 const kAudioOutputUnitProperty_EnableIO: AudioUnitPropertyID = 2003;
 const kAudioOutputUnitProperty_SetInputCallback: AudioUnitPropertyID = 2005;
+
+// AudioUnit error returned when a property is used with a scope on which it
+// is not valid. kAudioUnitProperty_ClassInfo is defined only on global scope.
+const kAudioUnitErr_InvalidScope: OSStatus = -10866;
 
 // VoiceProcessingIO only.
 const kAUVoiceIOProperty_BypassVoiceProcessing: AudioUnitPropertyID = 2100;
@@ -163,6 +168,18 @@ fn AudioUnitSetProperty(
 
     let result;
     match in_id {
+        kAudioUnitProperty_ClassInfo if in_scope != kAudioUnitScope_Global => {
+            result = kAudioUnitErr_InvalidScope;
+            log_dbg!(
+                "AudioUnitSetProperty({:?}, kAudioUnitProperty_ClassInfo, {:?}, {:?}, {:?}, {:?}) -> {:?}",
+                in_unit,
+                in_scope,
+                in_element,
+                in_data,
+                in_data_size,
+                result
+            );
+        }
         kAudioUnitProperty_SetRenderCallback => {
             assert_eq!(in_element, OUTPUT_ELEMENT);
             // Apple's docs set it on the input scope, which is the same.
