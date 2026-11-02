@@ -3886,3 +3886,21 @@ is general and keeps strict object and null-memory checks. Guest ABI and native
 Foundation tests cover identity; physical-device validation remains pending
 for DizzyWizards and Marblenauts, with Spoing as regression. Full rationale:
 `dev-docs/compatibility-1.95-nsbundle-nil-class-contract.md`.
+
+## Dev 1.95 device result and Dev 1.96 POSIX `sync()` contract
+
+The two complete device logs embed source `389b9d4`, workflow
+`41401657404`, and the permanent bounded recorder. They are preserved as
+`outputs/device-logs/iDared-Dev-1.95-dizzywizards-marblenauts-2026-11-02.txt`
+and `outputs/device-logs/iDared-Dev-1.95-spoing-regression-2026-11-02.txt`.
+
+| App | Dev 1.95 evidence | Current classification / Dev 1.96 action |
+|---|---|---|
+| DizzyWizards | `bundleForClass:nil` now returns the main bundle; `executablePath` and `UTF8String` also return valid values. The next panic is missing `_sync` at 168 ms. | **Former blocker removed; exact general POSIX blocker exposed.** Implement the void `sync()` contract by flushing open writable guest files. |
+| Marblenauts | Runs for at least 55 seconds and advances from 298 to 3,305 main-loop iterations, but records zero EAGL presentation returns. One bundled-resource open fails. The session ends on host resign-active without a recorder dump. | **Active no-present black screen.** The doubled slash is already normalized and is not itself a proved bug. Make no speculative resource change; exit the next run with emulator Home to dump bounded history. |
+| Spoing | Clean emulator-Home return after 8.6 seconds, 244 main loops and 116 EAGL presentation returns. | **Regression pass in stated scope.** |
+
+Dev 1.96 adds only the general POSIX `sync()` export plus focused guest ABI
+coverage. It does not change Marblenauts rendering/resources, fabricate files,
+relax memory checks or change the universal recorder. Engineering detail:
+`dev-docs/compatibility-1.96-posix-sync-contract.md`.

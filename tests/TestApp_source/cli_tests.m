@@ -4097,6 +4097,50 @@ int test_open() {
   return 0;
 }
 
+int test_sync() {
+  NSAutoreleasePool *pool = [NSAutoreleasePool new];
+  NSString *path = [NSTemporaryDirectory()
+      stringByAppendingPathComponent:@"touchhle-posix-sync-test.bin"];
+  const char payload[] = "sync-test";
+
+  int fd = open([path UTF8String], O_WRONLY | O_CREAT | O_TRUNC, 0600);
+  if (fd == -1) {
+    [pool drain];
+    return -1;
+  }
+  if (write(fd, payload, sizeof(payload)) != sizeof(payload)) {
+    close(fd);
+    remove([path UTF8String]);
+    [pool drain];
+    return -2;
+  }
+
+  sync();
+
+  if (close(fd) != 0) {
+    remove([path UTF8String]);
+    [pool drain];
+    return -3;
+  }
+  fd = open([path UTF8String], O_RDONLY);
+  if (fd == -1) {
+    remove([path UTF8String]);
+    [pool drain];
+    return -4;
+  }
+
+  char result[sizeof(payload)] = {0};
+  int test_result = 0;
+  if (read(fd, result, sizeof(result)) != sizeof(result) ||
+      memcmp(result, payload, sizeof(payload)) != 0) {
+    test_result = -5;
+  }
+  close(fd);
+  remove([path UTF8String]);
+  [pool drain];
+  return test_result;
+}
+
 int test_fchmod() {
   errno = 0;
   if (fchmod(-1, 0600) != -1 || errno != EBADF) {
@@ -8285,6 +8329,7 @@ struct {
     FUNC_DEF(test_flockfile_blocks_other_thread),
     FUNC_DEF(test_flockfile_io_while_locked),
     FUNC_DEF(test_open),
+    FUNC_DEF(test_sync),
     FUNC_DEF(test_fchmod),
     FUNC_DEF(test_close),
     FUNC_DEF(test_cond_var),

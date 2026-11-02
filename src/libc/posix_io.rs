@@ -937,6 +937,33 @@ pub fn fsync(env: &mut Environment, fd: FileDescriptor) -> i32 {
     }
 }
 
+/// Flush pending writes for every writable file currently open by the guest.
+///
+/// Darwin's `sync(2)` has no return value, so individual host flush failures
+/// can only be reported to the log. Guest writes already update their backing
+/// host files synchronously; this makes their durability boundary explicit
+/// without changing descriptor state or suppressing later close-time checks.
+pub fn sync(env: &mut Environment) {
+    let mut flushed = 0usize;
+    let mut failed = 0usize;
+
+    for file in env.libc_state.posix_io.files.iter_mut().flatten() {
+        if !file.needs_flush {
+            continue;
+        }
+
+        match file.file.sync_all() {
+            Ok(()) => flushed += 1,
+            Err(error) => {
+                failed += 1;
+                log!("Warning: sync() could not flush an open guest file: {error:?}");
+            }
+        }
+    }
+
+    log_dbg!("sync() flushed {flushed} open guest files; {failed} failed");
+}
+
 pub fn ftruncate(env: &mut Environment, fd: FileDescriptor, len: off_t) -> i32 {
     if len < 0 {
         set_errno(env, EINVAL);
@@ -1025,6 +1052,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(fcntl(_, _, _)),
     export_c_func!(flock(_, _)),
     export_c_func!(fsync(_)),
+    export_c_func!(sync()),
     export_c_func!(ftruncate(_, _)),
     export_c_func!(truncate(_, _)),
     export_c_func!(setxattr(_, _, _, _, _, _)),
