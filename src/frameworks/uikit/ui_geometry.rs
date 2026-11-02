@@ -6,6 +6,7 @@ use crate::abi::GuestArg;
 use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
 use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect, CGSize};
 use crate::frameworks::foundation::ns_string;
+use crate::mem::SafeRead;
 use crate::objc::{autorelease, id};
 use crate::Environment;
 
@@ -17,6 +18,7 @@ pub struct UIEdgeInsets {
     pub bottom: CGFloat,
     pub right: CGFloat,
 }
+unsafe impl SafeRead for UIEdgeInsets {}
 impl GuestArg for UIEdgeInsets {
     const REG_COUNT: usize = 4;
 
