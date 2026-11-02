@@ -47,9 +47,8 @@ emulator does not silently turn a fixed collection into an unlimited one.
 `NSMutableURLRequest.allHTTPHeaderFields` is a nullable copy property. Dev 1.93
 implements `setAllHTTPHeaderFields:` by replacing the private backing fields
 with an independent mutable copy. Native macOS verification established that
-passing nil clears the aggregate property to an empty dictionary rather than
-making the getter return nil. The getter continues to return a snapshot, so
-caller mutations cannot alias request state.
+passing nil leaves the existing aggregate fields unchanged. The getter
+continues to return a snapshot, so caller mutations cannot alias request state.
 No network success is fabricated and the existing offline behavior is
 unchanged.
 
@@ -69,8 +68,8 @@ Focused development-library tests cover:
 
 - positive fixed CFArray capacity, removal/reuse, over-capacity rejection and
   negative-capacity rejection;
-- aggregate request-header replacement, copy isolation, native nil-clearing
-  behavior, and per-field mutation after clearing;
+- aggregate request-header replacement, copy isolation, native nil-assignment
+  behavior, and subsequent per-field mutation;
 - CATransition defaults, type/subtype state and animation-copy preservation.
 
 The macOS native Foundation reference fixture also exercises lawful positive

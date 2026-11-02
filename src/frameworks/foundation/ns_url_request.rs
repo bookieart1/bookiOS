@@ -297,16 +297,14 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())setAllHTTPHeaderFields:(id)header_fields { // NSDictionary<NSString*, NSString*>*
     log_dbg!("[(NSURLRequest*){:?} setAllHTTPHeaderFields:{:?}]", this, header_fields);
-    let header_fields: id = if header_fields == nil {
-        // Native Foundation treats nil as clearing the property, but its
-        // getter subsequently exposes an empty dictionary rather than nil.
-        msg_class![env; NSMutableDictionary new]
-    } else {
-        // Keep a private mutable backing dictionary while honoring the public
-        // copy property: later mutations of the caller's dictionary must not
-        // affect the request.
-        msg![env; header_fields mutableCopy]
-    };
+    // Native Foundation ignores a nil aggregate assignment, preserving the
+    // current fields. Keep a private mutable backing dictionary for non-nil
+    // input while honoring the public copy property: later mutations of the
+    // caller's dictionary must not affect the request.
+    if header_fields == nil {
+        return;
+    }
+    let header_fields: id = msg![env; header_fields mutableCopy];
     let host = env.objc.borrow_mut::<NSURLRequestHostObject>(this);
     let old = std::mem::replace(&mut host.http_header_fields, header_fields);
     release(env, old);
@@ -354,12 +352,14 @@ mod tests {
         assert_eq!(absent, nil);
 
         () = msg![env; request setAllHTTPHeaderFields:nil];
-        let cleared: id = msg![env; request allHTTPHeaderFields];
-        let cleared_count: NSUInteger = msg![env; cleared count];
-        assert_eq!(cleared_count, 0);
+        let preserved: id = msg![env; request allHTTPHeaderFields];
+        let preserved_count: NSUInteger = msg![env; preserved count];
+        let preserved_value: id = msg![env; preserved objectForKey:first_key];
+        assert_eq!(preserved_count, 1);
+        assert_eq!(preserved_value, first_value);
 
-        // Per-field mutation remains usable after clearing the aggregate
-        // property and lazily creates a fresh backing dictionary.
+        // Per-field mutation remains usable after an ignored nil aggregate
+        // assignment.
         () = msg![env; request setValue:second_value forHTTPHeaderField:second_key];
         let restored: id = msg![env; request valueForHTTPHeaderField:second_key];
         assert_eq!(restored, second_value);
