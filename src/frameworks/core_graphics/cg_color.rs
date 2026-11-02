@@ -10,7 +10,7 @@ use std::ops::{Add, Mul, Sub};
 use crate::dyld::{export_c_func, FunctionExports};
 use crate::frameworks::core_foundation::{CFRelease, CFRetain, CFTypeRef};
 use crate::frameworks::core_graphics::cg_color_space::{
-    kCGColorSpaceGenericRGB, CGColorSpaceHostObject, CGColorSpaceRef,
+    get_static_color_space, kCGColorSpaceGenericRGB, CGColorSpaceHostObject, CGColorSpaceRef,
 };
 use crate::frameworks::core_graphics::CGFloat;
 use crate::mem::MutPtr;
@@ -124,12 +124,24 @@ fn CGColorEqualToColor(env: &mut Environment, a: CGColorRef, b: CGColorRef) -> b
     to_rgba(&env.objc, a) == to_rgba(&env.objc, b)
 }
 
+/// Returns the color space associated with the color. This follows Core
+/// Foundation's Get rule: the result is borrowed and remains owned by the
+/// framework rather than being newly created for the caller.
+fn CGColorGetColorSpace(env: &mut Environment, color: CGColorRef) -> CGColorSpaceRef {
+    let color_space_name = env
+        .objc
+        .borrow::<CGColorHostObject>(color)
+        .color_space_name;
+    get_static_color_space(env, color_space_name)
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGColorRetain(_)),
     export_c_func!(CGColorRelease(_)),
     export_c_func!(CGColorCreate(_, _)),
     export_c_func!(CGColorCreateGenericRGB(_, _, _, _)),
     export_c_func!(CGColorEqualToColor(_, _)),
+    export_c_func!(CGColorGetColorSpace(_)),
 ];
 
 /// Shortcut for use by `UIColor`: directly construct a `CGColor` instance from
@@ -159,4 +171,27 @@ pub fn to_rgba(objc: &ObjC, color: CGColorRef) -> (CGFloat, CGFloat, CGFloat, CG
     } = objc.borrow(color);
     assert_eq!(color_space_name, kCGColorSpaceGenericRGB);
     (r, g, b, a)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frameworks::core_graphics::cg_color_space::{
+        CGColorSpaceGetModel, kCGColorSpaceModelRGB,
+    };
+
+    #[test]
+    fn color_space_getter_returns_a_stable_borrowed_rgb_space() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let color = from_rgba(&mut env, (0.1, 0.2, 0.3, 1.0));
+        let first = CGColorGetColorSpace(&mut env, color);
+        let second = CGColorGetColorSpace(&mut env, color);
+        assert_eq!(first, second);
+        assert_eq!(CGColorSpaceGetModel(&mut env, first), kCGColorSpaceModelRGB);
+
+        CGColorRelease(&mut env, color);
+        // Get-rule results are not owned by the caller, but this canonical
+        // associated space remains valid after the source color is released.
+        assert_eq!(CGColorSpaceGetModel(&mut env, first), kCGColorSpaceModelRGB);
+    }
 }

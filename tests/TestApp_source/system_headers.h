@@ -519,16 +519,18 @@ void CGImageRelease(CGImageRef image);
 
 // `CGColor.h`
 
+typedef struct _CGColorSpace *CGColorSpaceRef;
 typedef struct _CGColor *CGColorRef;
 
 CGColorRef CGColorCreateGenericRGB(CGFloat red, CGFloat green, CGFloat blue,
                                    CGFloat alpha);
+CGColorSpaceRef CGColorGetColorSpace(CGColorRef color);
+void CGColorRelease(CGColorRef color);
 
 // `CGColorSpace.h`
 
-typedef struct _CGColorSpace *CGColorSpaceRef;
-
 CGColorSpaceRef CGColorSpaceCreateDeviceRGB(void);
+int CGColorSpaceGetModel(CGColorSpaceRef cs);
 void CGColorSpaceRelease(CGColorSpaceRef cs);
 
 // `CGContext.h`

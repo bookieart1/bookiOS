@@ -20,6 +20,12 @@ use std::ops::{Add, Sub};
 use std::time::{Duration, SystemTime};
 
 #[derive(Default)]
+pub struct State {
+    distant_future: Option<id>,
+    distant_past: Option<id>,
+}
+
+#[derive(Default)]
 pub(super) struct NSDateHostObject {
     pub(super) time_interval: NSTimeInterval,
 }
@@ -51,6 +57,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 + (id)distantFuture {
+    if let Some(existing) = env.framework_state.foundation.ns_date.distant_future {
+        return existing;
+    }
     // As of 2024, this approximately corresponds to 20 years into the future.
     // While `distantFuture` docs are talking in terms of centuries,
     // this should be OK to use for our purposes.
@@ -61,14 +70,18 @@ pub const CLASSES: ClassExports = objc_classes! {
     let host_object = Box::new(NSDateHostObject {
         time_interval
     });
-    let new = env.objc.alloc_object(this, host_object, &mut env.mem);
+    let new = env.objc.alloc_static_object(this, host_object, &mut env.mem);
+    env.framework_state.foundation.ns_date.distant_future = Some(new);
 
     log_dbg!("[(NSDate*){:?} distantFuture]: date {:?} (time_interval: {})", this, new, time_interval);
 
-    autorelease(env, new)
+    new
 }
 
 + (id)distantPast {
+    if let Some(existing) = env.framework_state.foundation.ns_date.distant_past {
+        return existing;
+    }
     // This corresponds to the Unix epoch from Apple's reference date.
     // While `distantPast` docs are talking in terms of centuries,
     // for our purposes it is OK to use the Unix epoch as a distant past.
@@ -76,11 +89,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     let host_object = Box::new(NSDateHostObject {
         time_interval
     });
-    let new = env.objc.alloc_object(this, host_object, &mut env.mem);
+    let new = env.objc.alloc_static_object(this, host_object, &mut env.mem);
+    env.framework_state.foundation.ns_date.distant_past = Some(new);
 
     log_dbg!("[(NSDate*){:?} distantPast]: date {:?} (time_interval: {})", this, new, time_interval);
 
-    autorelease(env, new)
+    new
 }
 
 + (id)dateWithTimeIntervalSinceNow:(NSTimeInterval)secs {
@@ -263,5 +277,25 @@ mod tests {
         release(env, pool);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);
+    }
+
+    #[test]
+    fn distant_boundary_dates_survive_autorelease_pool_drains() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let first_pool: id = msg_class![env; NSAutoreleasePool new];
+        let future: id = msg_class![env; NSDate distantFuture];
+        let past: id = msg_class![env; NSDate distantPast];
+        release(env, first_pool);
+
+        let second_pool: id = msg_class![env; NSAutoreleasePool new];
+        let future_again: id = msg_class![env; NSDate distantFuture];
+        let past_again: id = msg_class![env; NSDate distantPast];
+        assert_eq!(future, future_again);
+        assert_eq!(past, past_again);
+        let future_time: f64 = msg![env; future_again timeIntervalSince1970];
+        let past_time: f64 = msg![env; past_again timeIntervalSince1970];
+        assert!(future_time > past_time);
+        release(env, second_pool);
     }
 }

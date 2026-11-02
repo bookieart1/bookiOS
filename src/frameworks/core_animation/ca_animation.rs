@@ -258,6 +258,15 @@ pub fn get_group_animations(env: &mut Environment, animation: id) -> Option<Vec<
     Some(array_to_vec(env, animations))
 }
 
+/// Whether this is a transition animation. `CATransition` inherits directly
+/// from `CAAnimation`; it is not a property animation and therefore does not
+/// implement `keyPath`, `fromValue`, `toValue`, or `isCumulative`.
+pub fn is_transition(env: &mut Environment, animation: id) -> bool {
+    let class = env.objc.get_known_class("CATransition", &mut env.mem);
+    let animation_class: Class = msg![env; animation class];
+    env.objc.class_is_subclass_of(animation_class, class)
+}
+
 /// What a keyframe animation animates between, for [super::animation].
 pub struct Keyframes {
     /// `id`s of the values, if there's no path.

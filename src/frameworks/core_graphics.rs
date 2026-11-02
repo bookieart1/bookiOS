@@ -19,6 +19,12 @@ pub mod cg_geometry;
 pub mod cg_image;
 pub mod cg_path;
 
+#[derive(Default)]
+pub struct State {
+    generic_rgb_color_space: Option<crate::objc::id>,
+    generic_gray_color_space: Option<crate::objc::id>,
+}
+
 pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
     path: "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics",
     aliases: &[],

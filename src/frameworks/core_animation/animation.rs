@@ -20,6 +20,7 @@ use std::ops::Sub;
 
 use crate::frameworks::core_animation::ca_animation::{
     get_animation_start_time, get_animation_stopped, get_group_animations, get_keyframes,
+    is_transition,
     kCAAnimationCubic, kCAAnimationCubicPaced, kCAAnimationDiscrete, kCAAnimationPaced,
     kCAFillModeBackwards, kCAFillModeBoth, kCAFillModeForwards, CAMediaTimingFillMode, Keyframes,
 };
@@ -225,6 +226,15 @@ fn apply_animation(
         let key_path: id = msg![env; animation keyPath];
         let key_path = to_rust_string(env, key_path).into_owned();
         apply_keyframes(env, presentation, &key_path, keyframes, amount);
+        return;
+    }
+
+    // CATransition is a direct CAAnimation subclass, not a property
+    // animation. The model-layer state has already changed; visual transition
+    // effects are not rendered yet, but timing/delegate/removal processing is
+    // still handled by the outer animation loop. Do not treat it as a basic
+    // property animation and send selectors it does not implement.
+    if is_transition(env, animation) {
         return;
     }
 
@@ -802,6 +812,7 @@ fn set_scale(presentation: &mut CALayerHostObject, key_path: &str, scale: f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::objc::{msg_class, release};
 
     #[test]
     fn transform_components_round_trip() {
@@ -827,5 +838,23 @@ mod tests {
         let next = vec![0.0, 0.0, -3.0, 1.0, 0.0, 1.0];
         let next = unwrap_angle(&prev, next);
         assert!((next[2] - (std::f32::consts::TAU - 3.0)).abs() < 1e-5);
+    }
+
+    #[test]
+    fn transition_is_not_treated_as_a_basic_property_animation() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let layer: id = msg_class![env; CALayer new];
+        let mut presentation = env.objc.borrow::<CALayerHostObject>(layer).clone();
+        let transition: id = msg_class![env; CATransition new];
+
+        apply_animation(env, &mut presentation, transition, 0.5, 0.0);
+
+        release(env, transition);
+        release(env, layer);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

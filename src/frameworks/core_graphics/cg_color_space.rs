@@ -9,7 +9,7 @@ use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant}
 use crate::frameworks::core_foundation::cf_string::CFStringRef;
 use crate::frameworks::core_foundation::{CFRelease, CFRetain, CFTypeRef};
 use crate::frameworks::foundation::ns_string;
-use crate::objc::{msg, objc_classes, ClassExports, HostObject};
+use crate::objc::{id, msg, objc_classes, ClassExports, HostObject};
 use crate::Environment;
 
 pub const CLASSES: ClassExports = objc_classes! {
@@ -46,6 +46,54 @@ pub(super) struct CGColorSpaceHostObject {
 impl HostObject for CGColorSpaceHostObject {}
 
 pub type CGColorSpaceRef = CFTypeRef;
+
+/// Return the process-lifetime color space used by Get-rule APIs whose owner
+/// stores only our canonical color-space name. The object is borrowed: callers
+/// neither create nor own it. Keeping it stable also means a `CGColor` copied
+/// into the compositor can still vend its associated space later without
+/// manufacturing an owned object from a Get-rule function.
+pub(super) fn get_static_color_space(
+    env: &mut Environment,
+    name: &'static str,
+) -> CGColorSpaceRef {
+    let existing = match name {
+        kCGColorSpaceGenericRGB => env
+            .framework_state
+            .core_graphics
+            .generic_rgb_color_space,
+        kCGColorSpaceGenericGray => env
+            .framework_state
+            .core_graphics
+            .generic_gray_color_space,
+        _ => unimplemented!("Unsupported canonical color space {name:?}"),
+    };
+    if let Some(existing) = existing {
+        return existing;
+    }
+
+    let isa = env
+        .objc
+        .get_known_class("_touchHLE_CGColorSpace", &mut env.mem);
+    let new: id = env.objc.alloc_static_object(
+        isa,
+        Box::new(CGColorSpaceHostObject { name }),
+        &mut env.mem,
+    );
+    match name {
+        kCGColorSpaceGenericRGB => {
+            env.framework_state
+                .core_graphics
+                .generic_rgb_color_space = Some(new)
+        }
+        kCGColorSpaceGenericGray => {
+            env.framework_state
+                .core_graphics
+                .generic_gray_color_space = Some(new)
+        }
+        _ => unreachable!(),
+    }
+    new
+}
 
 pub fn CGColorSpaceCreateWithName(env: &mut Environment, name: CFStringRef) -> CGColorSpaceRef {
     let generic_rgb = ns_string::get_static_str(env, kCGColorSpaceGenericRGB);

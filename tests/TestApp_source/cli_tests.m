@@ -139,6 +139,25 @@ int test_UIImage_drawAsPatternInRect() {
   return result;
 }
 
+int test_CGColorGetColorSpace() {
+  CGColorRef firstColor = CGColorCreateGenericRGB(0.1, 0.2, 0.3, 1.0);
+  CGColorRef secondColor = CGColorCreateGenericRGB(0.3, 0.2, 0.1, 1.0);
+  CGColorSpaceRef firstSpace = CGColorGetColorSpace(firstColor);
+  CGColorSpaceRef secondSpace = CGColorGetColorSpace(secondColor);
+  if (firstSpace == NULL || secondSpace == NULL || firstSpace != secondSpace)
+    return -1;
+  // kCGColorSpaceModelRGB is 1 in the historical Core Graphics ABI.
+  if (CGColorSpaceGetModel(firstSpace) != 1)
+    return -2;
+  CGColorRelease(firstColor);
+  CGColorRelease(secondColor);
+  // Get-rule results are borrowed, and the canonical associated color space
+  // must remain usable after its source colors are gone.
+  if (CGColorSpaceGetModel(firstSpace) != 1)
+    return -3;
+  return 0;
+}
+
 int test_CGGeometry() {
   CGRect testRect;
   testRect.origin.x = 2.0;
@@ -8294,6 +8313,7 @@ struct {
     FUNC_DEF(test_CFNumberCompare_simple),
     FUNC_DEF(test_CFNumberCompare_extended),
     FUNC_DEF(test_memset_pattern),
+    FUNC_DEF(test_CGColorGetColorSpace),
     FUNC_DEF(test_CGGeometry),
     FUNC_DEF(test_UIView_insertSubview_aboveSubview),
     FUNC_DEF(test_NSMachPort_runLoop_lifecycle),

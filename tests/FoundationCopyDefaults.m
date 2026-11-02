@@ -37,6 +37,17 @@ static unsigned liveTokens;
 int main(void) {
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
 
+    // Boundary dates are process-stable Foundation objects in the native
+    // implementation. Older SDKs cache distantFuture for worker run loops,
+    // so verify both identity and lifetime across an inner pool drain.
+    NSAutoreleasePool *datePool = [NSAutoreleasePool new];
+    NSDate *distantFuture = [NSDate distantFuture];
+    NSDate *distantPast = [NSDate distantPast];
+    [datePool drain];
+    assert(distantFuture == [NSDate distantFuture]);
+    assert(distantPast == [NSDate distantPast]);
+    assert([distantFuture timeIntervalSince1970] > [distantPast timeIntervalSince1970]);
+
     NSDateFormatter *formatter = [NSDateFormatter new];
     formatter.locale = [[[NSLocale alloc] initWithLocaleIdentifier:@"en_US_POSIX"] autorelease];
     formatter.timeZone = [NSTimeZone timeZoneForSecondsFromGMT:-19800];
