@@ -2828,6 +2828,18 @@ int test_strcoll_C_locale() {
   return 0;
 }
 
+int test_NSBundle_bundleForClass_nil() {
+  NSBundle *mainBundle = [NSBundle mainBundle];
+  if (mainBundle == nil)
+    return -1;
+  if ([NSBundle bundleForClass:nil] != mainBundle)
+    return -2;
+  // A class compiled into the executable belongs to the main bundle too.
+  if ([NSBundle bundleForClass:[NSObject class]] != mainBundle)
+    return -3;
+  return 0;
+}
+
 int test_access_combined_mode() {
   if (access("/", R_OK | X_OK) != 0)
     return -1;
@@ -8243,6 +8255,7 @@ struct {
     FUNC_DEF(test_strlcpy),
     FUNC_DEF(test_setlocale),
     FUNC_DEF(test_strcoll_C_locale),
+    FUNC_DEF(test_NSBundle_bundleForClass_nil),
     FUNC_DEF(test_access_combined_mode),
     FUNC_DEF(test_strtoul),
     FUNC_DEF(test_strtol),

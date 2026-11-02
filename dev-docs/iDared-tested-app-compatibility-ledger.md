@@ -3872,3 +3872,17 @@ Implementation rationale, limitations, log hashes and predictions are in
 `dev-docs/compatibility-1.85-ninth-stage-shared-contracts.md`. This candidate
 contains no game-identifier branch, network-success fabrication, missing-file
 fabrication, relaxed memory check, save reset, or diagnostic redesign.
+
+## Dev 1.95 candidate: `NSBundle bundleForClass:nil` fallback
+
+The Dev 1.93 bounded history for DizzyWizards shows its own caller loading a
+literal zero as the argument to `+[NSBundle bundleForClass:]`. The prior
+missing-class-lookup theory is therefore rejected. iDared returned `nil`, and
+the guest later faulted while copying the nil-derived executable path.
+
+Dev 1.95 makes nil and application-class arguments return the existing
+main-bundle singleton in iDared's current one-bundle model. The implementation
+is general and keeps strict object and null-memory checks. Guest ABI and native
+Foundation tests cover identity; physical-device validation remains pending
+for DizzyWizards and Marblenauts, with Spoing as regression. Full rationale:
+`dev-docs/compatibility-1.95-nsbundle-nil-class-contract.md`.

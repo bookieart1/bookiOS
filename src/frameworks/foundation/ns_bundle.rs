@@ -87,11 +87,11 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 + (id)bundleForClass:(Class)class {
-    if class == nil {
-        return nil;
-    }
     // Framework bundles are not modeled separately. Guest classes, which are
     // the normal callers of this legacy API, live in the application's bundle.
+    // Native Foundation also falls back to the main bundle when there is no
+    // associated framework bundle, including for a nil class argument.
+    let _ = class;
     msg![env; this mainBundle]
 }
 

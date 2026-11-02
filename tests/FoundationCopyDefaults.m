@@ -37,6 +37,11 @@ static unsigned liveTokens;
 int main(void) {
     NSAutoreleasePool *pool = [NSAutoreleasePool new];
 
+    NSBundle *mainBundle = [NSBundle mainBundle];
+    assert(mainBundle != nil);
+    assert([NSBundle bundleForClass:nil] == mainBundle);
+    assert([NSBundle bundleForClass:[CopyToken class]] == mainBundle);
+
     // Boundary dates are process-stable Foundation objects in the native
     // implementation. Older SDKs cache distantFuture for worker run loops,
     // so verify both identity and lifetime across an inner pool drain.
@@ -225,6 +230,6 @@ int main(void) {
     assert(liveTokens == 1 && [immutable anyObject] == element);
     [immutable release];
     assert(liveTokens == 0);
-    puts("Foundation date, process-info, defaults, string/data, mutable-collection and copy contracts passed.");
+    puts("Foundation bundle, date, process-info, defaults, string/data, mutable-collection and copy contracts passed.");
     return 0;
 }

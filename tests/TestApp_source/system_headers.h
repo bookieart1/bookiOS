@@ -102,6 +102,11 @@ void dispatch_once(dispatch_once_t *predicate, void (^block)(void));
 - (void (*)(void))methodForSelector:(SEL)selector;
 @end
 
+@interface NSBundle : NSObject
++ (instancetype)mainBundle;
++ (instancetype)bundleForClass:(Class)aClass;
+@end
+
 @interface NSAutoreleasePool : NSObject
 + (void)addObject:(id)anObject;
 - (void)addObject:(id)anObject;
