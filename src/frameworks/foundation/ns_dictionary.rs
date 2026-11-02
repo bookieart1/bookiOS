@@ -456,17 +456,6 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, new_dict)
 }
 
-// NSMutableDictionary's KVC assignment contract maps keys to dictionary
-// entries. As on Foundation, assigning nil removes the entry rather than
-// attempting to store a nil object.
-- (())setValue:(id)value forKey:(id)key {
-    if value == nil {
-        () = msg![env; this removeObjectForKey:key];
-    } else {
-        () = msg![env; this setObject:value forKey:key];
-    }
-}
-
 // These probably comes from some category related to plists.
 + (id)dictionaryWithContentsOfFile:(id)path { // NSString*
     let new_dict: id = msg![env; this alloc];
@@ -729,6 +718,17 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     let new_dict = mutable_dict_from_keys_and_objects(env, &[(key, object)]);
     autorelease(env, new_dict)
+}
+
+// NSMutableDictionary's KVC assignment contract maps keys to dictionary
+// entries. As on Foundation, assigning nil removes the entry rather than
+// attempting to store a nil object.
+- (())setValue:(id)value forKey:(id)key {
+    if value == nil {
+        () = msg![env; this removeObjectForKey:key];
+    } else {
+        () = msg![env; this setObject:value forKey:key];
+    }
 }
 
 // These probably comes from some category related to plists.
