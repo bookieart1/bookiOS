@@ -103,6 +103,69 @@ fn mbsrtowcs(
     written
 }
 
+/// Restartable wide-to-multibyte conversion for the emulator's UTF-8 locale.
+/// UTF-8 has no shift state. Count-only calls leave `*src` unchanged; output
+/// calls stop before a character that would be split by the destination limit.
+fn wcsrtombs(
+    env: &mut Environment,
+    dst: MutPtr<u8>,
+    src: MutPtr<ConstPtr<wchar_t>>,
+    len: GuestUSize,
+    _state: crate::mem::MutVoidPtr,
+) -> GuestUSize {
+    let start = env.mem.read(src);
+    if start.is_null() {
+        return 0;
+    }
+
+    let count_only = dst.is_null();
+    let mut cursor = start;
+    let mut written: GuestUSize = 0;
+    loop {
+        let wide = env.mem.read(cursor);
+        if wide == 0 {
+            if !count_only {
+                if written < len {
+                    env.mem.write(dst + written, 0u8);
+                    env.mem.write(src, Ptr::null());
+                } else {
+                    env.mem.write(src, cursor);
+                }
+            }
+            return written;
+        }
+
+        let Some(character) = u32::try_from(wide).ok().and_then(char::from_u32) else {
+            if !count_only {
+                env.mem.write(src, cursor);
+            }
+            set_errno(env, EILSEQ);
+            return GuestUSize::MAX;
+        };
+        let mut encoded = [0u8; 4];
+        let encoded = character.encode_utf8(&mut encoded).as_bytes();
+        let encoded_len: GuestUSize = encoded.len().try_into().unwrap();
+
+        if !count_only {
+            let Some(next_written) = written.checked_add(encoded_len) else {
+                env.mem.write(src, cursor);
+                return written;
+            };
+            if next_written > len {
+                env.mem.write(src, cursor);
+                return written;
+            }
+            env.mem
+                .bytes_at_mut((dst + written).cast(), encoded_len)
+                .copy_from_slice(encoded);
+            written = next_written;
+        } else {
+            written = written.checked_add(encoded_len).unwrap();
+        }
+        cursor = cursor + 1;
+    }
+}
+
 // Functions shared with string.rs
 
 fn wmemset(
@@ -282,6 +345,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(btowc(_)),
     export_c_func!(wctob(_)),
     export_c_func!(mbsrtowcs(_, _, _, _)),
+    export_c_func!(wcsrtombs(_, _, _, _)),
     // Functions shared with string.rs
     export_c_func!(wmemset(_, _, _)),
     export_c_func!(wmemcpy(_, _, _)),

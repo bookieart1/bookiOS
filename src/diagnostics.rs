@@ -23,6 +23,9 @@ const PROVENANCE: usize = 128;
 const BOUNDARY_DETAILS: usize = 8;
 const BUNDLE_CANDIDATES: usize = 16;
 const COLLECTION_EVENTS: usize = 48;
+const WATCHED_OBJECTS: usize = 16;
+const OBJECT_LIFETIME_EVENTS: usize = 64;
+const DICTIONARY_ORIGINS: usize = 64;
 const HEALTHY_PRESENT_INTERVAL: Duration = Duration::from_millis(100);
 const SLOW_PRESENT_INTERVAL: Duration = Duration::from_millis(180);
 const HEALTHY_PRESENT_STREAK: u16 = 30;
@@ -63,6 +66,16 @@ impl Text {
             text.bytes[i] = byte[0];
             text.len += 1;
         }
+        text
+    }
+    fn path_tail(path: &str) -> Self {
+        let bytes = path.as_bytes();
+        if bytes.len() < 80 {
+            return Self::from_bytes(bytes);
+        }
+        let mut text = Self::default();
+        text.append(b"[tail] ");
+        text.append(&bytes[bytes.len() - 72..]);
         text
     }
     fn bytes(&self) -> &[u8] {
@@ -227,6 +240,28 @@ struct CollectionEvent {
     value_release: u32,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct ObjectLifetimeEvent {
+    sequence: u64,
+    thread: usize,
+    action: &'static str,
+    object: u32,
+    class: Text,
+    before: u32,
+    after: u32,
+    pc: u32,
+    lr: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct DictionaryOrigin {
+    sequence: u64,
+    object: u32,
+    mutable: bool,
+    context: &'static str,
+    option: u32,
+}
+
 struct Ring<T: Copy + Default, const N: usize> {
     items: [T; N],
     written: u64,
@@ -292,6 +327,10 @@ pub struct Recorder {
     boundary_details: Ring<BoundaryDetail, BOUNDARY_DETAILS>,
     bundle_candidates: Ring<Text, BUNDLE_CANDIDATES>,
     collection_events: Ring<CollectionEvent, COLLECTION_EVENTS>,
+    watched_objects: [u32; WATCHED_OBJECTS],
+    object_lifetime_events: Ring<ObjectLifetimeEvent, OBJECT_LIFETIME_EVENTS>,
+    dictionary_origins: [DictionaryOrigin; DICTIONARY_ORIGINS],
+    dictionary_origin_sequence: u64,
     defaults_lookup: DefaultsLookup,
     slow_capture: Option<SlowCapture>,
     pending_slow_capture: Option<PendingSlowCapture>,
@@ -322,6 +361,10 @@ impl Recorder {
             boundary_details: Ring::default(),
             bundle_candidates: Ring::default(),
             collection_events: Ring::default(),
+            watched_objects: [0; WATCHED_OBJECTS],
+            object_lifetime_events: Ring::default(),
+            dictionary_origins: [DictionaryOrigin::default(); DICTIONARY_ORIGINS],
+            dictionary_origin_sequence: 0,
             defaults_lookup: DefaultsLookup::default(),
             slow_capture: None,
             pending_slow_capture: None,
@@ -484,6 +527,36 @@ impl Recorder {
             .iter()
             .find(|slot| slot.object == object)
     }
+    fn watch_object(&mut self, object: u32) {
+        if object == 0 || self.watched_objects.contains(&object) {
+            return;
+        }
+        if let Some(slot) = self.watched_objects.iter_mut().find(|slot| **slot == 0) {
+            *slot = object;
+            return;
+        }
+        let index = self.object_lifetime_events.written as usize % WATCHED_OBJECTS;
+        self.watched_objects[index] = object;
+    }
+    fn watches_object(&self, object: u32) -> bool {
+        object != 0 && self.watched_objects.contains(&object)
+    }
+    fn remember_dictionary_origin(&mut self, origin: DictionaryOrigin) {
+        if let Some(slot) = self
+            .dictionary_origins
+            .iter_mut()
+            .find(|slot| slot.object == origin.object)
+        {
+            *slot = origin;
+            return;
+        }
+        let slot = self
+            .dictionary_origins
+            .iter_mut()
+            .min_by_key(|slot| slot.sequence)
+            .unwrap();
+        *slot = origin;
+    }
     fn note_present(&mut self) {
         self.note_present_at(Instant::now());
     }
@@ -629,12 +702,34 @@ impl Recorder {
                 event.sequence, event.thread, event.action, event.dictionary, event.key, event.value,
                 event.key_retain, event.key_release, event.value_retain, event.value_release);
         }
+        echo_no_panic!(
+            "flight watched-object lifetime events: newest {OBJECT_LIFETIME_EVENTS}; total={} (only values observed in non-retaining dictionaries)",
+            self.object_lifetime_events.written
+        );
+        for event in self.object_lifetime_events.iter() {
+            echo_no_panic!("flight lifetime #{} tid={} action={} object={:#x} class=\"{}\" refcount={}->{} pc={:#x} lr={:#x}",
+                event.sequence, event.thread, event.action, event.object, event.class,
+                event.before, event.after, event.pc, event.lr);
+        }
         if let Some(last) = self
             .recent
             .iter()
             .rev()
             .find(|event| event.result.is_none())
         {
+            if let Some(origin) = self
+                .dictionary_origins
+                .iter()
+                .find(|origin| origin.object == last.call.receiver)
+            {
+                echo_no_panic!("flight receiver dictionary origin: receiver={:#x} mutable={} context={} option={} sequence={}",
+                    origin.object, origin.mutable, origin.context, origin.option, origin.sequence);
+            } else {
+                echo_no_panic!(
+                    "flight receiver dictionary origin: no retained origin for receiver {:#x}",
+                    last.call.receiver
+                );
+            }
             if let Some(origin) = self.provenance_for(last.call.receiver) {
                 echo_no_panic!("flight receiver provenance: most recent tracked object-producing boundary for receiver {:#x}; this may be a transfer, not the original allocation", last.call.receiver);
                 self.print_event(&origin.event);
@@ -863,9 +958,7 @@ impl Environment {
     /// flight-recorder dump.
     pub fn diagnostic_bundle_candidate_miss(&mut self, path: &str) {
         if let Some(recorder) = &mut self.diagnostics {
-            recorder
-                .bundle_candidates
-                .push(Text::from_bytes(path.as_bytes()));
+            recorder.bundle_candidates.push(Text::path_tail(path));
         }
     }
     /// Record only dictionary ownership-relevant transitions. This is a
@@ -879,6 +972,9 @@ impl Environment {
         value: u32,
         callbacks: [u32; 4],
     ) {
+        let refcount = self.objc.refcount_for_diagnostics(id::from_bits(value));
+        let regs = self.cpu.regs();
+        let (pc, lr) = (regs[15], regs[14]);
         if let Some(recorder) = &mut self.diagnostics {
             let sequence = recorder.collection_events.written.saturating_add(1);
             recorder.collection_events.push(CollectionEvent {
@@ -892,6 +988,77 @@ impl Environment {
                 key_release: callbacks[1],
                 value_retain: callbacks[2],
                 value_release: callbacks[3],
+            });
+            if action == "insert-callback-dictionary"
+                && callbacks == [0; 4]
+                && value != 0
+            {
+                recorder.watch_object(value);
+                recorder.object_lifetime_events.push(ObjectLifetimeEvent {
+                    sequence: recorder.object_lifetime_events.written.saturating_add(1),
+                    thread: self.current_thread,
+                    action: "observed-in-non-retaining-dictionary",
+                    object: value,
+                    class: Text::default(),
+                    before: refcount.unwrap_or(0),
+                    after: refcount.unwrap_or(0),
+                    pc,
+                    lr,
+                });
+            }
+        }
+    }
+    pub fn diagnostic_object_lifetime(
+        &mut self,
+        action: &'static str,
+        object: id,
+        before: u32,
+        after: u32,
+    ) {
+        let address = object.to_bits();
+        if !self
+            .diagnostics
+            .as_ref()
+            .is_some_and(|recorder| recorder.watches_object(address))
+        {
+            return;
+        }
+        let class = ObjC::try_read_isa(object, &self.mem)
+            .and_then(|class| self.objc.try_get_class_name(class))
+            .map(|name| Text::from_bytes(name.as_bytes()))
+            .unwrap_or_else(|| Text::from_bytes(b"<deallocated-or-invalid>"));
+        let regs = self.cpu.regs();
+        if let Some(recorder) = &mut self.diagnostics {
+            recorder.object_lifetime_events.push(ObjectLifetimeEvent {
+                sequence: recorder.object_lifetime_events.written.saturating_add(1),
+                thread: self.current_thread,
+                action,
+                object: address,
+                class,
+                before,
+                after,
+                pc: regs[15],
+                lr: regs[14],
+            });
+        }
+    }
+    pub fn diagnostic_dictionary_origin(
+        &mut self,
+        object: id,
+        mutable: bool,
+        context: &'static str,
+        option: u32,
+    ) {
+        if let Some(recorder) = &mut self.diagnostics {
+            recorder.dictionary_origin_sequence =
+                recorder.dictionary_origin_sequence.saturating_add(1);
+            let sequence = recorder.dictionary_origin_sequence;
+            recorder.remember_dictionary_origin(DictionaryOrigin {
+                sequence,
+                object: object.to_bits(),
+                mutable,
+                context,
+                option,
             });
         }
     }

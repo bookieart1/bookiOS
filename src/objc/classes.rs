@@ -43,6 +43,9 @@ pub(super) struct ClassHostObject {
     pub(super) methods: HashMap<SEL, Method>,
     pub(super) guest_method_signatures: HashMap<SEL, ConstPtr<u8>>,
     pub(super) ivars: HashMap<String, IVar>,
+    /// Protocol objects adopted directly by this class. Protocol inheritance
+    /// and superclass adoption are evaluated when conformance is queried.
+    pub(super) protocols: Vec<ConstVoidPtr>,
     /// Offset into the allocated memory for the object where the ivars of
     /// instances of this class or metaclass (respectively: normal objects or
     /// classes) should live. This is always >= the value in the superclass.
@@ -109,7 +112,7 @@ struct class_rw_t {
     _reserved: u32,
     name: ConstPtr<u8>,
     base_methods: ConstPtr<method_list_t>,
-    _base_protocols: ConstVoidPtr, // protocol list (TODO)
+    base_protocols: ConstVoidPtr,
     ivars: ConstPtr<ivar_list_t>,
     _weak_ivar_layout: u32,
     _base_properties: ConstVoidPtr, // property list (TODO)
@@ -125,10 +128,62 @@ struct category_t {
     class: Class,
     instance_methods: ConstPtr<method_list_t>,
     class_methods: ConstPtr<method_list_t>,
-    _protocols: ConstVoidPtr,     // protocol list (TODO)
+    protocols: ConstVoidPtr,
     _property_list: ConstVoidPtr, // property list (TODO)
 }
 unsafe impl SafeRead for category_t {}
+
+/// Prefix of the 32-bit Objective-C 2 runtime's `protocol_t`. Only the name
+/// and inherited protocol list are required for conformance checks.
+#[repr(C, packed)]
+struct protocol_t {
+    _isa: Class,
+    mangled_name: ConstPtr<u8>,
+    protocols: ConstVoidPtr,
+}
+unsafe impl SafeRead for protocol_t {}
+
+fn read_protocol_list(list: ConstVoidPtr, mem: &Mem) -> Vec<ConstVoidPtr> {
+    if list.is_null() {
+        return Vec::new();
+    }
+    let words: ConstPtr<u32> = list.cast();
+    let count = mem.read(words);
+    assert!(count <= 1024, "Objective-C protocol list is implausibly large");
+    (0..count)
+        .map(|index| Ptr::from_bits(mem.read(words + 1 + index)))
+        .collect()
+}
+
+fn protocols_match(first: ConstVoidPtr, second: ConstVoidPtr, mem: &Mem) -> bool {
+    if first == second {
+        return true;
+    }
+    if first.is_null() || second.is_null() {
+        return false;
+    }
+    let first: protocol_t = mem.read(first.cast());
+    let second: protocol_t = mem.read(second.cast());
+    mem.cstr_at(first.mangled_name) == mem.cstr_at(second.mangled_name)
+}
+
+fn protocol_conforms_recursive(
+    protocol: ConstVoidPtr,
+    target: ConstVoidPtr,
+    mem: &Mem,
+    visited: &mut HashSet<u32>,
+) -> bool {
+    if protocols_match(protocol, target, mem) {
+        return true;
+    }
+    if protocol.is_null() || !visited.insert(protocol.to_bits()) {
+        return false;
+    }
+    let protocol_data: protocol_t = mem.read(protocol.cast());
+    read_protocol_list(protocol_data.protocols, mem)
+        .into_iter()
+        .any(|inherited| protocol_conforms_recursive(inherited, target, mem, visited))
+}
 
 #[repr(C, packed)]
 pub struct objc_property {
@@ -396,6 +451,7 @@ impl ClassHostObject {
                 }),
             ),
             guest_method_signatures: HashMap::default(),
+            protocols: Vec::new(),
             // maybe this should be 0 for NSObject? does it matter?
             instance_start: size,
             instance_size: size,
@@ -413,6 +469,7 @@ impl ClassHostObject {
             instance_size,
             name,
             base_methods,
+            base_protocols,
             ivars,
             ..
         } = mem.read(data);
@@ -425,6 +482,7 @@ impl ClassHostObject {
             superclass,
             methods: HashMap::new(),
             guest_method_signatures: HashMap::new(),
+            protocols: read_protocol_list(base_protocols, mem),
             instance_start,
             instance_size,
             ivars: HashMap::new(),
@@ -898,6 +956,22 @@ impl ObjC {
             let class = data.class;
             let metaclass = Self::read_isa(class, mem);
 
+            if !data.protocols.is_null() {
+                let protocols = read_protocol_list(data.protocols, mem);
+                if let Some(host) = self
+                    .get_host_object(class)
+                    .and_then(|host| host.as_any().downcast_ref::<ClassHostObject>())
+                {
+                    let mut combined = host.protocols.clone();
+                    for protocol in protocols {
+                        if !combined.contains(&protocol) {
+                            combined.push(protocol);
+                        }
+                    }
+                    self.borrow_mut::<ClassHostObject>(class).protocols = combined;
+                }
+            }
+
             for (class, methods) in [
                 (class, data.instance_methods),
                 (metaclass, data.class_methods),
@@ -921,6 +995,7 @@ impl ObjC {
                         superclass: nil,
                         methods: Default::default(),
                         guest_method_signatures: Default::default(),
+                        protocols: Default::default(),
                         instance_start: Default::default(),
                         instance_size: Default::default(),
                         ivars: Default::default(),
@@ -967,6 +1042,34 @@ impl ObjC {
             } else {
                 class = next;
             }
+        }
+    }
+
+    pub fn class_conforms_to_protocol(
+        &self,
+        class: Class,
+        protocol: ConstVoidPtr,
+        mem: &Mem,
+    ) -> bool {
+        if class == nil || protocol.is_null() {
+            return false;
+        }
+        let mut class = class;
+        loop {
+            let ClassHostObject {
+                superclass,
+                protocols,
+                ..
+            } = self.borrow(class);
+            for &adopted in protocols {
+                if protocol_conforms_recursive(adopted, protocol, mem, &mut HashSet::new()) {
+                    return true;
+                }
+            }
+            if *superclass == nil {
+                return false;
+            }
+            class = *superclass;
         }
     }
 
@@ -1073,6 +1176,23 @@ pub(super) fn class_getInstanceSize(env: &mut Environment, cls: Class) -> GuestU
     } else {
         env.objc.borrow::<ClassHostObject>(cls).instance_size
     }
+}
+
+pub(super) fn class_conformsToProtocol(
+    env: &mut Environment,
+    cls: Class,
+    protocol: ConstVoidPtr,
+) -> bool {
+    env.objc
+        .class_conforms_to_protocol(cls, protocol, &env.mem)
+}
+
+pub(super) fn protocol_conformsToProtocol(
+    env: &mut Environment,
+    protocol: ConstVoidPtr,
+    other: ConstVoidPtr,
+) -> bool {
+    protocol_conforms_recursive(protocol, other, &env.mem, &mut HashSet::new())
 }
 
 pub(super) fn class_getProperty(

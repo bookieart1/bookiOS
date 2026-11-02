@@ -3964,3 +3964,20 @@ Physical-device status is **pending**. Focused targets are 8bitninja 1.2,
 DoDoFly, LegendaryWar, Peggle, Solomon's Boneyard, TrenchesVS and ZA!
 2ndWave; Blot, SpaceMnkey and Spoing are regressions. Engineering record:
 `dev-docs/compatibility-1.98-shared-font-runtime-cf-and-libc-contracts.md`.
+
+## Dev 2.01 device result and Dev 2.02 candidate
+
+The complete Dev 2.01 run verifies that all five Dev 2.01 contracts passed
+their former blockers. Blot, Solomon's Boneyard, Space Monkey and Spoing are
+clean focused regressions. The new decisive boundaries are: an invalid Audio
+Unit handle after Peggle requests unavailable 3D Mixer; nil dictionary copy
+initialization in Tiki Totems 2's offline path; `conformsToProtocol:` in
+TrenchesVS; and `_wcsrtombs` in ZA! 2ndWave.
+
+Dev 2.02 implements those four general contracts without claiming 3D Mixer
+support. 8bitninja, DoDoFly and LegendaryWar remain strict unresolved roots;
+their next logs gain bounded path-tail, watched-value lifetime, and
+property-list dictionary mutability/origin evidence respectively. No invalid
+receiver, null memory, missing resource, immutable collection, network result,
+or CF ownership rule is relaxed. Full record and predictions:
+`dev-docs/compatibility-2.02-protocol-widechar-null-init-and-causal-origins.md`.

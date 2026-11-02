@@ -173,6 +173,15 @@ fn deserialize_plist(
                 }
                 _ => unreachable!(),
             };
+            env.diagnostic_dictionary_origin(
+                ns_dict,
+                matches!(
+                    mut_options,
+                    NSPropertyListMutableContainers | NSPropertyListMutableContainersAndLeaves
+                ),
+                "property-list",
+                mut_options,
+            );
             // ...so they need to be released.
             for (key, value) in pairs {
                 release(env, key);

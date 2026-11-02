@@ -355,6 +355,18 @@ impl super::ObjC {
         *refcount
     }
 
+    /// Bounded diagnostics may inspect the current count without changing
+    /// ownership. `None` covers nil, static, unknown and deallocating objects.
+    pub fn refcount_for_diagnostics(&self, object: id) -> Option<u32> {
+        self.objects.get(&object).and_then(|entry| {
+            if entry.static_lifetime {
+                None
+            } else {
+                entry.refcount.map(NonZeroU32::get)
+            }
+        })
+    }
+
     /// Increase the refcount of a reference-counted object. Do not call this
     /// directly unless you're implementing `release` on `NSObject`. That method
     /// may be overridden.

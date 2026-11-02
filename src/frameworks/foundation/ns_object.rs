@@ -95,6 +95,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 + (bool)isSubclassOfClass:(Class)class {
     env.objc.class_is_subclass_of(this, class)
 }
++ (bool)conformsToProtocol:(crate::mem::ConstVoidPtr)protocol {
+    env.objc.class_conforms_to_protocol(this, protocol, &env.mem)
+}
 
 // See the instance method section for the normal versions of these.
 + (id)retain {
@@ -168,7 +171,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (id)retain {
     log_dbg!("[{:?} retain]", this);
     if !env.objc.has_static_lifetime(this) {
+        let before = env.objc.refcount_for_diagnostics(this).unwrap_or(0);
         env.objc.increment_refcount(this, &env.mem, env.current_thread);
+        let after = env.objc.refcount_for_diagnostics(this).unwrap_or(0);
+        env.diagnostic_object_lifetime("retain", this, before, after);
     }
     this
 }
@@ -176,16 +182,27 @@ pub const CLASSES: ClassExports = objc_classes! {
     log_dbg!("[{:?} release]", this);
     let regs = env.cpu.regs();
     let (pc, lr) = (regs[Cpu::PC], regs[Cpu::LR]);
-    if !env.objc.has_static_lifetime(this)
-        && env
+    if !env.objc.has_static_lifetime(this) {
+        let before = env.objc.refcount_for_diagnostics(this).unwrap_or(0);
+        let reached_zero = env
             .objc
-            .decrement_refcount(this, env.current_thread, pc, lr)
-    {
-        () = msg![env; this dealloc];
+            .decrement_refcount(this, env.current_thread, pc, lr);
+        let after = env.objc.refcount_for_diagnostics(this).unwrap_or(0);
+        env.diagnostic_object_lifetime(
+            if reached_zero { "release-to-zero" } else { "release" },
+            this,
+            before,
+            after,
+        );
+        if reached_zero {
+            () = msg![env; this dealloc];
+        }
     }
 }
 - (id)autorelease {
     if !env.objc.has_static_lifetime(this) {
+        let refcount = env.objc.refcount_for_diagnostics(this).unwrap_or(0);
+        env.diagnostic_object_lifetime("autorelease-scheduled", this, refcount, refcount);
         () = msg_class![env; NSAutoreleasePool addObject:this];
     }
     this
@@ -193,6 +210,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())dealloc {
     log_dbg!("[{:?} dealloc]", this);
+    env.diagnostic_object_lifetime("dealloc", this, 0, 0);
     ns_key_value_observing::forget_object(env, this);
     env.objc.dealloc_object(this, &mut env.mem)
 }
@@ -211,6 +229,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (bool)isKindOfClass:(Class)class {
     let this_class: Class = msg![env; this class];
     env.objc.class_is_subclass_of(this_class, class)
+}
+- (bool)conformsToProtocol:(crate::mem::ConstVoidPtr)protocol {
+    let class = ObjC::read_isa(this, &env.mem);
+    env.objc.class_conforms_to_protocol(class, protocol, &env.mem)
 }
 
 - (NSUInteger)hash {

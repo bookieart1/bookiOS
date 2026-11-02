@@ -126,6 +126,12 @@ fn AudioUnitRemoveRenderNotify(
 }
 
 fn AudioUnitInitialize(env: &mut Environment, in_unit: AudioUnit) -> OSStatus {
+    if !audio_components::State::get(&mut env.framework_state)
+        .audio_component_instances
+        .contains_key(&in_unit)
+    {
+        return paramErr;
+    }
     let run_loop = CFRunLoopGetMain(env);
     ns_run_loop::add_audio_unit(env, run_loop, in_unit);
     0 // success
@@ -148,10 +154,12 @@ fn AudioUnitSetProperty(
     in_data: ConstVoidPtr,
     in_data_size: u32,
 ) -> OSStatus {
-    let host_object = audio_components::State::get(&mut env.framework_state)
+    let Some(host_object) = audio_components::State::get(&mut env.framework_state)
         .audio_component_instances
         .get_mut(&in_unit)
-        .unwrap();
+    else {
+        return paramErr;
+    };
 
     let result;
     match in_id {
@@ -239,6 +247,13 @@ fn AudioUnitGetProperty(
     out_data: MutVoidPtr,
     io_data_size: MutPtr<u32>,
 ) -> OSStatus {
+    let Some(host_object) = audio_components::State::get(&mut env.framework_state)
+        .audio_component_instances
+        .get_mut(&in_unit)
+    else {
+        return paramErr;
+    };
+
     assert!(
         in_element == OUTPUT_ELEMENT,
         "AudioUnitGetProperty() for property {}, scope {}, element {}",
@@ -246,11 +261,6 @@ fn AudioUnitGetProperty(
         in_scope,
         in_element
     );
-
-    let host_object = audio_components::State::get(&mut env.framework_state)
-        .audio_component_instances
-        .get_mut(&in_unit)
-        .unwrap();
 
     match in_id {
         kAudioUnitProperty_MaximumFramesPerSlice => {
@@ -307,6 +317,12 @@ fn AudioUnitGetProperty(
 }
 
 fn AudioOutputUnitStart(env: &mut Environment, ci: AudioUnit) -> OSStatus {
+    if !audio_components::State::get(&mut env.framework_state)
+        .audio_component_instances
+        .contains_key(&ci)
+    {
+        return paramErr;
+    }
     let context = env
         .framework_state
         .audio_toolbox
@@ -323,7 +339,7 @@ fn AudioOutputUnitStart(env: &mut Environment, ci: AudioUnit) -> OSStatus {
     let audio_unit_state = audio_components_state
         .audio_component_instances
         .get_mut(&ci)
-        .unwrap();
+        .expect("validated Audio Unit disappeared");
     audio_unit_state.al_source = Some(source);
     audio_unit_state.last_render_time = Some(Instant::now());
     audio_unit_state.started = true;
@@ -357,7 +373,7 @@ fn AudioOutputUnitStop(env: &mut Environment, ci: AudioUnit) -> OSStatus {
         audio_unit_state.al_source = None;
         0 // success
     } else {
-        -1
+        paramErr
     };
     log_dbg!("AudioOutputUnitStop({:?}) -> {:?}", ci, result);
     result

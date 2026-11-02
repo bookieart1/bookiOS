@@ -70,6 +70,8 @@ Ivar object_getInstanceVariable(id obj, const char *name, void **outValue);
 Ivar object_setInstanceVariable(id obj, const char *name, void *value);
 const char *ivar_getTypeEncoding(Ivar v);
 ptrdiff_t ivar_getOffset(Ivar v);
+BOOL class_conformsToProtocol(Class cls, Protocol *protocol);
+BOOL protocol_conformsToProtocol(Protocol *protocol, Protocol *other);
 #ifdef DEFINE_ME_WHEN_BUILDING_ON_MACOS
 SEL method_getName(Method m);
 #endif
@@ -89,6 +91,7 @@ void dispatch_once(dispatch_once_t *predicate, void (^block)(void));
 + (instancetype)alloc;
 + (instancetype)new;
 + (BOOL)respondsToSelector:(SEL)selector;
++ (BOOL)conformsToProtocol:(Protocol *)protocol;
 - (instancetype)init;
 - (instancetype)retain;
 - (void)release;
@@ -101,6 +104,7 @@ void dispatch_once(dispatch_once_t *predicate, void (^block)(void));
              withObject:(id)object
           waitUntilDone:(BOOL)wait;
 - (BOOL)respondsToSelector:(SEL)selector;
+- (BOOL)conformsToProtocol:(Protocol *)protocol;
 - (id)valueForKey:(NSString *)key;
 - (id)valueForKeyPath:(NSString *)keyPath;
 - (void)setValue:(id)value forKey:(NSString *)key;
@@ -159,6 +163,7 @@ void dispatch_once(dispatch_once_t *predicate, void (^block)(void));
 + (id)dictionaryWithContentsOfFile:(id)path;
 + (id)dictionaryWithContentsOfURL:(NSURL *)url;
 - (id)valueForKey:(id)key;
+- (instancetype)initWithDictionary:(NSDictionary *)otherDictionary;
 @end
 
 @interface NSMutableDictionary<KeyType, ObjectType> : NSDictionary
@@ -660,6 +665,12 @@ OSStatus AudioComponentInstanceNew(AudioComponent, AudioUnit *);
 OSStatus AudioComponentInstanceDispose(AudioUnit);
 OSStatus AudioUnitAddRenderNotify(AudioUnit, AURenderCallback, void *);
 OSStatus AudioUnitRemoveRenderNotify(AudioUnit, AURenderCallback, void *);
+OSStatus AudioUnitInitialize(AudioUnit);
+OSStatus AudioUnitSetProperty(AudioUnit, uint32_t, uint32_t, uint32_t,
+                              const void *, uint32_t);
+OSStatus AudioUnitGetProperty(AudioUnit, uint32_t, uint32_t, uint32_t, void *,
+                              uint32_t *);
+OSStatus AudioOutputUnitStart(AudioUnit);
 #define kAudioFormatLinearPCM 'lpcm'
 #define kAudioFormatFlagIsSignedInteger (1 << 2)
 #define kAudioFormatFlagIsPacked (1 << 3)

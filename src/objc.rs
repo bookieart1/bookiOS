@@ -47,11 +47,11 @@ pub use selectors::{selector, SEL};
 use crate::mem::{ConstPtr, ConstVoidPtr, MutPtr, Ptr};
 use crate::Environment;
 use classes::{
-    class_addMethod, class_copyPropertyList, class_getClassMethod, class_getInstanceMethod,
-    class_getInstanceSize, class_getMethodImplementation, class_getProperty, class_getSuperclass,
-    class_replaceMethod, method_exchangeImplementations, method_getImplementation,
-    method_getTypeEncoding, method_setImplementation, objc_getClass, ClassHostObject, FakeClass,
-    UnimplementedClass,
+    class_addMethod, class_conformsToProtocol, class_copyPropertyList, class_getClassMethod,
+    class_getInstanceMethod, class_getInstanceSize, class_getMethodImplementation, class_getProperty,
+    class_getSuperclass, class_replaceMethod, method_exchangeImplementations,
+    method_getImplementation, method_getTypeEncoding, method_setImplementation, objc_getClass,
+    protocol_conformsToProtocol, ClassHostObject, FakeClass, UnimplementedClass,
 };
 pub(crate) use messages::objc_msgSend;
 use messages::{
@@ -287,6 +287,8 @@ const FUNCTIONS: FunctionExports = &[
     export_c_func!(class_copyPropertyList(_, _)),
     export_c_func!(class_getInstanceSize(_)),
     export_c_func!(class_getSuperclass(_)),
+    export_c_func!(class_conformsToProtocol(_, _)),
+    export_c_func!(protocol_conformsToProtocol(_, _)),
     export_c_func!(class_getProperty(_, _)),
     export_c_func!(class_getInstanceMethod(_, _)),
     export_c_func!(class_getClassMethod(_, _)),

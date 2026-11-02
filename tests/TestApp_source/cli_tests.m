@@ -3821,6 +3821,35 @@ int test_mbstowcs() {
     return -6;
   }
 
+  const wchar_t wide_restart_source[] = {L'A', 0x00A2, L'Z', L'\0'};
+  const wchar_t *wide_restart_cursor = wide_restart_source;
+  memset(buffer, 0, sizeof(buffer));
+  res = wcsrtombs(buffer, &wide_restart_cursor, 2, NULL);
+  if (res != 1 || buffer[0] != 'A' ||
+      wide_restart_cursor != wide_restart_source + 1) {
+    return -7;
+  }
+  res = wcsrtombs(buffer + 1, &wide_restart_cursor, 63, NULL);
+  if (res != 3 || strcmp(buffer, "A\xC2\xA2Z") != 0 ||
+      wide_restart_cursor != NULL) {
+    return -8;
+  }
+
+  wide_restart_cursor = wide_restart_source;
+  res = wcsrtombs(NULL, &wide_restart_cursor, 0, NULL);
+  if (res != 4 || wide_restart_cursor != wide_restart_source) {
+    return -9;
+  }
+
+  const wchar_t invalid_wide[] = {0xD800, L'\0'};
+  wide_restart_cursor = invalid_wide;
+  errno = 0;
+  if (wcsrtombs(buffer, &wide_restart_cursor, sizeof(buffer), NULL) !=
+          (size_t)-1 ||
+      errno != EILSEQ || wide_restart_cursor != invalid_wide) {
+    return -10;
+  }
+
   return 0;
 }
 
@@ -8419,6 +8448,25 @@ cleanup:
 @protocol IDaredRuntimeProtocol
 @end
 
+@protocol IDaredRuntimeParentProtocol
+@end
+
+@protocol IDaredRuntimeChildProtocol <IDaredRuntimeParentProtocol>
+@end
+
+@protocol IDaredRuntimeCategoryProtocol
+@end
+
+@interface IDaredRuntimeProtocolClass : NSObject <IDaredRuntimeChildProtocol>
+@end
+@implementation IDaredRuntimeProtocolClass
+@end
+
+@interface IDaredRuntimeProtocolClass (ProtocolCategory) <IDaredRuntimeCategoryProtocol>
+@end
+@implementation IDaredRuntimeProtocolClass (ProtocolCategory)
+@end
+
 int test_NSStringFromProtocol() {
   NSString *name = NSStringFromProtocol(@protocol(IDaredRuntimeProtocol));
   if (![name isEqualToString:@"IDaredRuntimeProtocol"])
@@ -8426,6 +8474,44 @@ int test_NSStringFromProtocol() {
   if (NSStringFromProtocol(nil) != nil)
     return -2;
   return 0;
+}
+
+int test_ObjectiveC_protocol_conformance() {
+  IDaredRuntimeProtocolClass *object = [IDaredRuntimeProtocolClass new];
+  int result = 0;
+  if (![object conformsToProtocol:@protocol(IDaredRuntimeChildProtocol)] ||
+      ![object conformsToProtocol:@protocol(IDaredRuntimeParentProtocol)] ||
+      ![object conformsToProtocol:@protocol(IDaredRuntimeCategoryProtocol)] ||
+      [object conformsToProtocol:@protocol(IDaredRuntimeProtocol)]) {
+    result = -1;
+  } else if (![IDaredRuntimeProtocolClass
+                 conformsToProtocol:@protocol(IDaredRuntimeParentProtocol)] ||
+             !class_conformsToProtocol(
+                 [IDaredRuntimeProtocolClass class],
+                 @protocol(IDaredRuntimeCategoryProtocol)) ||
+             !protocol_conformsToProtocol(
+                 @protocol(IDaredRuntimeChildProtocol),
+                 @protocol(IDaredRuntimeParentProtocol))) {
+    result = -2;
+  }
+  [object release];
+  return result;
+}
+
+int test_NSDictionary_initWithDictionary_nil() {
+  NSDictionary *immutable = [[NSDictionary alloc] initWithDictionary:nil];
+  NSMutableDictionary *mutable =
+      [[NSMutableDictionary alloc] initWithDictionary:nil];
+  int result = immutable != nil && mutable != nil && [immutable count] == 0 &&
+                       [mutable count] == 0
+                   ? 0
+                   : -1;
+  [mutable setObject:@1 forKey:@"one"];
+  if (result == 0 && [mutable count] != 1)
+    result = -2;
+  [immutable release];
+  [mutable release];
+  return result;
 }
 
 int test_CFNumberGetTypeID_contract() {
@@ -8577,6 +8663,24 @@ int test_AudioUnit_render_notify_registration() {
     return -4;
   }
   return AudioComponentInstanceDispose(unit) == 0 ? 0 : -5;
+#endif
+}
+
+int test_AudioUnit_invalid_instance_contract() {
+#ifdef DEFINE_ME_WHEN_BUILDING_ON_MACOS
+  return 0;
+#else
+  uint32_t value = 0;
+  uint32_t size = sizeof(value);
+  if (AudioUnitInitialize(NULL) != -50)
+    return -1;
+  if (AudioUnitSetProperty(NULL, 14, 0, 0, &value, sizeof(value)) != -50)
+    return -2;
+  if (AudioUnitGetProperty(NULL, 14, 0, 0, &value, &size) != -50)
+    return -3;
+  if (AudioOutputUnitStart(NULL) != -50)
+    return -4;
+  return 0;
 #endif
 }
 
@@ -8843,12 +8947,15 @@ struct {
     FUNC_DEF(test_NSString_stringByReplacingOccurrencesOfString_options_range),
     FUNC_DEF(test_NSString_pathWithComponents),
     FUNC_DEF(test_NSStringFromProtocol),
+    FUNC_DEF(test_ObjectiveC_protocol_conformance),
+    FUNC_DEF(test_NSDictionary_initWithDictionary_nil),
     FUNC_DEF(test_NSFilePosixPermissions_constant),
     FUNC_DEF(test_NSObject_valueForKeyPath),
     FUNC_DEF(test_NSObject_setValueForKeyPath),
     FUNC_DEF(test_NSGetExecutablePath_contract),
     FUNC_DEF(test_sigaltstack_contract),
     FUNC_DEF(test_AudioUnit_render_notify_registration),
+    FUNC_DEF(test_AudioUnit_invalid_instance_contract),
     FUNC_DEF(test_NSBundle_localized_resource_lookup),
     FUNC_DEF(test_rmdir_contract),
     FUNC_DEF(test_NSFileManager_directory_permissions),
