@@ -886,6 +886,10 @@ mod transition_tests {
     fn transition_type_and_subtype_have_state_and_copy_with_the_animation() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        // Copy and teardown both use superclass dispatch, which temporarily
+        // places an objc_super value on the synthetic guest stack.
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let pool: id = msg_class![env; NSAutoreleasePool new];
         let transition: id = msg_class![env; CATransition new];
         let fade = get_static_str(env, kCATransitionFade);
@@ -911,5 +915,7 @@ mod transition_tests {
         release(env, copy);
         release(env, transition);
         release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }
