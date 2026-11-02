@@ -871,7 +871,7 @@ pub fn decode_buffer(
                 // float PCM. OpenAL on our supported targets is fed PCM16, so
                 // perform the same bounded sample conversion used for 32-bit
                 // integer PCM rather than rejecting an otherwise valid ASBD.
-                assert_eq!(format.bits_per_channel, 32);
+                assert_eq!(bytes_per_channel, 4);
                 let sample_bytes = data_slice.len() - data_slice.len() % 4;
                 let mut pcm16 = Vec::with_capacity(sample_bytes / 2);
                 for bytes in data_slice[..sample_bytes].chunks_exact(4) {
