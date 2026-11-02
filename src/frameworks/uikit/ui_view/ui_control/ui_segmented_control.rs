@@ -103,7 +103,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)initWithItems:(id)items { // NSArray<NSString* or UIImage*>*
-    let this: id = msg_super![env; this initWithFrame:CGRect::default()];
+    let frame = CGRect::default();
+    let this: id = msg_super![env; this initWithFrame:frame];
     if items == nil {
         return this;
     }
