@@ -165,7 +165,8 @@ mod tests {
         let env = &mut env;
 
         let integer: id = msg_class![env; NSNumber numberWithInt:123i32];
-        let unsigned: id = msg_class![env; NSNumber numberWithUnsignedInt:u32::MAX];
+        let max_unsigned = u32::MAX;
+        let unsigned: id = msg_class![env; NSNumber numberWithUnsignedInt:max_unsigned];
         let float: id = msg_class![env; NSNumber numberWithFloat:1.25f32];
         let double: id = msg_class![env; NSNumber numberWithDouble:1.25f64];
 
