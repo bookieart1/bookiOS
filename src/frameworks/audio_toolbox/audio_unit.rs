@@ -703,9 +703,11 @@ mod tests {
     #[test]
     fn default_remote_io_format_supplies_render_sample_rate() {
         let host = audio_components::AudioComponentInstanceHostObject::default();
+        let global_stream_format = host.global_stream_format;
+        let expected_sample_rate = global_stream_format.sample_rate;
         assert_eq!(
-            render_sample_rate(None, None, &host.global_stream_format, 48_000.0),
-            host.global_stream_format.sample_rate
+            render_sample_rate(None, None, &global_stream_format, 48_000.0),
+            expected_sample_rate
         );
     }
 }
