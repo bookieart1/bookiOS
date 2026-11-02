@@ -4133,6 +4133,40 @@ int test_open() {
   return 0;
 }
 
+int test_creat() {
+  NSAutoreleasePool *pool = [NSAutoreleasePool new];
+  NSString *path = [NSTemporaryDirectory()
+      stringByAppendingPathComponent:@"touchhle-posix-creat-test.bin"];
+  const char payload[] = "creat-test";
+  int result = 0;
+
+  int fd = creat([path UTF8String], 0600);
+  if (fd == -1) {
+    result = -1;
+    goto out;
+  }
+  if (write(fd, payload, sizeof(payload)) != sizeof(payload) || close(fd) != 0) {
+    result = -2;
+    goto out;
+  }
+  fd = open([path UTF8String], O_RDONLY);
+  if (fd == -1) {
+    result = -3;
+    goto out;
+  }
+  char actual[sizeof(payload)] = {0};
+  if (read(fd, actual, sizeof(actual)) != sizeof(actual) ||
+      memcmp(actual, payload, sizeof(payload)) != 0) {
+    result = -4;
+  }
+  close(fd);
+
+out:
+  remove([path UTF8String]);
+  [pool drain];
+  return result;
+}
+
 int test_sync() {
   NSAutoreleasePool *pool = [NSAutoreleasePool new];
   NSString *path = [NSTemporaryDirectory()
@@ -4853,6 +4887,36 @@ CFDictionaryValueCallBacks testDefaultValueCallBacks = {
     CFRetainWrapper, CFReleaseWrapper,
     NULL, // stub of CFCopyDescription
     CFEqualWrapper};
+
+int test_CFMutableDictionary_IndependentCallbacks() {
+  retainCount = 0;
+  releaseCount = 0;
+  CFMutableDictionaryRef dict = CFDictionaryCreateMutable(
+      NULL, 0, NULL, &testDefaultValueCallBacks);
+  CFStringRef value =
+      CFStringCreateWithCString(NULL, "retained", kCFStringEncodingASCII);
+  const void *key = (const void *)0x1234;
+
+  CFDictionaryAddValue(dict, key, value);
+  if (retainCount != 1) {
+    CFRelease(value);
+    CFRelease(dict);
+    return -1;
+  }
+  CFRelease(value);
+  CFStringRef stored = CFDictionaryGetValue(dict, key);
+  if (stored == NULL || !CFEqual(stored, CFSTR("retained"))) {
+    CFRelease(dict);
+    return -2;
+  }
+  CFDictionaryRemoveValue(dict, key);
+  if (releaseCount != 1 || CFDictionaryGetValue(dict, key) != NULL) {
+    CFRelease(dict);
+    return -3;
+  }
+  CFRelease(dict);
+  return 0;
+}
 
 int test_CFMutableDictionary_CustomCallbacks_CFTypes() {
   // Reset counters
@@ -8350,6 +8414,62 @@ cleanup:
   return result;
 }
 
+@protocol IDaredRuntimeProtocol
+@end
+
+int test_NSStringFromProtocol() {
+  NSString *name = NSStringFromProtocol(@protocol(IDaredRuntimeProtocol));
+  if (![name isEqualToString:@"IDaredRuntimeProtocol"])
+    return -1;
+  if (NSStringFromProtocol(nil) != nil)
+    return -2;
+  return 0;
+}
+
+int test_CFNumberGetTypeID_contract() {
+  int32_t value = 42;
+  CFNumberRef number =
+      CFNumberCreate(NULL, kCFNumberSInt32Type, &value);
+  CFTypeID numberType = CFNumberGetTypeID();
+  int result = 0;
+  if (numberType == 0 || CFGetTypeID(number) != numberType ||
+      CFGetTypeID([NSNumber numberWithDouble:1.5]) != numberType ||
+      numberType == CFStringGetTypeID()) {
+    result = -1;
+  }
+  CFRelease(number);
+  return result;
+}
+
+int test_NSFilePosixPermissions_constant() {
+  return [NSFilePosixPermissions
+             isEqualToString:@"NSFilePosixPermissions"]
+             ? 0
+             : -1;
+}
+
+int test_UILabel_highlightedTextColor() {
+  UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 100, 30)];
+  UIColor *color = [UIColor redColor];
+  [label setHighlightedTextColor:color];
+  if ([label highlightedTextColor] != color) {
+    [label release];
+    return -1;
+  }
+  [label setHighlighted:YES];
+  if (![label isHighlighted]) {
+    [label release];
+    return -2;
+  }
+  [label setHighlighted:NO];
+  if ([label isHighlighted]) {
+    [label release];
+    return -3;
+  }
+  [label release];
+  return 0;
+}
+
 // clang-format off
 #define FUNC_DEF(func)                                                         \
   { &func, #func }
@@ -8415,6 +8535,7 @@ struct {
     FUNC_DEF(test_flockfile_blocks_other_thread),
     FUNC_DEF(test_flockfile_io_while_locked),
     FUNC_DEF(test_open),
+    FUNC_DEF(test_creat),
     FUNC_DEF(test_sync),
     FUNC_DEF(test_fchmod),
     FUNC_DEF(test_close),
@@ -8443,6 +8564,7 @@ struct {
     FUNC_DEF(test_CFMutableDictionary_NullCallbacks),
     FUNC_DEF(test_CFMutableDictionary_CustomCallbacks_PrimitiveTypes),
     FUNC_DEF(test_CFMutableDictionary_CustomCallbacks_CFTypes),
+    FUNC_DEF(test_CFMutableDictionary_IndependentCallbacks),
     FUNC_DEF(test_lrint),
     FUNC_DEF(test_fesetround),
     FUNC_DEF(test_ldexp),
@@ -8456,10 +8578,12 @@ struct {
     FUNC_DEF(test_CFURL),
     FUNC_DEF(test_CFNumberCompare_simple),
     FUNC_DEF(test_CFNumberCompare_extended),
+    FUNC_DEF(test_CFNumberGetTypeID_contract),
     FUNC_DEF(test_memset_pattern),
     FUNC_DEF(test_CGColorGetColorSpace),
     FUNC_DEF(test_CGGeometry),
     FUNC_DEF(test_UIView_insertSubview_aboveSubview),
+    FUNC_DEF(test_UILabel_highlightedTextColor),
     FUNC_DEF(test_NSMachPort_runLoop_lifecycle),
     FUNC_DEF(test_CFURLHasDirectoryPath),
     FUNC_DEF(test_CGImage_JPEG),
@@ -8468,6 +8592,8 @@ struct {
     FUNC_DEF(test_NSString_stringByReplacingCharactersInRange),
     FUNC_DEF(test_NSString_stringByReplacingOccurrencesOfString_options_range),
     FUNC_DEF(test_NSString_pathWithComponents),
+    FUNC_DEF(test_NSStringFromProtocol),
+    FUNC_DEF(test_NSFilePosixPermissions_constant),
     FUNC_DEF(test_strptime),
     FUNC_DEF(test_uname),
 #ifndef DEFINE_ME_WHEN_BUILDING_ON_MACOS

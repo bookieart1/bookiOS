@@ -150,6 +150,35 @@ impl sockaddr {
         let (ip, port) = self.to_ipv4_parts();
         SocketAddrV4::new(ip.into(), port)
     }
+
+    /// Decode a sockaddr supplied to a syscall. Darwin's syscall ABI has an
+    /// explicit socklen_t argument and treats that as authoritative; the
+    /// copied-in sockaddr's first byte is not independently trusted.
+    fn to_sockaddr_v4_for_input(self, address_len: socklen_t) -> SocketAddrV4 {
+        assert_sockaddr_len(address_len);
+        let sa_family = self.sa_family;
+        assert_eq!(
+            sa_family,
+            AF_INET as u8,
+            "unsupported sockaddr family {sa_family} for IPv4 socket"
+        );
+        let sa_len = self.sa_len;
+        if sa_len != 0 && sa_len as socklen_t != address_len {
+            log_dbg!(
+                "Ignoring input sockaddr sa_len {} in favor of syscall length {}",
+                sa_len,
+                address_len
+            );
+        }
+        let port = u16::from_be_bytes([self.sa_data[0], self.sa_data[1]]);
+        let ip = [
+            self.sa_data[2],
+            self.sa_data[3],
+            self.sa_data[4],
+            self.sa_data[5],
+        ];
+        SocketAddrV4::new(ip.into(), port)
+    }
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -442,7 +471,7 @@ fn bind(
         address_len
     );
 
-    let mut socket_address = sockaddr_val.to_sockaddr_v4();
+    let mut socket_address = sockaddr_val.to_sockaddr_v4_for_input(address_len);
     if !env.options.network_access && !socket_address.ip().is_loopback() {
         // Only on this machine, so nothing is exposed to the network.
         log_dbg!(
@@ -541,7 +570,7 @@ fn connect(
         address_len
     );
 
-    let socket_address = sockaddr_val.to_sockaddr_v4();
+    let socket_address = sockaddr_val.to_sockaddr_v4_for_input(address_len);
     log_dbg!("connect: socket address {:?}", socket_address);
 
     if is_offline_destination(env, &socket_address) {
@@ -1167,7 +1196,7 @@ fn sendto(
 
     assert_sockaddr_len(dest_address_len);
     let sockaddr_val = env.mem.read(dest_address);
-    let socket_address = sockaddr_val.to_sockaddr_v4();
+    let socket_address = sockaddr_val.to_sockaddr_v4_for_input(dest_address_len);
     log_dbg!(
         "sendto({}, {:?}, {}, {}, {:?} ({:?}, {:?}), {})",
         socket,
@@ -1295,6 +1324,16 @@ pub fn close_socket(env: &mut Environment, socket: i32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn syscall_length_is_authoritative_for_input_sockaddr() {
+        let mut address = sockaddr::from_ipv4_parts([255, 255, 255, 255], 80);
+        address.sa_len = 0xa0;
+        assert_eq!(
+            address.to_sockaddr_v4_for_input(guest_size_of::<sockaddr>()),
+            SocketAddrV4::new(std::net::Ipv4Addr::BROADCAST, 80)
+        );
+    }
 
     #[test]
     fn connect_failure_is_reported_to_the_app() {

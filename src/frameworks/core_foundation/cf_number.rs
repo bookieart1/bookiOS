@@ -9,6 +9,7 @@
 //! Here it is the same type.
 
 use super::cf_allocator::{kCFAllocatorDefault, CFAllocatorRef};
+use super::cf_type::{CFTypeID, CF_NUMBER_TYPE_ID};
 use super::{CFComparisonResult, CFIndex, CFTypeRef};
 use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
 use crate::frameworks::foundation::ns_value::{cf_number_type, is_conversion_lossless};
@@ -112,6 +113,10 @@ fn CFNumberGetType(env: &mut Environment, num: CFNumberRef) -> CFNumberType {
     cf_number_type(env, num)
 }
 
+fn CFNumberGetTypeID() -> CFTypeID {
+    CF_NUMBER_TYPE_ID
+}
+
 fn CFNumberCompare(
     env: &mut Environment,
     num1: CFNumberRef,
@@ -149,6 +154,7 @@ pub const CONSTANTS: ConstantExports = &[
 
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFNumberCreate(_, _, _)),
+    export_c_func!(CFNumberGetTypeID()),
     export_c_func!(CFNumberGetType(_)),
     export_c_func!(CFNumberGetValue(_, _, _)),
     export_c_func!(CFNumberCompare(_, _, _)),

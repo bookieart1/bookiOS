@@ -2,8 +2,18 @@
 
 use super::ns_string;
 use crate::dyld::{export_c_func, FunctionExports};
+use crate::mem::{ConstPtr, SafeRead};
 use crate::objc::{id, nil, Class, SEL};
 use crate::Environment;
+
+/// Prefix of the 32-bit Objective-C 2 runtime's protocol_t structure. The
+/// compiler-emitted protocol object's mangled name immediately follows isa.
+#[repr(C, packed)]
+struct GuestProtocol {
+    _isa: Class,
+    mangled_name: ConstPtr<u8>,
+}
+unsafe impl SafeRead for GuestProtocol {}
 
 fn NSStringFromSelector(env: &mut Environment, selector: SEL) -> id {
     // TODO: caching?
@@ -26,6 +36,19 @@ pub fn NSStringFromClass(env: &mut Environment, class: Class) -> id {
     ns_string::from_rust_string(env, string)
 }
 
+fn NSStringFromProtocol(env: &mut Environment, protocol: ConstPtr<GuestProtocol>) -> id {
+    if protocol.is_null() {
+        return nil;
+    }
+    let protocol = env.mem.read(protocol);
+    let name = env
+        .mem
+        .cstr_at_utf8(protocol.mangled_name)
+        .expect("Objective-C protocol name is not valid UTF-8")
+        .to_owned();
+    ns_string::from_rust_string(env, name)
+}
+
 fn NSClassFromString(env: &mut Environment, string: id) -> Class {
     if string == nil {
         return nil;
@@ -46,4 +69,5 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(NSSelectorFromString(_)),
     export_c_func!(NSClassFromString(_)),
     export_c_func!(NSStringFromClass(_)),
+    export_c_func!(NSStringFromProtocol(_)),
 ];

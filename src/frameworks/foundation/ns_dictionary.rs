@@ -1107,11 +1107,13 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (id)initWithKeyCallbacks:(ConstPtr<CFDictionaryKeyCallBacks>)key_callbacks
          andValueCallbacks:(ConstPtr<CFDictionaryValueCallBacks>)value_callbacks {
     if !key_callbacks.is_null() {
-        assert!(!value_callbacks.is_null());
-        let host_object = env.objc.borrow_mut::<CFDictionaryHostObject>(this);
-        host_object.key_callbacks = env.mem.read(key_callbacks);
-        host_object.value_callbacks = env.mem.read(value_callbacks);
-    };
+        env.objc.borrow_mut::<CFDictionaryHostObject>(this).key_callbacks =
+            env.mem.read(key_callbacks);
+    }
+    if !value_callbacks.is_null() {
+        env.objc.borrow_mut::<CFDictionaryHostObject>(this).value_callbacks =
+            env.mem.read(value_callbacks);
+    }
     this
 }
 

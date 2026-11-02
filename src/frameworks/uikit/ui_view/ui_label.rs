@@ -30,6 +30,9 @@ pub struct UILabelHostObject {
     font: id,
     /// `UIColor*`
     text_color: id,
+    /// `UIColor*`
+    highlighted_text_color: id,
+    highlighted: bool,
     text_alignment: UITextAlignment,
     line_break_mode: UILineBreakMode,
     number_of_lines: NSInteger,
@@ -44,6 +47,8 @@ impl Default for UILabelHostObject {
             text: nil,
             font: nil,
             text_color: nil,
+            highlighted_text_color: nil,
+            highlighted: false,
             text_alignment: UITextAlignmentLeft,
             line_break_mode: UILineBreakModeTailTruncation,
             number_of_lines: 1,
@@ -126,6 +131,8 @@ pub const CLASSES: ClassExports = objc_classes! {
         text,
         font,
         text_color,
+        highlighted_text_color,
+        highlighted: _,
         text_alignment: _,
         line_break_mode: _,
         number_of_lines: _,
@@ -135,6 +142,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     release(env, text);
     release(env, font);
     release(env, text_color);
+    release(env, highlighted_text_color);
     msg_super![env; this dealloc]
 }
 
@@ -240,6 +248,27 @@ pub const CLASSES: ClassExports = objc_classes! {
     () = msg![env; this setNeedsDisplay];
 }
 
+- (id)highlightedTextColor {
+    env.objc.borrow::<UILabelHostObject>(this).highlighted_text_color
+}
+- (())setHighlightedTextColor:(id)new_color {
+    let old_color = std::mem::replace(
+        &mut env.objc.borrow_mut::<UILabelHostObject>(this).highlighted_text_color,
+        new_color
+    );
+    retain(env, new_color);
+    release(env, old_color);
+    () = msg![env; this setNeedsDisplay];
+}
+
+- (bool)isHighlighted {
+    env.objc.borrow::<UILabelHostObject>(this).highlighted
+}
+- (())setHighlighted:(bool)highlighted {
+    env.objc.borrow_mut::<UILabelHostObject>(this).highlighted = highlighted;
+    () = msg![env; this setNeedsDisplay];
+}
+
 - (())setBackgroundColor:(id)color { // UIColor*
     // This overrides the standard setBackgroundColor: accessor on UIView.
     // UILabel seems to default to white, and setting the background color to
@@ -302,6 +331,8 @@ pub const CLASSES: ClassExports = objc_classes! {
         text,
         font,
         text_color,
+        highlighted_text_color,
+        highlighted,
         text_alignment,
         line_break_mode,
         number_of_lines,
@@ -309,7 +340,12 @@ pub const CLASSES: ClassExports = objc_classes! {
         minimum_font_size,
     } = env.objc.borrow_mut(this);
 
-    let (r, g, b, a) = ui_color::get_rgba(&env.objc, text_color);
+    let effective_text_color = if highlighted && highlighted_text_color != nil {
+        highlighted_text_color
+    } else {
+        text_color
+    };
+    let (r, g, b, a) = ui_color::get_rgba(&env.objc, effective_text_color);
     CGContextSetRGBFillColor(env, context, r, g, b, a);
 
     let single_line = number_of_lines == 1;

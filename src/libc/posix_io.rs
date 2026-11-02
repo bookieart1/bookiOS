@@ -22,6 +22,7 @@ use crate::mem::{
 };
 use crate::Environment;
 use std::io::{Read, Seek, SeekFrom, Write};
+use self::stat::mode_t;
 
 #[derive(Default)]
 pub struct State {
@@ -136,6 +137,12 @@ fn open(env: &mut Environment, path: ConstPtr<u8>, flags: i32, _args: DotDotDot)
 
     // TODO: parse variadic arguments and pass them on (file creation mode)
     self::open_direct(env, path, flags)
+}
+
+fn creat(env: &mut Environment, path: ConstPtr<u8>, _mode: mode_t) -> FileDescriptor {
+    // File permission bits are not modeled by the virtual filesystem yet,
+    // matching open(). The required create/truncate/write semantics are.
+    open_direct(env, path, O_WRONLY | O_CREAT | O_TRUNC)
 }
 
 /// Special extension for host code: [open] without the [DotDotDot].
@@ -1040,6 +1047,7 @@ fn setxattr(
 
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(open(_, _, _)),
+    export_c_func!(creat(_, _)),
     export_c_func!(read(_, _, _)),
     export_c_func!(pread(_, _, _, _)),
     export_c_func!(write(_, _, _)),

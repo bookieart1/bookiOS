@@ -18,6 +18,8 @@ pub type CFTypeID = u32;
 /// Stable, opaque identity for the toll-free bridged CFString/NSString family.
 /// The numeric value is private to this process; only equality is meaningful.
 pub(crate) const CF_STRING_TYPE_ID: CFTypeID = 0x5354_5201;
+/// Stable, opaque identity for the toll-free bridged CFNumber/NSNumber family.
+pub(crate) const CF_NUMBER_TYPE_ID: CFTypeID = 0x4E55_4D01;
 
 /// Core Foundation type identifiers are opaque and process-local. Toll-free
 /// bridged class clusters must share one identity even when their concrete
@@ -31,7 +33,12 @@ pub fn CFGetTypeID(env: &mut Environment, object: CFTypeRef) -> CFTypeID {
     if env.objc.class_is_subclass_of(object_class, string_class) {
         CF_STRING_TYPE_ID
     } else {
-        object_class.to_bits()
+        let number_class = env.objc.get_known_class("NSNumber", &mut env.mem);
+        if env.objc.class_is_subclass_of(object_class, number_class) {
+            CF_NUMBER_TYPE_ID
+        } else {
+            object_class.to_bits()
+        }
     }
 }
 
