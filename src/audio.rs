@@ -175,6 +175,92 @@ fn wav_to_pcm16<R: std::io::Read>(
     })
 }
 
+/// Decode ordinary integer PCM from a RIFF/WAVE file whose chunk layout is
+/// legal but rejected by the stricter `hound` reader. Old iPhone games often
+/// shipped assets made by permissive desktop tools, and Audio File Services
+/// accepted chunks in an order that some modern readers do not.
+///
+/// This fallback deliberately supports only uncompressed 8- and 16-bit PCM.
+/// It validates the format and frame size, ignores unknown bounded chunks and
+/// never guesses a compressed codec.
+fn riff_pcm_to_pcm16(bytes: &[u8]) -> Option<symphonia_formats::SymphoniaDecodedToPcm> {
+    if bytes.get(..4)? != b"RIFF" || bytes.get(8..12)? != b"WAVE" {
+        return None;
+    }
+
+    let mut format = None;
+    let mut data = None;
+    let mut pos = 12usize;
+    while pos.checked_add(8)? <= bytes.len() {
+        let chunk_type = bytes.get(pos..pos + 4)?;
+        let declared_size =
+            u32::from_le_bytes(bytes.get(pos + 4..pos + 8)?.try_into().ok()?) as usize;
+        let start = pos + 8;
+        let declared_end = start.checked_add(declared_size)?;
+
+        if chunk_type == b"data" {
+            // Some historical encoders left a stale data length in an
+            // otherwise usable file. Audio File Services consumed the full
+            // frames available at EOF, so do the same bounded clamping here.
+            data = Some(bytes.get(start..declared_end.min(bytes.len()))?);
+        } else {
+            let chunk = bytes.get(start..declared_end)?;
+            if chunk_type == b"fmt " && chunk.len() >= 16 {
+                let u16_at = |offset| {
+                    Some(u16::from_le_bytes(
+                        chunk.get(offset..offset + 2)?.try_into().ok()?,
+                    ))
+                };
+                let u32_at = |offset| {
+                    Some(u32::from_le_bytes(
+                        chunk.get(offset..offset + 4)?.try_into().ok()?,
+                    ))
+                };
+                format = Some((
+                    u16_at(0)?,
+                    u16_at(2)?,
+                    u32_at(4)?,
+                    u16_at(12)?,
+                    u16_at(14)?,
+                ));
+            }
+        }
+
+        if declared_end >= bytes.len() {
+            break;
+        }
+        pos = declared_end.checked_add(declared_size & 1)?;
+    }
+
+    let (format_tag, channels, sample_rate, block_align, bits_per_sample) = format?;
+    if format_tag != 1 || channels == 0 || sample_rate == 0 || !matches!(bits_per_sample, 8 | 16)
+    {
+        return None;
+    }
+    let expected_block_align = channels.checked_mul(bits_per_sample / 8)?;
+    if block_align != expected_block_align || block_align == 0 {
+        return None;
+    }
+
+    let data = data?;
+    let complete_len = data.len() - data.len() % usize::from(block_align);
+    let data = &data[..complete_len];
+    let pcm16 = match bits_per_sample {
+        8 => data
+            .iter()
+            .flat_map(|&sample| ((i16::from(sample) - 128) << 8).to_le_bytes())
+            .collect(),
+        16 => data.to_vec(),
+        _ => unreachable!(),
+    };
+    Some(symphonia_formats::SymphoniaDecodedToPcm {
+        bytes: pcm16,
+        sample_rate,
+        channels: channels.into(),
+        compressed_format: None,
+    })
+}
+
 /// Symphonia can't read 8-bit linear PCM in CAF files, so convert it to
 /// 16-bit here. CAF's integer samples are always signed.
 fn caf_pcm8_to_pcm16(bytes: &[u8]) -> Option<symphonia_formats::SymphoniaDecodedToPcm> {
@@ -334,6 +420,8 @@ impl AudioFile {
         // are immediately decoding the entire file to PCM and acting as if
         // it's a PCM file, simply because because this is easier. Full MP3
         // support would require a lot of changes in Audio Toolbox.
+        } else if let Some(pcm) = riff_pcm_to_pcm16(&bytes) {
+            Ok(AudioFileInner::Symphonia(pcm))
         } else if let Some(pcm) = aiff_to_pcm16(&bytes) {
             Ok(AudioFileInner::Symphonia(pcm))
         } else if let Some(pcm) = caf_pcm8_to_pcm16(&bytes) {
@@ -633,5 +721,28 @@ mod tests {
         let mut sample = [0; 2];
         assert_eq!(file.read_bytes(0, &mut sample), Ok(2));
         assert_eq!(i16::from_le_bytes(sample), 0x1234);
+    }
+
+    #[test]
+    fn wav_pcm_fallback_accepts_data_before_fmt_and_converts_unsigned_8_bit() {
+        let mut bytes = b"RIFF\0\0\0\0WAVEdata\x04\0\0\0\0\x80\xff\x40fmt \x10\0\0\0"
+            .to_vec();
+        bytes.extend_from_slice(&[
+            1, 0, // PCM
+            1, 0, // mono
+            0x22, 0x56, 0, 0, // 22050 Hz
+            0x22, 0x56, 0, 0, // 22050 bytes/s
+            1, 0, // block align
+            8, 0, // bits/sample
+        ]);
+        let riff_size = u32::try_from(bytes.len() - 8).unwrap().to_le_bytes();
+        bytes[4..8].copy_from_slice(&riff_size);
+        let pcm = riff_pcm_to_pcm16(&bytes).unwrap();
+        assert_eq!(pcm.sample_rate, 22050);
+        assert_eq!(pcm.channels, 1);
+        assert_eq!(
+            pcm.bytes,
+            [0x00, 0x80, 0x00, 0x00, 0x00, 0x7f, 0x00, 0xc0]
+        );
     }
 }

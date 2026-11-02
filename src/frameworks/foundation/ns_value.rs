@@ -12,8 +12,9 @@ use super::{
 };
 use crate::frameworks::core_animation::ca_transform_3d::CATransform3D;
 use crate::frameworks::core_foundation::cf_number::{
-    kCFNumberCharType, kCFNumberFloat32Type, kCFNumberFloatType, kCFNumberIntType,
-    kCFNumberSInt16Type, kCFNumberSInt32Type, kCFNumberSInt8Type, kCFNumberShortType, CFNumberType,
+    kCFNumberCharType, kCFNumberFloat32Type, kCFNumberFloat64Type, kCFNumberFloatType,
+    kCFNumberIntType, kCFNumberSInt16Type, kCFNumberSInt32Type, kCFNumberSInt64Type,
+    kCFNumberSInt8Type, kCFNumberShortType, CFNumberType,
 };
 use crate::frameworks::core_graphics::{CGPoint, CGRect, CGSize};
 use crate::frameworks::foundation::ns_keyed_archiver::get_value_to_encode_for_current_key;
@@ -109,6 +110,24 @@ impl NSNumberHostObject {
     impl_AsValue!(as_unsigned_short, u16);
     impl_AsValue!(as_char, i8);
     impl_AsValue!(as_i128, i128);
+}
+
+/// Return the canonical Core Foundation storage type for this NSNumber.
+///
+/// CFNumber does not preserve all of the type aliases supplied at creation
+/// time. In particular, its public contract reports the internal storage
+/// category rather than necessarily echoing the caller's original type.
+pub(crate) fn cf_number_type(env: &mut Environment, number: id) -> CFNumberType {
+    match env.objc.borrow::<NSNumberHostObject>(number) {
+        NSNumberHostObject::Bool(_) | NSNumberHostObject::Char(_) => kCFNumberSInt8Type,
+        NSNumberHostObject::Short(_) => kCFNumberSInt16Type,
+        NSNumberHostObject::UnsignedShort(_) | NSNumberHostObject::Int(_) => kCFNumberSInt32Type,
+        NSNumberHostObject::UnsignedInt(_)
+        | NSNumberHostObject::LongLong(_)
+        | NSNumberHostObject::UnsignedLongLong(_) => kCFNumberSInt64Type,
+        NSNumberHostObject::Float(_) => kCFNumberFloat32Type,
+        NSNumberHostObject::Double(_) => kCFNumberFloat64Type,
+    }
 }
 
 fn objc_type(env: &mut Environment, number: id) -> ConstPtr<u8> {

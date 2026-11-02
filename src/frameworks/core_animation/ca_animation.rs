@@ -26,6 +26,12 @@ const kCATransitionMoveIn: &str = "moveIn";
 const kCATransitionPush: &str = "push";
 const kCATransitionReveal: &str = "reveal";
 
+type CATransitionSubtype = id; // NSString*
+const kCATransitionFromRight: &str = "fromRight";
+const kCATransitionFromLeft: &str = "fromLeft";
+const kCATransitionFromTop: &str = "fromTop";
+const kCATransitionFromBottom: &str = "fromBottom";
+
 pub type CAMediaTimingFillMode = id; // NSString*
 pub const kCAFillModeBackwards: &str = "backwards";
 pub const kCAFillModeBoth: &str = "both";
@@ -91,6 +97,23 @@ pub const CONSTANTS: ConstantExports = &[
         "_kCATransitionReveal",
         HostConstant::NSString(kCATransitionReveal),
     ),
+    // `CATransitionSubtype` values.
+    (
+        "_kCATransitionFromRight",
+        HostConstant::NSString(kCATransitionFromRight),
+    ),
+    (
+        "_kCATransitionFromLeft",
+        HostConstant::NSString(kCATransitionFromLeft),
+    ),
+    (
+        "_kCATransitionFromTop",
+        HostConstant::NSString(kCATransitionFromTop),
+    ),
+    (
+        "_kCATransitionFromBottom",
+        HostConstant::NSString(kCATransitionFromBottom),
+    ),
     // `CAMediaTimingFillMode` values.
     (
         "_kCAFillModeBackwards",
@@ -106,6 +129,30 @@ pub const CONSTANTS: ConstantExports = &[
         HostConstant::NSString(kCAFillModeRemoved),
     ),
 ];
+
+#[cfg(test)]
+mod constant_tests {
+    use super::*;
+
+    #[test]
+    fn transition_subtypes_export_the_historical_string_values() {
+        for (symbol, value) in [
+            ("_kCATransitionFromRight", "fromRight"),
+            ("_kCATransitionFromLeft", "fromLeft"),
+            ("_kCATransitionFromTop", "fromTop"),
+            ("_kCATransitionFromBottom", "fromBottom"),
+        ] {
+            let (_, constant) = CONSTANTS
+                .iter()
+                .find(|(candidate, _)| *candidate == symbol)
+                .unwrap();
+            let HostConstant::NSString(actual) = constant else {
+                panic!("{symbol} was not exported as NSString");
+            };
+            assert_eq!(*actual, value);
+        }
+    }
+}
 
 struct CAAnimationHostObject {
     removed_on_completion: bool,

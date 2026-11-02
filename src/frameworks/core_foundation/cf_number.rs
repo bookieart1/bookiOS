@@ -11,7 +11,7 @@
 use super::cf_allocator::{kCFAllocatorDefault, CFAllocatorRef};
 use super::{CFComparisonResult, CFIndex, CFTypeRef};
 use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
-use crate::frameworks::foundation::ns_value::is_conversion_lossless;
+use crate::frameworks::foundation::ns_value::{cf_number_type, is_conversion_lossless};
 use crate::mem::{ConstVoidPtr, MutVoidPtr};
 use crate::objc::{id, msg, msg_class};
 use crate::Environment;
@@ -26,9 +26,13 @@ pub const kCFNumberFloat64Type: CFNumberType = 6;
 pub const kCFNumberCharType: CFNumberType = 7;
 pub const kCFNumberShortType: CFNumberType = 8;
 pub const kCFNumberIntType: CFNumberType = 9;
+pub const kCFNumberLongType: CFNumberType = 10;
 pub const kCFNumberLongLongType: CFNumberType = 11;
 pub const kCFNumberFloatType: CFNumberType = 12;
 pub const kCFNumberDoubleType: CFNumberType = 13;
+pub const kCFNumberCFIndexType: CFNumberType = 14;
+pub const kCFNumberNSIntegerType: CFNumberType = 15;
+pub const kCFNumberCGFloatType: CFNumberType = 16;
 
 type CFNumberRef = CFTypeRef;
 // Note: on iOS SDK side this type is defined as a pointer to an opaque struct
@@ -104,6 +108,10 @@ fn CFNumberGetValue(
     }
 }
 
+fn CFNumberGetType(env: &mut Environment, num: CFNumberRef) -> CFNumberType {
+    cf_number_type(env, num)
+}
+
 fn CFNumberCompare(
     env: &mut Environment,
     num1: CFNumberRef,
@@ -141,7 +149,29 @@ pub const CONSTANTS: ConstantExports = &[
 
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFNumberCreate(_, _, _)),
+    export_c_func!(CFNumberGetType(_)),
     export_c_func!(CFNumberGetValue(_, _, _)),
     export_c_func!(CFNumberCompare(_, _, _)),
     export_c_func!(CFBooleanGetValue(_)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_type_reports_canonical_storage_categories() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+
+        let integer: id = msg_class![env; NSNumber numberWithInt:123i32];
+        let unsigned: id = msg_class![env; NSNumber numberWithUnsignedInt:u32::MAX];
+        let float: id = msg_class![env; NSNumber numberWithFloat:1.25f32];
+        let double: id = msg_class![env; NSNumber numberWithDouble:1.25f64];
+
+        assert_eq!(CFNumberGetType(env, integer), kCFNumberSInt32Type);
+        assert_eq!(CFNumberGetType(env, unsigned), kCFNumberSInt64Type);
+        assert_eq!(CFNumberGetType(env, float), kCFNumberFloat32Type);
+        assert_eq!(CFNumberGetType(env, double), kCFNumberFloat64Type);
+    }
+}
