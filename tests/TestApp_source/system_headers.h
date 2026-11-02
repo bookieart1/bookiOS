@@ -81,7 +81,7 @@ void dispatch_once(dispatch_once_t *predicate, void (^block)(void));
 
 // Foundation
 
-@class NSThread;
+@class NSString, NSThread;
 @interface NSObject {
   Class isa;
 }
@@ -101,6 +101,8 @@ void dispatch_once(dispatch_once_t *predicate, void (^block)(void));
              withObject:(id)object
           waitUntilDone:(BOOL)wait;
 - (BOOL)respondsToSelector:(SEL)selector;
+- (id)valueForKey:(NSString *)key;
+- (id)valueForKeyPath:(NSString *)keyPath;
 + (void (*)(void))instanceMethodForSelector:(SEL)selector;
 - (void (*)(void))methodForSelector:(SEL)selector;
 @end
@@ -108,6 +110,10 @@ void dispatch_once(dispatch_once_t *predicate, void (^block)(void));
 @interface NSBundle : NSObject
 + (instancetype)mainBundle;
 + (instancetype)bundleForClass:(Class)aClass;
+- (NSString *)pathForResource:(NSString *)name
+                       ofType:(NSString *)extension
+                  inDirectory:(NSString *)directory
+              forLocalization:(NSString *)localization;
 @end
 
 @interface NSAutoreleasePool : NSObject
@@ -133,7 +139,7 @@ void dispatch_once(dispatch_once_t *predicate, void (^block)(void));
 - (void)removeLastObject;
 @end
 
-@class NSURL;
+@class NSURL, NSError;
 @interface NSArray (NSArrayCreation)
 + (id)arrayWithContentsOfFile:(id)path;
 + (id)arrayWithContentsOfURL:(NSURL *)url;
@@ -198,6 +204,7 @@ typedef enum {
 + (NSNumber *)numberWithFloat:(float)value;
 + (NSNumber *)numberWithBool:(bool)value;
 - (int)intValue;
+- (short)shortValue;
 @end
 
 @interface NSNull : NSObject
@@ -281,6 +288,7 @@ NSString *NSTemporaryDirectory(void);
 extern NSString *const NSFileType;
 extern NSString *const NSFileTypeDirectory;
 extern NSString *const NSFileTypeRegular;
+extern NSString *const NSFilePosixPermissions;
 
 @interface NSEnumerator : NSObject
 - (id)nextObject;
@@ -302,6 +310,12 @@ typedef enum {
 
 @interface NSFileManager : NSObject
 + (NSFileManager *)defaultManager;
+- (BOOL)fileExistsAtPath:(NSString *)path;
+- (BOOL)createDirectoryAtPath:(NSString *)path
+  withIntermediateDirectories:(BOOL)createIntermediates
+                   attributes:(NSDictionary *)attributes
+                        error:(NSError **)error;
+- (BOOL)removeItemAtPath:(NSString *)path error:(NSError **)error;
 - (NSDirectoryEnumerator *)enumeratorAtPath:(NSString *)path;
 - (NSDirectoryEnumerator *)enumeratorAtURL:(NSURL *)url
                 includingPropertiesForKeys:(NSArray *)keys
@@ -857,6 +871,24 @@ extern NSString *const UIApplicationLaunchOptionsURLKey;
 @interface UIButton : UIControl
 + (instancetype)buttonWithType:(UIButtonType)type;
 - (void)setTitle:(NSString *)title forState:(UIControlState)state;
+@end
+@interface UISegmentedControl : UIControl
+- (instancetype)initWithItems:(NSArray *)items;
+- (NSUInteger)numberOfSegments;
+- (NSString *)titleForSegmentAtIndex:(NSUInteger)index;
+- (void)setTitle:(NSString *)title forSegmentAtIndex:(NSUInteger)index;
+- (void)insertSegmentWithTitle:(NSString *)title
+                       atIndex:(NSUInteger)index
+                      animated:(BOOL)animated;
+- (void)removeSegmentAtIndex:(NSUInteger)index animated:(BOOL)animated;
+- (NSInteger)selectedSegmentIndex;
+- (void)setSelectedSegmentIndex:(NSInteger)index;
+- (BOOL)isMomentary;
+- (void)setMomentary:(BOOL)momentary;
+- (BOOL)isEnabledForSegmentAtIndex:(NSUInteger)index;
+- (void)setEnabled:(BOOL)enabled forSegmentAtIndex:(NSUInteger)index;
+- (float)widthForSegmentAtIndex:(NSUInteger)index;
+- (void)setWidth:(float)width forSegmentAtIndex:(NSUInteger)index;
 @end
 
 int UIApplicationMain(int, char **, NSString *, NSString *);

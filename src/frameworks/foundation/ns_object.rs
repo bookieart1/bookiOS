@@ -28,7 +28,8 @@ use crate::libc::semaphore::{host_destroy_semaphore, sem_wait};
 use crate::mem::MutVoidPtr;
 use crate::objc::{
     autorelease, id, msg, msg_class, msg_send, msg_send_no_type_checking, nil, objc_classes,
-    retain, Class, ClassExports, NSZonePtr, ObjC, TrivialHostObject, SEL, TYPE_BOOL, TYPE_CHAR,
+    release, retain, Class, ClassExports, NSZonePtr, ObjC, TrivialHostObject, SEL, TYPE_BOOL,
+    TYPE_CHAR,
     TYPE_CHAR_PTR, TYPE_CLASS, TYPE_DOUBLE, TYPE_FLOAT, TYPE_ID, TYPE_INT, TYPE_LONG,
     TYPE_LONGLONG, TYPE_SEL, TYPE_SHORT, TYPE_UCHAR, TYPE_UINT, TYPE_ULONG, TYPE_ULONGLONG,
     TYPE_UNDEF, TYPE_USHORT, TYPE_VOID,
@@ -389,6 +390,23 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     let sel = env.objc.lookup_selector("valueForUndefinedKey:").unwrap();
     msg_send(env, (this, sel, key))
+}
+
+- (id)valueForKeyPath:(id)key_path { // NSString*
+    // A key path is evaluated one key at a time. This is deliberately built
+    // on valueForKey: so dictionaries, accessor methods, scalar boxing and
+    // direct-ivar lookup all keep their existing KVC semantics.
+    let key_path = to_rust_string(env, key_path).into_owned();
+    let mut value = this;
+    for component in key_path.split('.') {
+        if value == nil {
+            break;
+        }
+        let key = from_rust_string(env, component.to_owned());
+        value = msg![env; value valueForKey:key];
+        release(env, key);
+    }
+    value
 }
 
 - (id)dictionaryWithValuesForKeys:(id)keys { // NSArray*

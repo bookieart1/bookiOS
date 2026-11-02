@@ -6,8 +6,10 @@
 //! Miscellaneous parts of `unistd.h`
 
 use crate::dyld::{export_c_func, FunctionExports};
-use crate::fs::GuestPath;
-use crate::libc::errno::{set_errno, EACCES, EINVAL, ENOENT, EROFS};
+use crate::fs::{FsError, GuestPath};
+use crate::libc::errno::{
+    set_errno, EACCES, EFAULT, EIO, EINVAL, ENOENT, ENOTDIR, ENOTEMPTY, EROFS,
+};
 use crate::libc::posix_io::{FileDescriptor, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 use crate::mem::{ConstPtr, GuestISize, GuestUSize, MutPtr, PAGE_SIZE};
 use crate::Environment;
@@ -125,6 +127,46 @@ fn unlink(env: &mut Environment, path: ConstPtr<u8>) -> i32 {
     }
 }
 
+fn rmdir(env: &mut Environment, path: ConstPtr<u8>) -> i32 {
+    set_errno(env, 0);
+    if path.is_null() {
+        set_errno(env, EFAULT);
+        return -1;
+    }
+
+    let Ok(path_str) = env.mem.cstr_at_utf8(path) else {
+        set_errno(env, EFAULT);
+        return -1;
+    };
+    let guest_path = GuestPath::new(&path_str);
+    if !env.fs.exists(guest_path) {
+        set_errno(env, ENOENT);
+        return -1;
+    }
+    if env.fs.is_file(guest_path) {
+        set_errno(env, ENOTDIR);
+        return -1;
+    }
+
+    match env.fs.remove(guest_path) {
+        Ok(()) => 0,
+        Err(err) => {
+            let errno = match &err {
+                FsError::DirectoryNotEmpty => ENOTEMPTY,
+                FsError::DoesNotExist | FsError::NonexistentParentDir => ENOENT,
+                FsError::InvalidParentDir => ENOTDIR,
+                FsError::ReadonlyParentDir => EROFS,
+                FsError::AccessDenied => EACCES,
+                FsError::IoError(_) => EIO,
+                FsError::AlreadyExist | FsError::IsDirectory => EINVAL,
+            };
+            set_errno(env, errno);
+            log!("rmdir({:?} '{:?}') failed with {:?}", path, path_str, err);
+            -1
+        }
+    }
+}
+
 fn gethostname(env: &mut Environment, name: MutPtr<u8>, namelen: GuestUSize) -> i32 {
     // TODO: define unique hostname once networking is supported
     let hostname = "touchHLE";
@@ -185,6 +227,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(isatty(_)),
     export_c_func!(access(_, _)),
     export_c_func!(unlink(_)),
+    export_c_func!(rmdir(_)),
     export_c_func!(gethostname(_, _)),
     export_c_func!(getpagesize()),
     export_c_func!(getgid()),

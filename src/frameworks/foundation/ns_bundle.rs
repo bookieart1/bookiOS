@@ -353,6 +353,48 @@ pub const CLASSES: ClassExports = objc_classes! {
                ofType:(id)extension { // NSString*
     msg![env; this pathForResource:name ofType:extension inDirectory:nil]
 }
+- (id)pathForResource:(id)name // NSString*
+               ofType:(id)extension // NSString*
+          inDirectory:(id)directory // NSString*
+      forLocalization:(id)localization { // NSString*
+    // The historical contract searches nonlocalized resources first, then
+    // only the explicitly requested localization. It does not run the normal
+    // preferred-language fallback performed by the three-argument method.
+    if name == nil || ns_string::to_rust_string(env, name).is_empty() {
+        // This uncommon form means "the first resource of this type". Reuse
+        // the deterministic global-resource behavior already implemented by
+        // the three-argument method.
+        return msg![env; this pathForResource:name ofType:extension inDirectory:directory];
+    }
+
+    let path = path_for_device_resource_helper(env, this, name, nil, directory, extension);
+    if path != nil {
+        return path;
+    }
+    let path = path_for_resource_helper(env, this, name, nil, directory, extension);
+    if path != nil || localization == nil {
+        return path;
+    }
+
+    let localization = ns_string::to_rust_string(env, localization).into_owned();
+    if localization.is_empty() {
+        return nil;
+    }
+    let lproj = if localization.ends_with(".lproj") {
+        localization
+    } else {
+        format!("{localization}.lproj")
+    };
+    let lproj = ns_string::from_rust_string(env, lproj);
+    let path = path_for_device_resource_helper(env, this, name, lproj, directory, extension);
+    let path = if path == nil {
+        path_for_resource_helper(env, this, name, lproj, directory, extension)
+    } else {
+        path
+    };
+    release(env, lproj);
+    path
+}
 - (id)URLForResource:(id)name // NSString*
        withExtension:(id)extension // NSString *
         subdirectory:(id)subpath { // NSString *

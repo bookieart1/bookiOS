@@ -8448,6 +8448,134 @@ int test_NSFilePosixPermissions_constant() {
              : -1;
 }
 
+int test_NSObject_valueForKeyPath() {
+  NSArray *innerObjects = [NSArray arrayWithObjects:@"ok", nil];
+  NSArray *innerKeys = [NSArray arrayWithObjects:@"leaf", nil];
+  NSDictionary *inner =
+      [NSDictionary dictionaryWithObjects:innerObjects forKeys:innerKeys];
+  NSArray *outerObjects = [NSArray arrayWithObjects:inner, nil];
+  NSArray *outerKeys = [NSArray arrayWithObjects:@"branch", nil];
+  NSDictionary *outer =
+      [NSDictionary dictionaryWithObjects:outerObjects forKeys:outerKeys];
+  id value = [outer valueForKeyPath:@"branch.leaf"];
+  return [value isEqualToString:@"ok"] ? 0 : -1;
+}
+
+int test_NSBundle_localized_resource_lookup() {
+#ifdef DEFINE_ME_WHEN_BUILDING_ON_MACOS
+  return 0;
+#else
+  // Global resources precede the explicitly requested localization.
+  NSString *path = [[NSBundle mainBundle]
+      pathForResource:@"Info"
+               ofType:@"plist"
+          inDirectory:nil
+      forLocalization:@"idared-missing-localization"];
+  return path != nil ? 0 : -1;
+#endif
+}
+
+int test_rmdir_contract() {
+  const char *home = getenv("HOME");
+  if (home == NULL)
+    return -1;
+  char directory[1024];
+  char child[1024];
+  if (snprintf(directory, sizeof(directory), "%s/tmp/idared-rmdir-contract",
+               home) >= (int)sizeof(directory) ||
+      snprintf(child, sizeof(child), "%s/child", directory) >=
+          (int)sizeof(child))
+    return -2;
+  rmdir(child);
+  rmdir(directory);
+  if (mkdir(directory, 0700) != 0)
+    return -3;
+  FILE *file = fopen(child, "w");
+  if (file == NULL) {
+    rmdir(directory);
+    return -4;
+  }
+  fclose(file);
+  errno = 0;
+  if (rmdir(child) != -1 || errno != ENOTDIR) {
+    unlink(child);
+    rmdir(directory);
+    return -5;
+  }
+  if (rmdir(directory) != -1 || errno != ENOTEMPTY) {
+    unlink(child);
+    rmdir(directory);
+    return -6;
+  }
+  if (unlink(child) != 0 || rmdir(directory) != 0)
+    return -7;
+  return 0;
+}
+
+int test_NSFileManager_directory_permissions() {
+  NSString *path = [NSString
+      stringWithFormat:@"%@/tmp/idared-directory-attributes", NSHomeDirectory()];
+  NSFileManager *manager = [NSFileManager defaultManager];
+  [manager removeItemAtPath:path error:nil];
+  NSArray *objects =
+      [NSArray arrayWithObjects:[NSNumber numberWithInt:0755], nil];
+  NSArray *keys = [NSArray arrayWithObjects:NSFilePosixPermissions, nil];
+  NSDictionary *attributes =
+      [NSDictionary dictionaryWithObjects:objects forKeys:keys];
+  if (![manager createDirectoryAtPath:path
+          withIntermediateDirectories:YES
+                           attributes:attributes
+                                error:nil] ||
+      ![manager fileExistsAtPath:path])
+    return -1;
+  // With intermediates enabled, an existing final directory is success.
+  if (![manager createDirectoryAtPath:path
+          withIntermediateDirectories:YES
+                           attributes:attributes
+                                error:nil])
+    return -2;
+  return [manager removeItemAtPath:path error:nil] ? 0 : -3;
+}
+
+int test_UISegmentedControl_state() {
+#ifdef DEFINE_ME_WHEN_BUILDING_ON_MACOS
+  return 0;
+#else
+  NSArray *items = [NSArray arrayWithObjects:@"One", @"Two", nil];
+  UISegmentedControl *control =
+      [[UISegmentedControl alloc] initWithItems:items];
+  if ([control numberOfSegments] != 2 ||
+      ![[control titleForSegmentAtIndex:0] isEqualToString:@"One"] ||
+      [control selectedSegmentIndex] != -1) {
+    [control release];
+    return -1;
+  }
+  [control setSelectedSegmentIndex:1];
+  [control setMomentary:YES];
+  [control setEnabled:NO forSegmentAtIndex:0];
+  [control setWidth:42.0f forSegmentAtIndex:1];
+  if ([control selectedSegmentIndex] != 1 || ![control isMomentary] ||
+      [control isEnabledForSegmentAtIndex:0] ||
+      fabsf([control widthForSegmentAtIndex:1] - 42.0f) > 0.0001f) {
+    [control release];
+    return -2;
+  }
+  [control insertSegmentWithTitle:@"Middle" atIndex:1 animated:YES];
+  if ([control numberOfSegments] != 3 ||
+      ![[control titleForSegmentAtIndex:1] isEqualToString:@"Middle"]) {
+    [control release];
+    return -3;
+  }
+  [control removeSegmentAtIndex:1 animated:NO];
+  if ([control numberOfSegments] != 2) {
+    [control release];
+    return -4;
+  }
+  [control release];
+  return 0;
+#endif
+}
+
 int test_UILabel_highlightedTextColor() {
   UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 100, 30)];
   UIColor *color = [UIColor redColor];
@@ -8594,6 +8722,11 @@ struct {
     FUNC_DEF(test_NSString_pathWithComponents),
     FUNC_DEF(test_NSStringFromProtocol),
     FUNC_DEF(test_NSFilePosixPermissions_constant),
+    FUNC_DEF(test_NSObject_valueForKeyPath),
+    FUNC_DEF(test_NSBundle_localized_resource_lookup),
+    FUNC_DEF(test_rmdir_contract),
+    FUNC_DEF(test_NSFileManager_directory_permissions),
+    FUNC_DEF(test_UISegmentedControl_state),
     FUNC_DEF(test_strptime),
     FUNC_DEF(test_uname),
 #ifndef DEFINE_ME_WHEN_BUILDING_ON_MACOS

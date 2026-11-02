@@ -39,6 +39,7 @@ pub const ECONNRESET: i32 = 54;
 pub const ETIMEDOUT: i32 = 60;
 pub const ECONNREFUSED: i32 = 61;
 pub const EHOSTUNREACH: i32 = 65;
+pub const ENOTEMPTY: i32 = 66;
 pub const EOVERFLOW: i32 = 84;
 pub const EILSEQ: i32 = 92;
 
@@ -136,6 +137,7 @@ fn strerror(env: &mut Environment, err_num: i32) -> ConstPtr<u8> {
             ENOTSUP => "Operation not supported",
             ECONNRESET => "Connection reset by peer",
             ETIMEDOUT => "Operation timed out",
+            ENOTEMPTY => "Directory not empty",
             EOVERFLOW => "Value too large to be stored in data type",
             EILSEQ => "Illegal byte sequence",
             _ => unimplemented!("strerror({})", err_num),

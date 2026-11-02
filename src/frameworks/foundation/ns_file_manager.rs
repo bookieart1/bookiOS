@@ -321,7 +321,21 @@ pub const CLASSES: ClassExports = objc_classes! {
   withIntermediateDirectories:(bool)with_intermediates
                    attributes:(id)attributes // NSDictionary*
                         error:(MutPtr<id>)error { // NSError**
-    assert_eq!(attributes, nil); // TODO
+    if attributes != nil {
+        // iDared's virtual filesystem does not currently persist Unix mode
+        // bits, but callers are allowed to supply NSFilePosixPermissions when
+        // creating a directory. Decode and validate the historical NSNumber
+        // contract instead of rejecting the whole operation.
+        let permissions_key = get_static_str(env, NSFilePosixPermissions);
+        let permissions: id = msg![env; attributes objectForKey:permissions_key];
+        if permissions != nil {
+            let permissions: i16 = msg![env; permissions shortValue];
+            log_dbg!(
+                "createDirectoryAtPath requested POSIX permissions {:04o}; virtual filesystem permissions are fixed",
+                (permissions as u16) & 0o7777,
+            );
+        }
+    }
 
     let path_str = ns_string::to_rust_string(env, path); // TODO: avoid copy
     let res = if with_intermediates {
