@@ -113,7 +113,7 @@ fn CFNumberGetType(env: &mut Environment, num: CFNumberRef) -> CFNumberType {
     cf_number_type(env, num)
 }
 
-fn CFNumberGetTypeID() -> CFTypeID {
+fn CFNumberGetTypeID(_env: &mut Environment) -> CFTypeID {
     CF_NUMBER_TYPE_ID
 }
 
