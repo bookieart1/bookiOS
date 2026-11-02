@@ -409,6 +409,26 @@ pub const CLASSES: ClassExports = objc_classes! {
     value
 }
 
+- (())setValue:(id)value
+ forKeyPath:(id)key_path { // NSString*
+    // Follow Foundation's default KVC contract: resolve every relationship
+    // with valueForKey:, then apply the existing setValue:forKey: behavior to
+    // the final object. This keeps accessor lookup, scalar unboxing, direct
+    // ivar access, and undefined-key handling in one place.
+    let key_path = to_rust_string(env, key_path).into_owned();
+    let mut components = key_path.split('.').peekable();
+    let mut destination = this;
+    while let Some(component) = components.next() {
+        let key = from_rust_string(env, component.to_owned());
+        if components.peek().is_some() {
+            destination = msg![env; destination valueForKey:key];
+        } else {
+            () = msg![env; destination setValue:value forKey:key];
+        }
+        release(env, key);
+    }
+}
+
 - (id)dictionaryWithValuesForKeys:(id)keys { // NSArray*
     let count: NSUInteger = msg![env; keys count];
     let dictionary: id = msg_class![env; NSMutableDictionary dictionaryWithCapacity:count];

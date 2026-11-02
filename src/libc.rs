@@ -136,6 +136,7 @@ pub struct State {
     keymgr: keymgr::State,
     math: math::State,
     posix_io: posix_io::State,
+    signal: signal::State,
     pub pthread: pthread::State,
     pub semaphore: semaphore::State,
     pub socket: sys::socket::State,

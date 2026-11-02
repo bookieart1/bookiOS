@@ -103,6 +103,8 @@ void dispatch_once(dispatch_once_t *predicate, void (^block)(void));
 - (BOOL)respondsToSelector:(SEL)selector;
 - (id)valueForKey:(NSString *)key;
 - (id)valueForKeyPath:(NSString *)keyPath;
+- (void)setValue:(id)value forKey:(NSString *)key;
+- (void)setValue:(id)value forKeyPath:(NSString *)keyPath;
 + (void (*)(void))instanceMethodForSelector:(SEL)selector;
 - (void (*)(void))methodForSelector:(SEL)selector;
 @end
@@ -638,6 +640,26 @@ typedef struct AudioTimeStamp {
   uint32_t mFlags;
   uint32_t mReserved;
 } AudioTimeStamp;
+typedef struct AudioBufferList AudioBufferList;
+typedef struct OpaqueAudioComponent *AudioComponent;
+typedef struct OpaqueAudioComponentInstance *AudioUnit;
+typedef uint32_t AudioUnitRenderActionFlags;
+typedef OSStatus (*AURenderCallback)(void *, AudioUnitRenderActionFlags *,
+                                     const AudioTimeStamp *, uint32_t, uint32_t,
+                                     AudioBufferList *);
+typedef struct AudioComponentDescription {
+  uint32_t componentType;
+  uint32_t componentSubType;
+  uint32_t componentManufacturer;
+  uint32_t componentFlags;
+  uint32_t componentFlagsMask;
+} AudioComponentDescription;
+AudioComponent AudioComponentFindNext(AudioComponent,
+                                      const AudioComponentDescription *);
+OSStatus AudioComponentInstanceNew(AudioComponent, AudioUnit *);
+OSStatus AudioComponentInstanceDispose(AudioUnit);
+OSStatus AudioUnitAddRenderNotify(AudioUnit, AURenderCallback, void *);
+OSStatus AudioUnitRemoveRenderNotify(AudioUnit, AURenderCallback, void *);
 #define kAudioFormatLinearPCM 'lpcm'
 #define kAudioFormatFlagIsSignedInteger (1 << 2)
 #define kAudioFormatFlagIsPacked (1 << 3)
@@ -889,6 +911,8 @@ extern NSString *const UIApplicationLaunchOptionsURLKey;
 - (void)setEnabled:(BOOL)enabled forSegmentAtIndex:(NSUInteger)index;
 - (float)widthForSegmentAtIndex:(NSUInteger)index;
 - (void)setWidth:(float)width forSegmentAtIndex:(NSUInteger)index;
+- (UIColor *)tintColor;
+- (void)setTintColor:(UIColor *)color;
 @end
 
 int UIApplicationMain(int, char **, NSString *, NSString *);

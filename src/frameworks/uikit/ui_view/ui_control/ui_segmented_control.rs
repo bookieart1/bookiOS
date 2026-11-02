@@ -40,6 +40,7 @@ pub struct UISegmentedControlHostObject {
     selected_segment_index: NSInteger,
     momentary: bool,
     style: NSInteger,
+    tint_color: id,
 }
 impl_HostObject_with_superclass!(UISegmentedControlHostObject);
 
@@ -51,6 +52,7 @@ impl Default for UISegmentedControlHostObject {
             selected_segment_index: UISegmentedControlNoSegment,
             momentary: false,
             style: 0,
+            tint_color: nil,
         }
     }
 }
@@ -129,6 +131,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     for segment in host.segments {
         release_segment(env, segment);
     }
+    release(env, host.tint_color);
     msg_super![env; this dealloc]
 }
 
@@ -236,6 +239,19 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())setSegmentedControlStyle:(NSInteger)style {
     env.objc.borrow_mut::<UISegmentedControlHostObject>(this).style = style;
+}
+
+- (id)tintColor {
+    env.objc.borrow::<UISegmentedControlHostObject>(this).tint_color
+}
+
+- (())setTintColor:(id)tint_color {
+    retain(env, tint_color);
+    let old = std::mem::replace(
+        &mut env.objc.borrow_mut::<UISegmentedControlHostObject>(this).tint_color,
+        tint_color,
+    );
+    release(env, old);
 }
 
 - (bool)isEnabledForSegmentAtIndex:(NSUInteger)index {

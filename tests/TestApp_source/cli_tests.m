@@ -28,6 +28,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <setjmp.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -51,6 +52,7 @@ extern kern_return_t thread_resume(mach_port_t target_act);
 extern kern_return_t thread_info(mach_port_t target_act, natural_t flavor,
                                  integer_t *thread_info_out,
                                  natural_t *thread_info_out_cnt);
+extern int _NSGetExecutablePath(char *buf, uint32_t *bufsize);
 
 // Declare test functions from other files.
 
@@ -8461,6 +8463,123 @@ int test_NSObject_valueForKeyPath() {
   return [value isEqualToString:@"ok"] ? 0 : -1;
 }
 
+int test_NSObject_setValueForKeyPath() {
+  NSMutableDictionary *inner = [NSMutableDictionary dictionary];
+  [inner setObject:@"before" forKey:@"leaf"];
+  NSMutableDictionary *outer = [NSMutableDictionary dictionary];
+  [outer setObject:inner forKey:@"branch"];
+  [outer setValue:@"after" forKeyPath:@"branch.leaf"];
+  if (![[inner objectForKey:@"leaf"] isEqualToString:@"after"])
+    return -1;
+  [outer setValue:@"single" forKeyPath:@"direct"];
+  if (![[outer objectForKey:@"direct"] isEqualToString:@"single"])
+    return -2;
+  [outer setValue:nil forKeyPath:@"direct"];
+  return [outer objectForKey:@"direct"] == nil ? 0 : -3;
+}
+
+int test_NSGetExecutablePath_contract() {
+#ifdef DEFINE_ME_WHEN_BUILDING_ON_MACOS
+  return 0;
+#else
+  uint32_t size = 0;
+  if (_NSGetExecutablePath(NULL, &size) != -1 || size < 2)
+    return -1;
+  uint32_t too_small = size - 1;
+  char *buffer = malloc(size);
+  if (buffer == NULL)
+    return -2;
+  if (_NSGetExecutablePath(buffer, &too_small) != -1 || too_small != size) {
+    free(buffer);
+    return -3;
+  }
+  uint32_t exact = size;
+  int result = _NSGetExecutablePath(buffer, &exact);
+  int valid = result == 0 && exact == size && buffer[0] == '/' &&
+              buffer[size - 1] == '\0';
+  free(buffer);
+  return valid ? 0 : -4;
+#endif
+}
+
+int test_sigaltstack_contract() {
+#ifdef DEFINE_ME_WHEN_BUILDING_ON_MACOS
+  return 0;
+#else
+  stack_t original;
+  if (sigaltstack(NULL, &original) != 0 || !(original.ss_flags & SS_DISABLE))
+    return -1;
+
+  char tiny[1024];
+  stack_t too_small = {tiny, sizeof(tiny), 0};
+  errno = 0;
+  if (sigaltstack(&too_small, NULL) != -1 || errno != ENOMEM)
+    return -2;
+
+  void *memory = malloc(MINSIGSTKSZ);
+  if (memory == NULL)
+    return -3;
+  stack_t requested = {memory, MINSIGSTKSZ, 0};
+  if (sigaltstack(&requested, NULL) != 0) {
+    free(memory);
+    return -4;
+  }
+  stack_t active;
+  if (sigaltstack(NULL, &active) != 0 || active.ss_sp != memory ||
+      active.ss_size != MINSIGSTKSZ || active.ss_flags != 0) {
+    free(memory);
+    return -5;
+  }
+  stack_t disabled = {NULL, 0, SS_DISABLE};
+  int result = sigaltstack(&disabled, NULL);
+  free(memory);
+  return result == 0 ? 0 : -6;
+#endif
+}
+
+static OSStatus idared_render_notify(void *context,
+                                     AudioUnitRenderActionFlags *flags,
+                                     const AudioTimeStamp *timestamp,
+                                     uint32_t bus, uint32_t frames,
+                                     AudioBufferList *data) {
+  (void)context;
+  (void)flags;
+  (void)timestamp;
+  (void)bus;
+  (void)frames;
+  (void)data;
+  return 0;
+}
+
+int test_AudioUnit_render_notify_registration() {
+#ifdef DEFINE_ME_WHEN_BUILDING_ON_MACOS
+  return 0;
+#else
+  AudioComponentDescription description = {
+      'auou', 'rioc', 'appl', 0, 0,
+  };
+  AudioComponent component = AudioComponentFindNext(NULL, &description);
+  AudioUnit unit = NULL;
+  if (component == NULL || AudioComponentInstanceNew(component, &unit) != 0 ||
+      unit == NULL)
+    return -1;
+  int marker = 1;
+  if (AudioUnitAddRenderNotify(unit, idared_render_notify, &marker) != 0) {
+    AudioComponentInstanceDispose(unit);
+    return -2;
+  }
+  if (AudioUnitRemoveRenderNotify(unit, idared_render_notify, &marker) != 0) {
+    AudioComponentInstanceDispose(unit);
+    return -3;
+  }
+  if (AudioUnitRemoveRenderNotify(unit, idared_render_notify, &marker) == 0) {
+    AudioComponentInstanceDispose(unit);
+    return -4;
+  }
+  return AudioComponentInstanceDispose(unit) == 0 ? 0 : -5;
+#endif
+}
+
 int test_NSBundle_localized_resource_lookup() {
 #ifdef DEFINE_ME_WHEN_BUILDING_ON_MACOS
   return 0;
@@ -8554,9 +8673,12 @@ int test_UISegmentedControl_state() {
   [control setMomentary:YES];
   [control setEnabled:NO forSegmentAtIndex:0];
   [control setWidth:42.0f forSegmentAtIndex:1];
+  UIColor *tint = [UIColor redColor];
+  [control setTintColor:tint];
   if ([control selectedSegmentIndex] != 1 || ![control isMomentary] ||
       [control isEnabledForSegmentAtIndex:0] ||
-      fabsf([control widthForSegmentAtIndex:1] - 42.0f) > 0.0001f) {
+      fabsf([control widthForSegmentAtIndex:1] - 42.0f) > 0.0001f ||
+      [control tintColor] != tint) {
     [control release];
     return -2;
   }
@@ -8723,6 +8845,10 @@ struct {
     FUNC_DEF(test_NSStringFromProtocol),
     FUNC_DEF(test_NSFilePosixPermissions_constant),
     FUNC_DEF(test_NSObject_valueForKeyPath),
+    FUNC_DEF(test_NSObject_setValueForKeyPath),
+    FUNC_DEF(test_NSGetExecutablePath_contract),
+    FUNC_DEF(test_sigaltstack_contract),
+    FUNC_DEF(test_AudioUnit_render_notify_registration),
     FUNC_DEF(test_NSBundle_localized_resource_lookup),
     FUNC_DEF(test_rmdir_contract),
     FUNC_DEF(test_NSFileManager_directory_permissions),

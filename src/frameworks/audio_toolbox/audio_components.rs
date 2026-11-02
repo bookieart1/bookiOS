@@ -46,6 +46,7 @@ pub struct AudioComponentInstanceHostObject {
     pub input_stream_format: Option<AudioStreamBasicDescription>,
     pub output_stream_format: Option<AudioStreamBasicDescription>,
     pub render_callback: Option<AURenderCallbackStruct>,
+    pub render_notifies: Vec<AURenderCallbackStruct>,
     pub last_render_time: Option<Instant>,
     /// For the render callback's timestamps.
     pub frames_rendered: u64,
@@ -77,6 +78,7 @@ impl Default for AudioComponentInstanceHostObject {
             input_stream_format: None,
             output_stream_format: None,
             render_callback: None,
+            render_notifies: Vec::new(),
             last_render_time: None,
             frames_rendered: 0,
             al_source: None,

@@ -77,6 +77,54 @@ const kAUVoiceIOProperty_DuckNonVoiceAudio: AudioUnitPropertyID = 2102;
 const OUTPUT_ELEMENT: AudioUnitElement = 0;
 const INPUT_ELEMENT: AudioUnitElement = 1;
 
+const kAudioUnitRenderAction_PreRender: u32 = 1 << 2;
+const kAudioUnitRenderAction_PostRender: u32 = 1 << 3;
+const kAudioUnitRenderAction_PostRenderError: u32 = 1 << 4;
+
+fn AudioUnitAddRenderNotify(
+    env: &mut Environment,
+    in_unit: AudioUnit,
+    in_proc: audio_components::AURenderCallback,
+    in_proc_user_data: MutVoidPtr,
+) -> OSStatus {
+    if in_proc.to_ptr().is_null() {
+        return paramErr;
+    }
+    let Some(host) = audio_components::State::get(&mut env.framework_state)
+        .audio_component_instances
+        .get_mut(&in_unit)
+    else {
+        return paramErr;
+    };
+    host.render_notifies.push(AURenderCallbackStruct {
+        input_proc: in_proc,
+        input_proc_ref_con: in_proc_user_data.cast_const(),
+    });
+    0
+}
+
+fn AudioUnitRemoveRenderNotify(
+    env: &mut Environment,
+    in_unit: AudioUnit,
+    in_proc: audio_components::AURenderCallback,
+    in_proc_user_data: MutVoidPtr,
+) -> OSStatus {
+    let Some(host) = audio_components::State::get(&mut env.framework_state)
+        .audio_component_instances
+        .get_mut(&in_unit)
+    else {
+        return paramErr;
+    };
+    let Some(index) = host.render_notifies.iter().position(|notify| {
+        notify.input_proc.addr_with_thumb_bit() == in_proc.addr_with_thumb_bit()
+            && notify.input_proc_ref_con.to_bits() == in_proc_user_data.to_bits()
+    }) else {
+        return paramErr;
+    };
+    host.render_notifies.remove(index);
+    0
+}
+
 fn AudioUnitInitialize(env: &mut Environment, in_unit: AudioUnit) -> OSStatus {
     let run_loop = CFRunLoopGetMain(env);
     ns_run_loop::add_audio_unit(env, run_loop, in_unit);
@@ -459,6 +507,7 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
         input_proc: inputProc,
         input_proc_ref_con: inputProcRefCon,
     } = audio_unit_host_object.render_callback.unwrap();
+    let render_notifies = audio_unit_host_object.render_notifies.clone();
     let frames_rendered = audio_unit_host_object.frames_rendered;
     let host_time = crate::libc::mach::time::mach_absolute_time(env);
     let time_stamp = env.mem.alloc_and_write(AudioTimeStamp {
@@ -467,7 +516,22 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
         flags: kAudioTimeStampSampleTimeValid | kAudioTimeStampHostTimeValid,
         ..Default::default()
     });
-    let () = inputProc.call_from_host(
+    env.mem.write(action_flags, kAudioUnitRenderAction_PreRender);
+    for notify in &render_notifies {
+        let _: OSStatus = notify.input_proc.call_from_host(
+            env,
+            (
+                notify.input_proc_ref_con,
+                action_flags,
+                time_stamp.cast_const(),
+                0u32,
+                number_frames,
+                audio_buffer_list,
+            ),
+        );
+    }
+    env.mem.write(action_flags, 0);
+    let render_status: OSStatus = inputProc.call_from_host(
         env,
         (
             inputProcRefCon,
@@ -520,6 +584,25 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
         assert_eq!(context.GetError(), 0);
     }
 
+    let mut post_flags = kAudioUnitRenderAction_PostRender;
+    if render_status != 0 {
+        post_flags |= kAudioUnitRenderAction_PostRenderError;
+    }
+    env.mem.write(action_flags, post_flags);
+    for notify in &render_notifies {
+        let _: OSStatus = notify.input_proc.call_from_host(
+            env,
+            (
+                notify.input_proc_ref_con,
+                action_flags,
+                time_stamp.cast_const(),
+                0u32,
+                number_frames,
+                audio_buffer_list,
+            ),
+        );
+    }
+
     // TODO: Do something with the action flags?
     env.mem.free(action_flags.cast_void());
     env.mem.free(time_stamp.cast_void());
@@ -545,6 +628,8 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(AudioUnitInitialize(_)),
     export_c_func!(AudioUnitUninitialize(_)),
+    export_c_func!(AudioUnitAddRenderNotify(_, _, _)),
+    export_c_func!(AudioUnitRemoveRenderNotify(_, _, _)),
     export_c_func!(AudioUnitSetProperty(_, _, _, _, _, _)),
     export_c_func!(AudioUnitGetProperty(_, _, _, _, _, _)),
     export_c_func!(AudioOutputUnitStart(_)),

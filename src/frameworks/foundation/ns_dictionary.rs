@@ -456,6 +456,17 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, new_dict)
 }
 
+// NSMutableDictionary's KVC assignment contract maps keys to dictionary
+// entries. As on Foundation, assigning nil removes the entry rather than
+// attempting to store a nil object.
+- (())setValue:(id)value forKey:(id)key {
+    if value == nil {
+        () = msg![env; this removeObjectForKey:key];
+    } else {
+        () = msg![env; this setObject:value forKey:key];
+    }
+}
+
 // These probably comes from some category related to plists.
 + (id)dictionaryWithContentsOfFile:(id)path { // NSString*
     let new_dict: id = msg![env; this alloc];
@@ -1118,6 +1129,20 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())dealloc {
+    let host_obj = env.objc.borrow::<CFDictionaryHostObject>(this);
+    let callbacks = [
+        host_obj.key_callbacks.retain.addr_with_thumb_bit(),
+        host_obj.key_callbacks.release.addr_with_thumb_bit(),
+        host_obj.value_callbacks.retain.addr_with_thumb_bit(),
+        host_obj.value_callbacks.release.addr_with_thumb_bit(),
+    ];
+    env.diagnostic_collection_event(
+        "dealloc-callback-dictionary",
+        this.to_bits(),
+        0,
+        0,
+        callbacks,
+    );
     env.objc.dealloc_object(this, &mut env.mem)
 }
 
@@ -1137,7 +1162,20 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (id)objectForKey:(id)key {
     let host_obj: CFDictionaryHostObject = std::mem::take(env.objc.borrow_mut(this));
     let res = host_obj.lookup(env, key);
+    let callbacks = [
+        host_obj.key_callbacks.retain.addr_with_thumb_bit(),
+        host_obj.key_callbacks.release.addr_with_thumb_bit(),
+        host_obj.value_callbacks.retain.addr_with_thumb_bit(),
+        host_obj.value_callbacks.release.addr_with_thumb_bit(),
+    ];
     *env.objc.borrow_mut(this) = host_obj;
+    env.diagnostic_collection_event(
+        "lookup-callback-dictionary",
+        this.to_bits(),
+        key.to_bits(),
+        res.to_bits(),
+        callbacks,
+    );
     res
 }
 
@@ -1156,15 +1194,41 @@ pub const CLASSES: ClassExports = objc_classes! {
          forKey:(id)key {
     assert!(!key.is_null());
     let mut host_obj: CFDictionaryHostObject = std::mem::take(env.objc.borrow_mut(this));
+    let callbacks = [
+        host_obj.key_callbacks.retain.addr_with_thumb_bit(),
+        host_obj.key_callbacks.release.addr_with_thumb_bit(),
+        host_obj.value_callbacks.retain.addr_with_thumb_bit(),
+        host_obj.value_callbacks.release.addr_with_thumb_bit(),
+    ];
     host_obj.insert(env, key, object);
     *env.objc.borrow_mut(this) = host_obj;
+    env.diagnostic_collection_event(
+        "insert-callback-dictionary",
+        this.to_bits(),
+        key.to_bits(),
+        object.to_bits(),
+        callbacks,
+    );
 }
 
 - (())removeObjectForKey:(id)key {
     assert!(!key.is_null());
     let mut host_obj: CFDictionaryHostObject = std::mem::take(env.objc.borrow_mut(this));
+    let callbacks = [
+        host_obj.key_callbacks.retain.addr_with_thumb_bit(),
+        host_obj.key_callbacks.release.addr_with_thumb_bit(),
+        host_obj.value_callbacks.retain.addr_with_thumb_bit(),
+        host_obj.value_callbacks.release.addr_with_thumb_bit(),
+    ];
     host_obj.remove(env, key);
     *env.objc.borrow_mut(this) = host_obj;
+    env.diagnostic_collection_event(
+        "remove-callback-dictionary",
+        this.to_bits(),
+        key.to_bits(),
+        0,
+        callbacks,
+    );
 }
 
 - (id)allKeys {

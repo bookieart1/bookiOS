@@ -3848,6 +3848,23 @@ in `dev-docs/compatibility-new-game-samples-2026-11-01.md`. Archived logs:
 Machine-readable inventory:
 `outputs/iDared-new-game-samples-2026-11-01.csv`.
 
+## Dev 2.01 candidate: five shared contracts and two bounded causal histories
+
+The Dev 2.00 device run verified that all five preceding contracts passed and
+that Solomon's Boneyard reached working gameplay in the tested scope. Dev 2.01
+implements the newly exposed general blockers: KVC `setValue:forKeyPath:`,
+Audio Unit render-notification registration and delivery, dyld executable-path
+size negotiation, per-thread `sigaltstack`, and retained segmented-control
+tint state. These target LegendaryWar, Peggle, Tiki Totems 2, TrenchesVS and
+ZA! 2ndWave respectively.
+
+8bitninja and DoDoFly remain maintained return targets. This candidate changes
+neither title's behavior; it adds fixed-size failure-only bundle candidate
+history and fixed-size dictionary ownership/callback lifecycle history so the
+next strict failure can distinguish origin hypotheses. The universal recorder
+remains enabled. Full evidence, boundaries and device predictions are in
+`dev-docs/compatibility-2.01-kvc-audio-signal-ui-and-causal-evidence.md`.
+
 ## Dev 1.84 device result and Dev 1.85 ninth-stage contracts
 
 The three complete Dev 1.84 logs are preserved under `outputs/device-logs/`.

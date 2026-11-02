@@ -21,6 +21,8 @@ const PROGRESS: usize = 24;
 const CRASH_CALLERS: usize = 8;
 const PROVENANCE: usize = 128;
 const BOUNDARY_DETAILS: usize = 8;
+const BUNDLE_CANDIDATES: usize = 16;
+const COLLECTION_EVENTS: usize = 48;
 const HEALTHY_PRESENT_INTERVAL: Duration = Duration::from_millis(100);
 const SLOW_PRESENT_INTERVAL: Duration = Duration::from_millis(180);
 const HEALTHY_PRESENT_STREAK: u16 = 30;
@@ -211,6 +213,20 @@ struct DefaultsLookup {
     domain: DefaultsDomain,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct CollectionEvent {
+    sequence: u64,
+    thread: usize,
+    action: &'static str,
+    dictionary: u32,
+    key: u32,
+    value: u32,
+    key_retain: u32,
+    key_release: u32,
+    value_retain: u32,
+    value_release: u32,
+}
+
 struct Ring<T: Copy + Default, const N: usize> {
     items: [T; N],
     written: u64,
@@ -274,6 +290,8 @@ pub struct Recorder {
     /// event ring wraps.
     provenance: [Provenance; PROVENANCE],
     boundary_details: Ring<BoundaryDetail, BOUNDARY_DETAILS>,
+    bundle_candidates: Ring<Text, BUNDLE_CANDIDATES>,
+    collection_events: Ring<CollectionEvent, COLLECTION_EVENTS>,
     defaults_lookup: DefaultsLookup,
     slow_capture: Option<SlowCapture>,
     pending_slow_capture: Option<PendingSlowCapture>,
@@ -302,6 +320,8 @@ impl Recorder {
             progress: Ring::default(),
             provenance: [Provenance::default(); PROVENANCE],
             boundary_details: Ring::default(),
+            bundle_candidates: Ring::default(),
+            collection_events: Ring::default(),
             defaults_lookup: DefaultsLookup::default(),
             slow_capture: None,
             pending_slow_capture: None,
@@ -593,6 +613,22 @@ impl Recorder {
         for e in self.signals.iter() {
             self.print_event(e);
         }
+        echo_no_panic!(
+            "flight failed bundle candidates: newest {BUNDLE_CANDIDATES}; total={} (attempted guest paths; each entry text-bounded)",
+            self.bundle_candidates.written
+        );
+        for candidate in self.bundle_candidates.iter() {
+            echo_no_panic!("flight bundle candidate miss path=\"{}\"", candidate);
+        }
+        echo_no_panic!(
+            "flight collection ownership events: newest {COLLECTION_EVENTS}; total={} (bounded observations, not proof of ownership correctness)",
+            self.collection_events.written
+        );
+        for event in self.collection_events.iter() {
+            echo_no_panic!("flight collection #{} tid={} action={} dictionary={:#x} key={:#x} value={:#x} callbacks[key-retain={:#x},key-release={:#x},value-retain={:#x},value-release={:#x}]",
+                event.sequence, event.thread, event.action, event.dictionary, event.key, event.value,
+                event.key_retain, event.key_release, event.value_retain, event.value_release);
+        }
         if let Some(last) = self
             .recent
             .iter()
@@ -820,6 +856,43 @@ impl Environment {
                 result,
                 domain: DefaultsDomain::from_name(domain),
             };
+        }
+    }
+    /// Retain the exact failed candidate without writing a per-lookup log or
+    /// calling guest code. The fixed-size ring is emitted only with a normal
+    /// flight-recorder dump.
+    pub fn diagnostic_bundle_candidate_miss(&mut self, path: &str) {
+        if let Some(recorder) = &mut self.diagnostics {
+            recorder
+                .bundle_candidates
+                .push(Text::from_bytes(path.as_bytes()));
+        }
+    }
+    /// Record only dictionary ownership-relevant transitions. This is a
+    /// bounded diagnostic stream, not a general retain/release trace.
+    #[allow(clippy::too_many_arguments)]
+    pub fn diagnostic_collection_event(
+        &mut self,
+        action: &'static str,
+        dictionary: u32,
+        key: u32,
+        value: u32,
+        callbacks: [u32; 4],
+    ) {
+        if let Some(recorder) = &mut self.diagnostics {
+            let sequence = recorder.collection_events.written.saturating_add(1);
+            recorder.collection_events.push(CollectionEvent {
+                sequence,
+                thread: self.current_thread,
+                action,
+                dictionary,
+                key,
+                value,
+                key_retain: callbacks[0],
+                key_release: callbacks[1],
+                value_retain: callbacks[2],
+                value_release: callbacks[3],
+            });
         }
     }
     pub fn diagnostic_end(&mut self, call: Option<Call>, object_result: bool) {

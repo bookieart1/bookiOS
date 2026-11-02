@@ -678,6 +678,8 @@ fn path_for_resource_helper(
     if file_exists {
         return path;
     }
+    let attempted_path = ns_string::to_rust_string(env, path).into_owned();
+    env.diagnostic_bundle_candidate_miss(&attempted_path);
     nil
 }
 

@@ -105,7 +105,11 @@ fn _NSGetExecutablePath(env: &mut Environment, buf: MutPtr<u8>, buf_size: MutPtr
 
     let size = env.mem.read(buf_size);
     let len: GuestUSize = bin_path.len().try_into().unwrap();
-    assert!(len < size);
+    let required_size = len.checked_add(1).unwrap();
+    if size < required_size {
+        env.mem.write(buf_size, required_size);
+        return -1;
+    }
 
     env.mem
         .bytes_at_mut(buf, len)
