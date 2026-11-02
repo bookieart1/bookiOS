@@ -101,8 +101,6 @@ pub(super) fn send_actions(
 
     let any = !action_targets.is_empty();
     for (target, action) in action_targets {
-        assert!(target != nil); // TODO
-
         () = msg![env; this sendAction:action to:target forEvent:event];
     }
     any
@@ -296,18 +294,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())addTarget:(id)target
          action:(SEL)action
 forControlEvents:(UIControlEvents)events {
-    if target == nil {
-        // TODO: when the target is nil, the responder chain is searched for
-        // a suitable target
-        log!(
-            "TODO: [{:?} addTarget:nil action:{:?} forControlEvents:{:?}] (ignored)",
-            target,
-            action,
-            events,
-        );
-        return;
-    }
-    // The target is a *weak* reference!
+    // The target is a *weak* reference. A nil target is meaningful: UIKit
+    // resolves it through the current responder chain when the action fires.
 
     // The selector must be for a method with zero to two arguments
     let sel_str = action.as_str(&env.mem);
@@ -320,7 +308,38 @@ forControlEvents:(UIControlEvents)events {
 - (())sendAction:(SEL)action
               to:(id)target
         forEvent:(id)event { // UIEvent*
-    assert!(target != nil); // TODO
+    let target = if target != nil {
+        target
+    } else {
+        let first = env.framework_state.uikit.ui_responder.first_responder;
+        let mut candidate: id = if first != nil {
+            first
+        } else {
+            msg![env; this nextResponder]
+        };
+        let mut found = nil;
+        // A malformed responder cycle must not hang the emulator.
+        for _ in 0..64 {
+            if candidate == nil {
+                break;
+            }
+            let responds: bool = msg![env; candidate respondsToSelector:action];
+            if responds {
+                found = candidate;
+                break;
+            }
+            candidate = msg![env; candidate nextResponder];
+        }
+        if found == nil {
+            log!(
+                "UIControl could not resolve nil target for action {:?} ({:?})",
+                action,
+                action.as_str(&env.mem),
+            );
+            return;
+        }
+        found
+    };
 
     let sel_str = action.as_str(&env.mem);
     let colon_count = sel_str.bytes().filter(|&b| b == b':').count();

@@ -57,6 +57,8 @@ pub struct UIButtonHostObject {
     titles_for_states: HashMap<UIControlState, id>,
     /// Values are `UIColor*`
     title_colors_for_states: HashMap<UIControlState, id>,
+    /// Values are `UIColor*`
+    title_shadow_colors_for_states: HashMap<UIControlState, id>,
     /// Values are `UIImage*`
     images_for_states: HashMap<UIControlState, id>,
     /// Values are `UIImage*`
@@ -73,6 +75,7 @@ impl Default for UIButtonHostObject {
             background_image_view: nil,
             titles_for_states: HashMap::new(),
             title_colors_for_states: HashMap::new(),
+            title_shadow_colors_for_states: HashMap::new(),
             images_for_states: HashMap::new(),
             background_images_for_states: HashMap::new(),
         }
@@ -85,6 +88,8 @@ fn update(env: &mut Environment, this: id) {
     () = msg![env; title_label setText:title];
     let title_color: id = msg![env; this currentTitleColor];
     () = msg![env; title_label setTextColor:title_color];
+    let title_shadow_color: id = msg![env; this currentTitleShadowColor];
+    () = msg![env; title_label setShadowColor:title_shadow_color];
 
     let image_view: id = msg![env; this imageView];
     let image: id = msg![env; this currentImage];
@@ -116,6 +121,9 @@ fn init_common(env: &mut Environment, this: id) -> id {
     host_obj
         .title_colors_for_states
         .insert(UIControlStateNormal, text_color);
+    host_obj
+        .title_shadow_colors_for_states
+        .insert(UIControlStateNormal, nil);
     host_obj.images_for_states.insert(UIControlStateNormal, nil);
     host_obj
         .background_images_for_states
@@ -245,6 +253,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         background_image_view,
         titles_for_states,
         title_colors_for_states,
+        title_shadow_colors_for_states,
         images_for_states,
         background_images_for_states
     } = std::mem::take(env.objc.borrow_mut(this));
@@ -256,6 +265,9 @@ pub const CLASSES: ClassExports = objc_classes! {
         release(env, title);
     }
     for (_state, color) in title_colors_for_states {
+        release(env, color);
+    }
+    for (_state, color) in title_shadow_colors_for_states {
         release(env, color);
     }
     for (_state, image) in images_for_states {
@@ -397,6 +409,29 @@ pub const CLASSES: ClassExports = objc_classes! {
     retain(env, color);
     let host_obj = env.objc.borrow_mut::<UIButtonHostObject>(this);
     if let Some(old) = host_obj.title_colors_for_states.insert(state, color) {
+        release(env, old);
+    }
+    update(env, this);
+}
+
+- (id)currentTitleShadowColor {
+    let state: UIControlState = msg![env; this state];
+    msg![env; this titleShadowColorForState:state]
+}
+- (id)titleShadowColorForState:(UIControlState)state {
+    let host_obj = env.objc.borrow::<UIButtonHostObject>(this);
+    host_obj
+        .title_shadow_colors_for_states
+        .get(&state)
+        .or_else(|| host_obj.title_shadow_colors_for_states.get(&UIControlStateNormal))
+        .copied()
+        .unwrap_or(nil)
+}
+- (())setTitleShadowColor:(id)color // UIColor*
+            forState:(UIControlState)state {
+    retain(env, color);
+    let host_obj = env.objc.borrow_mut::<UIButtonHostObject>(this);
+    if let Some(old) = host_obj.title_shadow_colors_for_states.insert(state, color) {
         release(env, old);
     }
     update(env, this);

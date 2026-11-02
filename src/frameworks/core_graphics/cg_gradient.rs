@@ -1,0 +1,129 @@
+/*
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/.
+ */
+//! `CGGradient.h` creation and ownership.
+
+use crate::dyld::{export_c_func, FunctionExports};
+use crate::frameworks::core_foundation::{CFRelease, CFRetain, CFTypeRef};
+use crate::frameworks::core_graphics::cg_color::{to_rgba, CGColorRef};
+use crate::frameworks::core_graphics::cg_color_space::{
+    kCGColorSpaceModelRGB, CGColorSpaceGetModel, CGColorSpaceRef,
+};
+use crate::frameworks::core_graphics::CGFloat;
+use crate::mem::ConstPtr;
+use crate::objc::{id, msg, objc_classes, ClassExports, HostObject};
+use crate::Environment;
+
+pub const CLASSES: ClassExports = objc_classes! {
+
+(env, this, _cmd);
+
+@implementation _touchHLE_CGGradient: NSObject
+@end
+
+};
+
+#[derive(Debug)]
+pub(super) struct CGGradientHostObject {
+    /// Snapshotting is intentional: Core Graphics gradients own their stop
+    /// data independently of the caller's temporary array and component data.
+    pub(super) stops: Vec<(CGFloat, (CGFloat, CGFloat, CGFloat, CGFloat))>,
+}
+impl HostObject for CGGradientHostObject {}
+
+pub type CGGradientRef = CFTypeRef;
+
+fn CGGradientCreateWithColors(
+    env: &mut Environment,
+    color_space: CGColorSpaceRef,
+    colors: CFTypeRef,
+    locations: ConstPtr<CGFloat>,
+) -> CGGradientRef {
+    if colors.is_null() {
+        return CGGradientRef::null();
+    }
+    if !color_space.is_null() && CGColorSpaceGetModel(env, color_space) != kCGColorSpaceModelRGB {
+        return CGGradientRef::null();
+    }
+
+    let count: u32 = msg![env; colors count];
+    if count == 0 {
+        return CGGradientRef::null();
+    }
+    let mut stops = Vec::with_capacity(count as usize);
+    for index in 0..count {
+        let color: id = msg![env; colors objectAtIndex:index];
+        if color.is_null() {
+            return CGGradientRef::null();
+        }
+        let color: CGColorRef = color;
+        let location = if locations.is_null() {
+            if count == 1 {
+                0.0
+            } else {
+                index as CGFloat / (count - 1) as CGFloat
+            }
+        } else {
+            env.mem.read(locations + index)
+        };
+        if !location.is_finite() {
+            return CGGradientRef::null();
+        }
+        stops.push((location, to_rgba(&env.objc, color)));
+    }
+
+    let class = env
+        .objc
+        .get_known_class("_touchHLE_CGGradient", &mut env.mem);
+    env.objc.alloc_object(
+        class,
+        Box::new(CGGradientHostObject { stops }),
+        &mut env.mem,
+    )
+}
+
+fn CGGradientRetain(env: &mut Environment, gradient: CGGradientRef) -> CGGradientRef {
+    if gradient.is_null() {
+        gradient
+    } else {
+        CFRetain(env, gradient)
+    }
+}
+
+fn CGGradientRelease(env: &mut Environment, gradient: CGGradientRef) {
+    if !gradient.is_null() {
+        CFRelease(env, gradient);
+    }
+}
+
+pub const FUNCTIONS: FunctionExports = &[
+    export_c_func!(CGGradientCreateWithColors(_, _, _)),
+    export_c_func!(CGGradientRetain(_)),
+    export_c_func!(CGGradientRelease(_)),
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frameworks::core_graphics::cg_color::from_rgba;
+    use crate::frameworks::foundation::ns_array;
+    use crate::objc::release;
+
+    #[test]
+    fn colors_are_snapshotted_with_even_default_locations() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let first = from_rgba(&mut env, (1.0, 0.0, 0.0, 1.0));
+        let second = from_rgba(&mut env, (0.0, 0.0, 1.0, 1.0));
+        let colors = ns_array::from_vec(&mut env, vec![first, second]);
+        let gradient =
+            CGGradientCreateWithColors(&mut env, CGColorSpaceRef::null(), colors, ConstPtr::null());
+        let stops = &env.objc.borrow::<CGGradientHostObject>(gradient).stops;
+        assert_eq!(stops[0].0, 0.0);
+        assert_eq!(stops[1].0, 1.0);
+        assert_eq!(stops[0].1, (1.0, 0.0, 0.0, 1.0));
+        CGGradientRelease(&mut env, gradient);
+        release(&mut env, colors);
+    }
+}

@@ -29,7 +29,7 @@ const INVOCATION_EVENTS: usize = 32;
 const ARRAY_EVENTS: usize = 48;
 const WATCHED_OBJECTS: usize = 16;
 const OBJECT_LIFETIME_EVENTS: usize = 64;
-const DICTIONARY_ORIGINS: usize = 64;
+const DICTIONARY_ORIGINS: usize = 256;
 const HEALTHY_PRESENT_INTERVAL: Duration = Duration::from_millis(100);
 const SLOW_PRESENT_INTERVAL: Duration = Duration::from_millis(180);
 const HEALTHY_PRESENT_STREAK: u16 = 30;
@@ -266,6 +266,8 @@ struct DictionaryOrigin {
     mutable: bool,
     context: &'static str,
     option: u32,
+    pc: u32,
+    lr: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -276,6 +278,8 @@ struct InvocationEvent {
     invocation: u32,
     target: u32,
     selector: u32,
+    selector_name: Text,
+    target_class: Text,
     argument_index: i32,
     argument_count: u32,
     set_mask: u32,
@@ -295,6 +299,8 @@ struct ArrayEvent {
     after: u32,
     pc: u32,
     lr: u32,
+    caller_code: [u8; 16],
+    caller_code_len: u8,
 }
 
 struct Ring<T: Copy + Default, const N: usize> {
@@ -725,6 +731,23 @@ impl Recorder {
         for p in self.progress.iter() {
             Self::print_progress(p);
         }
+        let elapsed_ms = self.started.elapsed().as_millis();
+        if elapsed_ms != 0 {
+            let present_rate = self.presents as f64 * 1000.0 / elapsed_ms as f64;
+            let loops_per_present = if self.presents == 0 {
+                None
+            } else {
+                Some(self.run_loops as f64 / self.presents as f64)
+            };
+            echo_no_panic!(
+                "flight absolute presentation cadence: elapsed-ms={} EAGL-returns={} rate-hz={:.3} main-loops={} loops-per-present={:?} (descriptive only; a low rate may be intentional)",
+                elapsed_ms,
+                self.presents,
+                present_rate,
+                self.run_loops,
+                loops_per_present,
+            );
+        }
         if let Some(capture) = &self.slow_capture {
             echo_no_panic!("flight first sustained slow-present transition: elapsed-ms={} first-gap-ms={} boundaries-during-first-gap={} present={} (frozen after at least {} healthy intervals and {} consecutive slow intervals)",
                 capture.ms, capture.gap_ms, capture.boundary_delta, capture.presents,
@@ -783,9 +806,9 @@ impl Recorder {
             self.invocation_events.written
         );
         for event in self.invocation_events.iter() {
-            echo_no_panic!("flight invocation #{} tid={} action={} invocation={:#x} target={:#x} selector={:#x} argument-index={} argument-count={} set-mask={:#010x} pc={:#x} lr={:#x}",
+            echo_no_panic!("flight invocation #{} tid={} action={} invocation={:#x} target={:#x} target-class=\"{}\" selector={:#x} selector-name=\"{}\" argument-index={} argument-count={} set-mask={:#010x} pc={:#x} lr={:#x}",
                 event.sequence, event.thread, event.action, event.invocation,
-                event.target, event.selector, event.argument_index,
+                event.target, event.target_class, event.selector, event.selector_name, event.argument_index,
                 event.argument_count, event.set_mask, event.pc, event.lr);
         }
         echo_no_panic!(
@@ -793,10 +816,11 @@ impl Recorder {
             self.array_events.written
         );
         for event in self.array_events.iter() {
-            echo_no_panic!("flight array #{} tid={} action={} array={:#x} index={} object={:#x} count={}->{} pc={:#x} lr={:#x}",
+            echo_no_panic!("flight array #{} tid={} action={} array={:#x} index={} object={:#x} count={}->{} pc={:#x} lr={:#x} caller-bytes={:02x?}",
                 event.sequence, event.thread, event.action, event.array,
                 event.index, event.object, event.before, event.after,
-                event.pc, event.lr);
+                event.pc, event.lr,
+                &event.caller_code[..usize::from(event.caller_code_len)]);
         }
         if let Some(last) = self
             .recent
@@ -809,8 +833,9 @@ impl Recorder {
                 .iter()
                 .find(|origin| origin.object == last.call.receiver)
             {
-                echo_no_panic!("flight receiver dictionary origin: receiver={:#x} mutable={} context={} option={} sequence={}",
-                    origin.object, origin.mutable, origin.context, origin.option, origin.sequence);
+                echo_no_panic!("flight receiver dictionary origin: receiver={:#x} mutable={} context={} option={} sequence={} creation-pc={:#x} creation-lr={:#x}",
+                    origin.object, origin.mutable, origin.context, origin.option, origin.sequence,
+                    origin.pc, origin.lr);
             } else {
                 echo_no_panic!(
                     "flight receiver dictionary origin: no retained origin for receiver {:#x}",
@@ -1079,6 +1104,11 @@ impl Environment {
         set_mask: u32,
     ) {
         let regs = self.cpu.regs();
+        let selector_name = Text::guest(&self.mem, selector);
+        let target_class = read_word(&self.mem, target)
+            .and_then(|isa| self.objc.try_get_class_name(id::from_bits(isa)))
+            .map(|name| Text::from_bytes(name.as_bytes()))
+            .unwrap_or_default();
         if let Some(recorder) = &mut self.diagnostics {
             recorder.invocation_events.push(InvocationEvent {
                 sequence: recorder.invocation_events.written.saturating_add(1),
@@ -1087,6 +1117,8 @@ impl Environment {
                 invocation,
                 target,
                 selector,
+                selector_name,
+                target_class,
                 argument_index,
                 argument_count,
                 set_mask,
@@ -1109,6 +1141,16 @@ impl Environment {
         after: u32,
     ) {
         let regs = self.cpu.regs();
+        let mut caller_code = [0; 16];
+        let caller_address = (regs[14] & !1).saturating_sub(8);
+        let caller_code_len = self
+            .mem
+            .get_bytes_fallible(ConstVoidPtr::from_bits(caller_address), 16)
+            .map(|bytes| {
+                caller_code.copy_from_slice(bytes);
+                bytes.len() as u8
+            })
+            .unwrap_or(0);
         if let Some(recorder) = &mut self.diagnostics {
             recorder.array_events.push(ArrayEvent {
                 sequence: recorder.array_events.written.saturating_add(1),
@@ -1121,6 +1163,8 @@ impl Environment {
                 after,
                 pc: regs[15],
                 lr: regs[14],
+                caller_code,
+                caller_code_len,
             });
         }
     }
@@ -1209,6 +1253,7 @@ impl Environment {
         context: &'static str,
         option: u32,
     ) {
+        let regs = self.cpu.regs();
         if let Some(recorder) = &mut self.diagnostics {
             recorder.dictionary_origin_sequence =
                 recorder.dictionary_origin_sequence.saturating_add(1);
@@ -1219,6 +1264,8 @@ impl Environment {
                 mutable,
                 context,
                 option,
+                pc: regs[15],
+                lr: regs[14],
             });
         }
     }
@@ -1501,6 +1548,7 @@ mod tests {
             mutable: false,
             context: "property-list",
             option: 0,
+            ..DictionaryOrigin::default()
         });
         recorder.finish(
             Call {

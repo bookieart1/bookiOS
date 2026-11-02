@@ -22,6 +22,48 @@ const NEWLINE_CHARACTERS: [char; 7] = [
     '\u{000A}', '\u{000B}', '\u{000C}', '\u{000D}', '\u{0085}', '\u{2028}', '\u{2029}',
 ];
 
+// Unicode General Category Nd ranges that fit in a UTF-16 code unit. These
+// are the decimal digits represented by NSCharacterSet's historical
+// `decimalDigitCharacterSet`, rather than every numeric character.
+const DECIMAL_DIGIT_RANGES: &[(u16, u16)] = &[
+    (0x0030, 0x0039),
+    (0x0660, 0x0669),
+    (0x06f0, 0x06f9),
+    (0x07c0, 0x07c9),
+    (0x0966, 0x096f),
+    (0x09e6, 0x09ef),
+    (0x0a66, 0x0a6f),
+    (0x0ae6, 0x0aef),
+    (0x0b66, 0x0b6f),
+    (0x0be6, 0x0bef),
+    (0x0c66, 0x0c6f),
+    (0x0ce6, 0x0cef),
+    (0x0d66, 0x0d6f),
+    (0x0e50, 0x0e59),
+    (0x0ed0, 0x0ed9),
+    (0x0f20, 0x0f29),
+    (0x1040, 0x1049),
+    (0x1090, 0x1099),
+    (0x17e0, 0x17e9),
+    (0x1810, 0x1819),
+    (0x1946, 0x194f),
+    (0x19d0, 0x19d9),
+    (0x1a80, 0x1a89),
+    (0x1a90, 0x1a99),
+    (0x1b50, 0x1b59),
+    (0x1bb0, 0x1bb9),
+    (0x1c40, 0x1c49),
+    (0x1c50, 0x1c59),
+    (0xa620, 0xa629),
+    (0xa8d0, 0xa8d9),
+    (0xa900, 0xa909),
+    (0xa9d0, 0xa9d9),
+    (0xa9f0, 0xa9f9),
+    (0xaa50, 0xaa59),
+    (0xabf0, 0xabf9),
+    (0xff10, 0xff19),
+];
+
 // Unicode General Category Cc and Cf.
 // TODO: This is not actually the full list of charadcters in Cc and Cf, but
 // these are the ones reported from a simulator run with all `unichar`s. This
@@ -101,6 +143,18 @@ pub const CLASSES: ClassExports = objc_classes! {
         .filter(|&code_unit| {
             char::from_u32(code_unit.into()).is_some_and(char::is_alphanumeric)
         })
+        .collect();
+
+    let new: id = msg![env; this alloc];
+    env.objc.borrow_mut::<CharacterSetHostObject>(new).set = set;
+
+    autorelease(env, new)
+}
+
++ (id)decimalDigitCharacterSet {
+    let set = DECIMAL_DIGIT_RANGES
+        .iter()
+        .flat_map(|&(start, end)| start..=end)
         .collect();
 
     let new: id = msg![env; this alloc];
@@ -242,3 +296,23 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objc::msg_class;
+
+    #[test]
+    fn decimal_digit_set_contains_unicode_decimal_digits_only() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let set: id = msg_class![env; NSCharacterSet decimalDigitCharacterSet];
+
+        let ascii: bool = msg![env; set characterIsMember:('5' as unichar)];
+        let arabic_indic: bool = msg![env; set characterIsMember:(0x0665u16)];
+        let roman_numeral: bool = msg![env; set characterIsMember:(0x2165u16)];
+        assert!(ascii);
+        assert!(arabic_indic);
+        assert!(!roman_numeral);
+    }
+}

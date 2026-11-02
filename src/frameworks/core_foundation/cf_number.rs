@@ -74,6 +74,16 @@ fn CFNumberCreate(
             let val: i64 = env.mem.read(value_ptr.cast());
             msg![env; num initWithLongLong:val]
         }
+        kCFNumberLongType | kCFNumberCFIndexType | kCFNumberNSIntegerType => {
+            // The guest ABI is 32-bit, so long, CFIndex and NSInteger are i32.
+            let val: i32 = env.mem.read(value_ptr.cast());
+            msg![env; num initWithLong:val]
+        }
+        kCFNumberCGFloatType => {
+            // CGFloat is float on the 32-bit guest ABI.
+            let val: f32 = env.mem.read(value_ptr.cast());
+            msg![env; num initWithFloat:val]
+        }
         _ => unimplemented!("type {}", type_),
     }
 }
@@ -101,6 +111,26 @@ fn CFNumberGetValue(
             is_conversion_lossless(env, num, type_)
         }
         kCFNumberFloat32Type | kCFNumberFloatType => {
+            let val: f32 = msg![env; num floatValue];
+            env.mem.write(value_ptr.cast(), val);
+            is_conversion_lossless(env, num, type_)
+        }
+        kCFNumberSInt64Type | kCFNumberLongLongType => {
+            let val: i64 = msg![env; num longLongValue];
+            env.mem.write(value_ptr.cast(), val);
+            is_conversion_lossless(env, num, type_)
+        }
+        kCFNumberFloat64Type | kCFNumberDoubleType => {
+            let val: f64 = msg![env; num doubleValue];
+            env.mem.write(value_ptr.cast(), val);
+            is_conversion_lossless(env, num, type_)
+        }
+        kCFNumberLongType | kCFNumberCFIndexType | kCFNumberNSIntegerType => {
+            let val: i32 = msg![env; num longValue];
+            env.mem.write(value_ptr.cast(), val);
+            is_conversion_lossless(env, num, type_)
+        }
+        kCFNumberCGFloatType => {
             let val: f32 = msg![env; num floatValue];
             env.mem.write(value_ptr.cast(), val);
             is_conversion_lossless(env, num, type_)
@@ -180,5 +210,31 @@ mod tests {
         assert_eq!(CFNumberGetType(env, unsigned), kCFNumberSInt64Type);
         assert_eq!(CFNumberGetType(env, float), kCFNumberFloat32Type);
         assert_eq!(CFNumberGetType(env, double), kCFNumberFloat64Type);
+    }
+
+    #[test]
+    fn get_value_supports_64_bit_and_guest_sized_number_types() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+
+        let large: id = msg_class![env; NSNumber numberWithLongLong:(-4_294_967_297i64)];
+        let large_out = env.mem.alloc_and_write(0i64);
+        assert!(CFNumberGetValue(
+            env,
+            large,
+            kCFNumberLongLongType,
+            large_out.cast()
+        ));
+        assert_eq!(env.mem.read(large_out), -4_294_967_297i64);
+
+        let guest_long: id = msg_class![env; NSNumber numberWithLong:(-123_456i32)];
+        let long_out = env.mem.alloc_and_write(0i32);
+        assert!(CFNumberGetValue(
+            env,
+            guest_long,
+            kCFNumberLongType,
+            long_out.cast()
+        ));
+        assert_eq!(env.mem.read(long_out), -123_456i32);
     }
 }

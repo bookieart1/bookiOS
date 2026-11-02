@@ -19,6 +19,7 @@ const NSNumberFormatterPercentStyle: NSUInteger = 3;
 const NSNumberFormatterScientificStyle: NSUInteger = 4;
 
 struct NSNumberFormatterHostObject {
+    formatter_behavior: NSUInteger,
     style: NSUInteger,
     minimum_fraction_digits: NSUInteger,
     maximum_fraction_digits: NSUInteger,
@@ -40,6 +41,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 + (id)allocWithZone:(NSZonePtr)_zone {
     let host_object = Box::new(NSNumberFormatterHostObject {
         style: NSNumberFormatterNoStyle,
+        formatter_behavior: 0,
         minimum_fraction_digits: 0,
         maximum_fraction_digits: 3,
         minimum_integer_digits: 1,
@@ -70,6 +72,13 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (())setNumberStyle:(NSUInteger)style {
     env.objc.borrow_mut::<NSNumberFormatterHostObject>(this).style = style;
+}
+
+- (NSUInteger)formatterBehavior {
+    env.objc.borrow::<NSNumberFormatterHostObject>(this).formatter_behavior
+}
+- (())setFormatterBehavior:(NSUInteger)behavior {
+    env.objc.borrow_mut::<NSNumberFormatterHostObject>(this).formatter_behavior = behavior;
 }
 
 - (NSUInteger)minimumFractionDigits {
@@ -268,7 +277,11 @@ fn format_with_pattern(value: f64, positive: &str, negative: Option<&str>) -> Op
         })
         .filter(|&size| size != 0);
     let percent = prefix.contains('%') || suffix.contains('%');
-    let magnitude = if percent { magnitude * 100.0 } else { magnitude };
+    let magnitude = if percent {
+        magnitude * 100.0
+    } else {
+        magnitude
+    };
 
     let mut number = format!("{magnitude:.maximum_fraction$}");
     trim_fraction(&mut number, minimum_fraction);
@@ -362,6 +375,22 @@ mod tests {
         let number: id = msg_class![env; NSNumber numberWithDouble:(-1234.5f64)];
         let string: id = msg![env; formatter stringFromNumber:number];
         assert_eq!(ns_string::to_rust_string(env, string), "-1,234.50");
+        release(env, formatter);
+    }
+
+    #[test]
+    fn formatter_behavior_round_trips_without_changing_format_state() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let formatter: id = msg_class![env; NSNumberFormatter new];
+        () = msg![env; formatter setFormatterBehavior:1040u32];
+        let behavior: NSUInteger = msg![env; formatter formatterBehavior];
+        assert_eq!(behavior, 1040);
+
+        () = msg![env; formatter setMaximumFractionDigits:1u32];
+        let number: id = msg_class![env; NSNumber numberWithDouble:2.25f64];
+        let string: id = msg![env; formatter stringFromNumber:number];
+        assert_eq!(ns_string::to_rust_string(env, string), "2.2");
         release(env, formatter);
     }
 }

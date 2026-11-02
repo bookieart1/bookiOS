@@ -73,6 +73,7 @@ struct ThreadHostObject {
     attr: pthread_attr_t,
     cancel_state: i32,
     cancel_type: i32,
+    cancel_pending: bool,
 }
 
 /// Arbitrarily-chosen magic number for `pthread_attr_t` (not Apple's).
@@ -266,6 +267,7 @@ pub fn pthread_create(
             attr,
             cancel_state: PTHREAD_CANCEL_ENABLE,
             cancel_type: PTHREAD_CANCEL_DEFERRED,
+            cancel_pending: false,
         },
     );
 
@@ -311,6 +313,7 @@ pub fn pthread_for_thread_id(env: &mut Environment, thread_id: ThreadId) -> Opti
                 attr: DEFAULT_ATTR,
                 cancel_state: PTHREAD_CANCEL_ENABLE,
                 cancel_type: PTHREAD_CANCEL_DEFERRED,
+                cancel_pending: false,
             },
         );
         log_dbg!(
@@ -415,8 +418,7 @@ fn pthread_setcancelstate(env: &mut Environment, state: i32, oldstate: MutPtr<i3
     if !oldstate.is_null() {
         env.mem.write(oldstate, old_state);
     }
-    // Cancellation delivery itself remains unsupported; retaining this state
-    // still gives callers the correct set/query contract.
+    cancel_current_if_pending(env, true);
     0
 }
 
@@ -434,10 +436,51 @@ fn pthread_setcanceltype(env: &mut Environment, type_: i32, oldtype: MutPtr<i32>
     if !oldtype.is_null() {
         env.mem.write(oldtype, old_type);
     }
+    cancel_current_if_pending(env, true);
     0
 }
-fn pthread_testcancel(_env: &mut Environment) {
-    log!("TODO: pthread_testcancel()");
+
+fn pthread_cancel(env: &mut Environment, thread: pthread_t) -> i32 {
+    let Some(thread_id) = State::get(env)
+        .threads
+        .get(&thread)
+        .map(|host_object| host_object.thread_id)
+    else {
+        return ESRCH;
+    };
+    if !env.threads[thread_id].is_alive() {
+        return ESRCH;
+    }
+    State::get(env)
+        .threads
+        .get_mut(&thread)
+        .unwrap()
+        .cancel_pending = true;
+
+    // POSIX deferred cancellation is a request. Delivery occurs when the
+    // target reaches pthread_testcancel (or another implemented cancellation
+    // point). Asynchronous cancellation can be delivered immediately only
+    // when the caller is cancelling itself; another guest coroutine cannot be
+    // safely torn down while this one is executing.
+    if thread_id == env.current_thread {
+        cancel_current_if_pending(env, true);
+    }
+    0
+}
+
+fn pthread_testcancel(env: &mut Environment) {
+    cancel_current_if_pending(env, false);
+}
+
+fn cancel_current_if_pending(env: &mut Environment, require_async: bool) {
+    let current = pthread_self(env);
+    let host_object = State::get(env).threads.get(&current).unwrap();
+    let should_cancel = host_object.cancel_pending
+        && host_object.cancel_state == PTHREAD_CANCEL_ENABLE
+        && (!require_async || host_object.cancel_type == PTHREAD_CANCEL_ASYNCHRONOUS);
+    if should_cancel {
+        pthread_exit(env, Ptr::from_bits(u32::MAX));
+    }
 }
 
 /// Darwin's non-portable predecessor/alias of `sched_yield`. Guest threads are
@@ -537,6 +580,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(pthread_detach(_)),
     export_c_func!(pthread_setcancelstate(_, _)),
     export_c_func!(pthread_setcanceltype(_, _)),
+    export_c_func!(pthread_cancel(_)),
     export_c_func!(pthread_testcancel()),
     export_c_func!(pthread_yield_np()),
     export_c_func!(pthread_mach_thread_np(_)),

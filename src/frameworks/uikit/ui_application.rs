@@ -210,6 +210,30 @@ pub const CLASSES: ClassExports = objc_classes! {
     true
 }
 
+- (bool)canOpenURL:(id)url { // NSURL
+    if url == nil {
+        return false;
+    }
+    let absolute: id = msg![env; url absoluteString];
+    if absolute == nil {
+        return false;
+    }
+    let value = ns_string::to_rust_string(env, absolute);
+    let Some((scheme, remainder)) = value.split_once(':') else {
+        return false;
+    };
+    if remainder.is_empty() {
+        return false;
+    }
+    // These are the schemes the host bridge can actually hand off without
+    // inventing an installed third-party application. Custom URL schemes are
+    // therefore reported unavailable, matching UIApplication's query role.
+    matches!(
+        scheme.to_ascii_lowercase().as_str(),
+        "http" | "https" | "mailto" | "tel"
+    )
+}
+
 // TODO: ignore touches
 -(())beginIgnoringInteractionEvents {
     log!("TODO: ignoring beginIgnoringInteractionEvents");

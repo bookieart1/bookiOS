@@ -18,7 +18,7 @@ use plist::{to_writer_binary, Dictionary, Uid, Value};
 
 use crate::frameworks::foundation::ns_keyed_unarchiver::NSKeyedArchiveRootObjectKey;
 use crate::frameworks::foundation::ns_string::{get_static_str, to_rust_string};
-use crate::frameworks::foundation::NSUInteger;
+use crate::frameworks::foundation::{NSInteger, NSUInteger};
 use crate::mem::{ConstPtr, GuestUSize};
 use crate::objc::{
     id, msg, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject, NSZonePtr,
@@ -100,6 +100,14 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())encodeInt:(i32)val
          forKey:(id)key {
+    let key = normalize_key(env, key);
+    let scope = get_value_to_encode_for_current_key(env, this);
+    assert!(!scope.contains_key(&key));
+    scope.insert(key, Value::Integer(val.into()));
+}
+
+- (())encodeInteger:(NSInteger)val
+             forKey:(id)key {
     let key = normalize_key(env, key);
     let scope = get_value_to_encode_for_current_key(env, this);
     assert!(!scope.contains_key(&key));

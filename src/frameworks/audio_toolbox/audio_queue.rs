@@ -773,13 +773,17 @@ pub fn is_supported_audio_format(format: &AudioStreamBasicDescription) -> bool {
             (channels_per_frame == 1) || (channels_per_frame == 2)
         }
         kAudioFormatLinearPCM => {
-            // TODO: support more PCM formats
+            let float = (format_flags & kAudioFormatFlagIsFloat) != 0;
+            let supported_sample = if float {
+                bits_per_channel == 32
+            } else {
+                bits_per_channel == 8 || bits_per_channel == 16 || bits_per_channel == 32
+            };
             (channels_per_frame == 1 || channels_per_frame == 2)
-                && (bits_per_channel == 8 || bits_per_channel == 16 || bits_per_channel == 32)
+                && supported_sample
                 && ((format_flags & kAudioFormatFlagIsPacked) != 0
                     || ((bits_per_channel / 8) * channels_per_frame) == bytes_per_frame)
                 && (format_flags & kAudioFormatFlagIsBigEndian) == 0
-                && (format_flags & kAudioFormatFlagIsFloat) == 0
         }
         _ => false,
     }
@@ -861,6 +865,32 @@ pub fn decode_buffer(
             let bytes_per_channel = format.bits_per_channel / 8;
             let actual_bytes_per_frame = format.channels_per_frame * bytes_per_channel;
             let actual_channels_per_frame = format.bytes_per_frame / bytes_per_channel;
+
+            if (format.format_flags & kAudioFormatFlagIsFloat) != 0 {
+                // RemoteIO's historical canonical/default stream is 32-bit
+                // float PCM. OpenAL on our supported targets is fed PCM16, so
+                // perform the same bounded sample conversion used for 32-bit
+                // integer PCM rather than rejecting an otherwise valid ASBD.
+                assert_eq!(format.bits_per_channel, 32);
+                let sample_bytes = data_slice.len() - data_slice.len() % 4;
+                let mut pcm16 = Vec::with_capacity(sample_bytes / 2);
+                for bytes in data_slice[..sample_bytes].chunks_exact(4) {
+                    let sample = f32::from_le_bytes(bytes.try_into().unwrap());
+                    let sample = if sample.is_finite() {
+                        sample.clamp(-1.0, 1.0)
+                    } else {
+                        0.0
+                    };
+                    let sample = (sample * i16::MAX as f32).round() as i16;
+                    pcm16.extend_from_slice(&sample.to_le_bytes());
+                }
+                let al_format = if format.channels_per_frame == 1 {
+                    al::AL_FORMAT_MONO16
+                } else {
+                    al::AL_FORMAT_STEREO16
+                };
+                return (al_format, format.sample_rate as ALsizei, pcm16);
+            }
 
             // In case the audio format has inconsistent values, we apply some
             // processing before passing it to OpenAL.
@@ -1726,3 +1756,50 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(AudioQueueFreeBuffer(_, _)),
     export_c_func!(AudioQueueDispose(_, _)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn float_pcm_is_supported_and_converted_to_pcm16() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let format = AudioStreamBasicDescription {
+            sample_rate: 44_100.0,
+            format_id: kAudioFormatLinearPCM,
+            format_flags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+            bytes_per_packet: 8,
+            frames_per_packet: 1,
+            bytes_per_frame: 8,
+            channels_per_frame: 2,
+            bits_per_channel: 32,
+            _reserved: 0,
+        };
+        let bytes: [u8; 16] = [
+            0x00, 0x00, 0x80, 0x3f, // 1.0
+            0x00, 0x00, 0x80, 0xbf, // -1.0
+            0x00, 0x00, 0x00, 0x3f, // 0.5
+            0x00, 0x00, 0xc0, 0x7f, // NaN
+        ];
+        let data: MutPtr<u8> = env.mem.alloc(bytes.len() as GuestUSize).cast();
+        env.mem
+            .bytes_at_mut(data, bytes.len() as GuestUSize)
+            .copy_from_slice(&bytes);
+
+        assert!(is_supported_audio_format(&format));
+        let (al_format, frequency, decoded) =
+            decode_buffer(&env.mem, &format, data.cast(), bytes.len() as GuestUSize);
+        assert_eq!(al_format, al::AL_FORMAT_STEREO16);
+        assert_eq!(frequency, 44_100);
+        assert_eq!(
+            decoded,
+            [
+                i16::MAX.to_le_bytes(),
+                (-i16::MAX).to_le_bytes(),
+                16384i16.to_le_bytes(),
+                0i16.to_le_bytes(),
+            ]
+            .concat()
+        );
+    }
+}
