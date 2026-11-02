@@ -328,7 +328,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_http_header_fields_replaces_with_an_independent_copy_and_nil_clears() {
+    fn all_http_header_fields_copies_and_nil_preserves_existing_fields() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
         let pool: id = msg_class![env; NSAutoreleasePool new];

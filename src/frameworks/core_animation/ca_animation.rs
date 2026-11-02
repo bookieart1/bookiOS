@@ -814,14 +814,13 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 + (id)allocWithZone:(NSZonePtr)_zone {
     let host_object = Box::<CATransitionHostObject>::default();
-    env.objc.alloc_object(this, host_object, &mut env.mem)
-}
-
-- (id)init {
-    let this: id = msg_super![env; this init];
+    let object = env.objc.alloc_object(this, host_object, &mut env.mem);
+    // CATransition inherits CAAnimation's initializer. Seed its documented
+    // property default at allocation so both normal initialization and the
+    // existing animation-copy path observe the same owned state.
     let fade = get_static_str(env, kCATransitionFade);
-    () = msg![env; this setType:fade];
-    this
+    () = msg![env; object setType:fade];
+    object
 }
 
 - (())setType:(CATransitionType)transition_type {
@@ -847,11 +846,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())_touchHLE_copyPropertiesFrom:(id)other { // CATransition*
     () = msg_super![env; this _touchHLE_copyPropertiesFrom:other];
     let &CATransitionHostObject { transition_type, subtype, .. } = env.objc.borrow(other);
-    retain(env, transition_type);
-    retain(env, subtype);
-    let host = env.objc.borrow_mut::<CATransitionHostObject>(this);
-    host.transition_type = transition_type;
-    host.subtype = subtype;
+    () = msg![env; this setType:transition_type];
+    () = msg![env; this setSubtype:subtype];
 }
 
 - (())dealloc {
