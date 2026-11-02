@@ -15,14 +15,24 @@ use crate::{msg_class, Environment};
 pub type CFTypeRef = objc::id;
 pub type CFTypeID = u32;
 
-/// Core Foundation type identifiers are opaque and process-local. Every Core
-/// Foundation object in touchHLE is toll-free bridged to an Objective-C object,
-/// so its stable dynamic class is the corresponding stable type identity.
-/// Apps must compare the returned value, not depend on a release-specific
-/// numeric constant.
+/// Stable, opaque identity for the toll-free bridged CFString/NSString family.
+/// The numeric value is private to this process; only equality is meaningful.
+pub(crate) const CF_STRING_TYPE_ID: CFTypeID = 0x5354_5201;
+
+/// Core Foundation type identifiers are opaque and process-local. Toll-free
+/// bridged class clusters must share one identity even when their concrete
+/// Objective-C subclasses differ (for example constant, mutable and ordinary
+/// strings). Families without a public GetTypeID implementation still use the
+/// stable dynamic class as their process-local identity.
 pub fn CFGetTypeID(env: &mut Environment, object: CFTypeRef) -> CFTypeID {
     assert!(!object.is_null());
-    ObjC::read_isa(object, &env.mem).to_bits()
+    let object_class = ObjC::read_isa(object, &env.mem);
+    let string_class = env.objc.get_known_class("NSString", &mut env.mem);
+    if env.objc.class_is_subclass_of(object_class, string_class) {
+        CF_STRING_TYPE_ID
+    } else {
+        object_class.to_bits()
+    }
 }
 
 pub fn CFRetain(env: &mut Environment, object: CFTypeRef) -> CFTypeRef {

@@ -9,6 +9,7 @@ use super::ui_graphics::UIGraphicsGetCurrentContext;
 use crate::font::{Font, TextAlignment, WrapMode};
 use crate::frameworks::core_graphics::cg_bitmap_context::CGBitmapContextDrawer;
 use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect, CGSize};
+use crate::frameworks::foundation::ns_array;
 use crate::frameworks::foundation::ns_string::{from_rust_string, to_rust_string};
 use crate::frameworks::foundation::NSInteger;
 use crate::objc::{
@@ -121,6 +122,53 @@ pub const CLASSES: ClassExports = objc_classes! {
     14.0
 }
 
++ (id)familyNames {
+    font_string_array(env, &[
+        "Courier",
+        "AppleGothic",
+        "Arial",
+        "STHeiti TC",
+        "Hiragino Kaku Gothic ProN",
+        "Courier New",
+        "Zapfino",
+        "Arial Unicode MS",
+        "STHeiti SC",
+        "American Typewriter",
+        "Helvetica",
+        "Marker Felt",
+        "Helvetica Neue",
+        "DB LCD Temp",
+        "Verdana",
+        "Times New Roman",
+        "Georgia",
+    ])
+}
+
++ (id)fontNamesForFamilyName:(id)familyName {
+    let family_name = to_rust_string(env, familyName);
+    let names: &[&str] = match family_name.as_ref() {
+        "Courier" => &["Courier", "Courier-BoldOblique", "Courier-Oblique", "Courier-Bold"],
+        "AppleGothic" => &["AppleGothic"],
+        "Arial" => &["ArialMT", "Arial-BoldMT", "Arial-BoldItalicMT", "Arial-ItalicMT"],
+        "STHeiti TC" => &["STHeitiTC-Light", "STHeitiTC-Medium"],
+        "Hiragino Kaku Gothic ProN" => &["HiraKakuProN-W6", "HiraKakuProN-W3"],
+        "Courier New" => &["CourierNewPS-BoldMT", "CourierNewPS-ItalicMT", "CourierNewPS-BoldItalicMT", "CourierNewPSMT"],
+        "Zapfino" => &["Zapfino"],
+        "Arial Unicode MS" => &["ArialUnicodeMS"],
+        "STHeiti SC" => &["STHeitiSC-Medium", "STHeitiSC-Light"],
+        "American Typewriter" => &["AmericanTypewriter", "AmericanTypewriter-Bold"],
+        "Helvetica" => &["Helvetica-Oblique", "Helvetica-BoldOblique", "Helvetica", "Helvetica-Bold"],
+        "Marker Felt" => &["MarkerFelt-Thin", "MarkerFelt-Wide"],
+        "Helvetica Neue" => &["HelveticaNeue", "HelveticaNeue-Bold"],
+        "DB LCD Temp" => &["DBLCDTempBlack"],
+        "Verdana" => &["Verdana-Bold", "Verdana-BoldItalic", "Verdana", "Verdana-Italic"],
+        "Times New Roman" => &["TimesNewRomanPSMT", "TimesNewRomanPS-BoldMT", "TimesNewRomanPS-BoldItalicMT", "TimesNewRomanPS-ItalicMT"],
+        "Georgia" => &["Georgia-Bold", "Georgia", "Georgia-BoldItalic", "Georgia-Italic"],
+        _ => &[],
+    };
+    font_string_array(env, names)
+}
+
 + (id)systemFontOfSize:(CGFloat)size {
     cached_font(env, this, FontKind::SansRegular, size, "Helvetica".to_owned())
 }
@@ -214,6 +262,18 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 };
 
+/// Build the immutable arrays returned by UIFont's class discovery methods.
+/// The list matches the font families exposed by the historical iOS 2 font
+/// table already used by `get_equivalent_font` below.
+fn font_string_array(env: &mut Environment, strings: &[&str]) -> id {
+    let strings = strings
+        .iter()
+        .map(|string| from_rust_string(env, (*string).to_owned()))
+        .collect();
+    let array = ns_array::from_vec(env, strings);
+    autorelease(env, array)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -229,6 +289,29 @@ mod tests {
         let resized: id = msg![env; font fontWithSize:24.0f32];
         let resized_name: id = msg![env; resized fontName];
         assert_eq!(to_rust_string(env, resized_name), "Helvetica-Bold");
+    }
+
+    #[test]
+    fn family_names_and_family_members_match_supported_font_table() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let families: id = msg_class![env; UIFont familyNames];
+        let family_count: u32 = msg![env; families count];
+        assert!(family_count >= 17);
+
+        let family = from_rust_string(env, "Helvetica".to_owned());
+        let names: id = msg_class![env; UIFont fontNamesForFamilyName:family];
+        let names_count: u32 = msg![env; names count];
+        assert_eq!(names_count, 4);
+        let regular: id = msg![env; names objectAtIndex:2u32];
+        let bold: id = msg![env; names objectAtIndex:3u32];
+        assert_eq!(to_rust_string(env, regular), "Helvetica");
+        assert_eq!(to_rust_string(env, bold), "Helvetica-Bold");
+
+        let missing = from_rust_string(env, "Not Installed".to_owned());
+        let missing_names: id = msg_class![env; UIFont fontNamesForFamilyName:missing];
+        let missing_count: u32 = msg![env; missing_names count];
+        assert_eq!(missing_count, 0);
     }
 }
 

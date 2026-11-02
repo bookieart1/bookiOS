@@ -1050,7 +1050,6 @@ struct PickerView: View {
                             height: layout.size.height - top
                         ))
                 }
-                BrandingLabels(branding: model.input.branding, size: layout.size)
                 if let error = model.input.error {
                     VStack(spacing: 20) {
                         Text(error)

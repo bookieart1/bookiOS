@@ -1329,6 +1329,27 @@ pub(super) fn method_setImplementation(
     old_imp
 }
 
+/// Exchanges the implementations represented by two runtime `Method`
+/// handles. Both handles remain canonical for their original class and
+/// selector; only their implementations change, just as with two calls to
+/// `method_setImplementation`.
+pub(super) fn method_exchangeImplementations(
+    env: &mut Environment,
+    first: MutPtr<method_t>,
+    second: MutPtr<method_t>,
+) {
+    assert!(!first.is_null(), "method_exchangeImplementations first Method is NULL");
+    assert!(!second.is_null(), "method_exchangeImplementations second Method is NULL");
+    if first == second {
+        return;
+    }
+
+    let first_imp = method_getImplementation(env, first.cast_const());
+    let second_imp = method_getImplementation(env, second.cast_const());
+    method_setImplementation(env, first, second_imp);
+    method_setImplementation(env, second, first_imp);
+}
+
 #[allow(non_snake_case)]
 pub(super) fn method_getTypeEncoding(
     env: &mut Environment,

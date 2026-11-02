@@ -49,8 +49,9 @@ use crate::Environment;
 use classes::{
     class_addMethod, class_copyPropertyList, class_getClassMethod, class_getInstanceMethod,
     class_getInstanceSize, class_getMethodImplementation, class_getProperty, class_getSuperclass,
-    class_replaceMethod, method_getImplementation, method_getTypeEncoding,
-    method_setImplementation, objc_getClass, ClassHostObject, FakeClass, UnimplementedClass,
+    class_replaceMethod, method_exchangeImplementations, method_getImplementation,
+    method_getTypeEncoding, method_setImplementation, objc_getClass, ClassHostObject, FakeClass,
+    UnimplementedClass,
 };
 pub(crate) use messages::objc_msgSend;
 use messages::{
@@ -293,6 +294,7 @@ const FUNCTIONS: FunctionExports = &[
     export_c_func!(class_addMethod(_, _, _, _)),
     export_c_func!(method_getImplementation(_)),
     export_c_func!(method_setImplementation(_, _)),
+    export_c_func!(method_exchangeImplementations(_, _)),
     export_c_func!(method_getTypeEncoding(_)),
     export_c_func!(class_getMethodImplementation(_, _)),
     export_c_func!(class_replaceMethod(_, _, _, _)),

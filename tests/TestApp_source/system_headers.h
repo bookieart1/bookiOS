@@ -65,6 +65,7 @@ Method class_getClassMethod(Class cls, SEL name);
 const char *class_getName(Class cls);
 void (*method_getImplementation(Method m))(void);
 void (*method_setImplementation(Method m, void (*imp)(void)))(void);
+void method_exchangeImplementations(Method m1, Method m2);
 Ivar object_getInstanceVariable(id obj, const char *name, void **outValue);
 Ivar object_setInstanceVariable(id obj, const char *name, void *value);
 const char *ivar_getTypeEncoding(Ivar v);

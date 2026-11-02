@@ -116,8 +116,19 @@ impl sockaddr {
     ///
     /// Port is returned in the native endian format.
     fn to_ipv4_parts(self) -> ([u8; 4], u16) {
-        assert!(self.sa_len == 16 || self.sa_len == 0);
-        assert_eq!(self.sa_family, AF_INET as u8);
+        let sa_len = self.sa_len;
+        let sa_family = self.sa_family;
+        if sa_len != 16 && sa_len != 0 {
+            let raw: [u8; 16] = unsafe { std::mem::transmute(self) };
+            panic!(
+                "unsupported IPv4 sockaddr layout: sa_len={sa_len}, sa_family={sa_family}, raw={raw:02x?}"
+            );
+        }
+        assert_eq!(
+            sa_family,
+            AF_INET as u8,
+            "unsupported sockaddr family {sa_family} for IPv4 socket"
+        );
         let port = u16::from_be_bytes([self.sa_data[0], self.sa_data[1]]);
         let ip = [
             self.sa_data[2],

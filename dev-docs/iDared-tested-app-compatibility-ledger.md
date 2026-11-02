@@ -3923,3 +3923,27 @@ TrenchesVS and ZA! 2ndWave. Blot, Cube and Spoing are focused regression tests.
 Removing an initial missing-symbol/assertion blocker is not a claim of gameplay
 compatibility. Engineering record:
 `dev-docs/compatibility-1.97-shared-runtime-text-and-graphics-evidence.md`.
+
+## Dev 1.97 result and Dev 1.98 candidate
+
+The complete Dev 1.97 device run is preserved as
+`outputs/device-logs/iDared-Dev-1.97-shared-contract-batch-2026-11-02.txt`
+(726,513 bytes; SHA-256
+`257e39fa791b5459919de98db4aa00060fd3bda3fbaf1bb03e17a3c5bd456e3b`).
+SpaceMnkey reached working gameplay/menu re-entry in the tested scope; Blot,
+Cube and Spoing passed; and Marblenauts' zero-present state can now be exited
+through native Home. DoDoFly, LegendaryWar, Peggle, TrenchesVS and ZA!
+2ndWave advanced respectively to exact `UIFont.familyNames`,
+`method_exchangeImplementations`, `CFStringGetTypeID`,
+`NSNumber.numberWithUnsignedLong:` and `strcasestr` boundaries.
+
+Dev 1.98 implements those five general contract families with focused tests.
+8bitninja's unsupported socket length remains strict but now reports its actual
+length, family and raw bytes. The tiled `UNOFFICIAL` picker decoration is
+removed without changing fork identification in version/log/About surfaces.
+DizzyWizards and Marblenauts receive no speculative rendering change.
+
+Physical-device status is **pending**. Focused targets are 8bitninja 1.2,
+DoDoFly, LegendaryWar, Peggle, Solomon's Boneyard, TrenchesVS and ZA!
+2ndWave; Blot, SpaceMnkey and Spoing are regressions. Engineering record:
+`dev-docs/compatibility-1.98-shared-font-runtime-cf-and-libc-contracts.md`.

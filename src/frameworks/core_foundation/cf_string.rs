@@ -11,6 +11,7 @@
 use super::cf_allocator::{kCFAllocatorDefault, CFAllocatorRef};
 use super::cf_dictionary::CFDictionaryRef;
 use super::cf_locale::CFLocaleRef;
+use super::cf_type::{CFTypeID, CF_STRING_TYPE_ID};
 use super::{kCFNotFound, CFComparisonResult, CFIndex, CFOptionFlags, CFRange};
 use crate::abi::{DotDotDot, VaList};
 use crate::dyld::{export_c_func, FunctionExports};
@@ -35,6 +36,10 @@ pub const kCFStringEncodingISOLatin1: CFStringEncoding = 0x0201;
 pub const kCFStringEncodingUTF32: CFStringEncoding = 0x0c000100;
 pub const kCFStringEncodingUTF32BE: CFStringEncoding = 0x18000100;
 pub const kCFStringEncodingUTF32LE: CFStringEncoding = 0x1c000100;
+
+fn CFStringGetTypeID(_env: &mut Environment) -> CFTypeID {
+    CF_STRING_TYPE_ID
+}
 
 fn CFStringAppend(
     env: &mut Environment,
@@ -498,6 +503,7 @@ fn CFStringNormalize(
 }
 
 pub const FUNCTIONS: FunctionExports = &[
+    export_c_func!(CFStringGetTypeID()),
     export_c_func!(CFStringAppend(_, _)),
     export_c_func!(CFStringAppendCString(_, _, _)),
     export_c_func!(CFStringAppendFormat(_, _, _, _)),
@@ -538,6 +544,9 @@ pub const FUNCTIONS: FunctionExports = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frameworks::core_foundation::cf_type::CFGetTypeID;
+    use crate::frameworks::foundation::ns_string::from_rust_string;
+    use crate::objc::id;
 
     #[test]
     fn supported_iana_charset_names_are_canonical() {
@@ -556,5 +565,17 @@ mod tests {
             Some("iso-8859-1")
         );
         assert_eq!(iana_charset_name(u32::MAX), None);
+    }
+
+    #[test]
+    fn type_id_is_shared_by_immutable_and_mutable_string_classes() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let immutable = from_rust_string(env, "immutable".to_owned());
+        let mutable: id = msg_class![env; NSMutableString new];
+        let string_type = CFStringGetTypeID(env);
+        assert_ne!(string_type, 0);
+        assert_eq!(CFGetTypeID(env, immutable), string_type);
+        assert_eq!(CFGetTypeID(env, mutable), string_type);
     }
 }

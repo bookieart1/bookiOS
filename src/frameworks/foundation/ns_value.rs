@@ -306,6 +306,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, new)
 }
 
++ (id)numberWithUnsignedLong:(u32)value {
+    // `unsigned long` is 32 bits in the guest iPhone ABI.
+    let new: id = msg![env; this alloc];
+    let new: id = msg![env; new initWithUnsignedLong:value];
+    autorelease(env, new)
+}
+
 + (id)numberWithInt:(i32)value {
     // TODO: for greater efficiency we could return a static-lifetime value
 
@@ -445,6 +452,11 @@ pub const CLASSES: ClassExports = objc_classes! {
     this
 }
 
+- (id)initWithUnsignedLong:(u32)value {
+    *env.objc.borrow_mut(this) = NSNumberHostObject::UnsignedInt(value);
+    this
+}
+
 - (id)initWithInt:(i32)value {
     *env.objc.borrow_mut(this) = NSNumberHostObject::Int(value);
     this
@@ -518,6 +530,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (u32)unsignedIntValue {
+    env.objc.borrow::<NSNumberHostObject>(this).as_unsigned_int()
+}
+
+- (u32)unsignedLongValue {
     env.objc.borrow::<NSNumberHostObject>(this).as_unsigned_int()
 }
 
@@ -685,4 +701,23 @@ pub fn is_conversion_lossless(env: &mut Environment, this: id, type_: CFNumberTy
         _ => unimplemented!("is_conversion_lossless for {}", type_),
     };
     msg![env; this isEqualToNumber:num2]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unsigned_long_uses_the_full_32_bit_guest_range() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let maximum = u32::MAX;
+        let number: id = msg_class![env; NSNumber numberWithUnsignedLong:maximum];
+        let value: u32 = msg![env; number unsignedLongValue];
+        let unsigned_int: u32 = msg![env; number unsignedIntValue];
+        assert_eq!(value, u32::MAX);
+        assert_eq!(unsigned_int, u32::MAX);
+        let string: id = msg![env; number stringValue];
+        assert_eq!(to_rust_string(env, string), "4294967295");
+    }
 }

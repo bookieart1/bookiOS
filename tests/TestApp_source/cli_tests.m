@@ -60,6 +60,7 @@ int test_RespondsToSelector(void);      // RespondsToSelector.m
 int test_class_getInstanceMethod(void); // RespondsToSelector.m
 int test_object_getInstanceVariable(void); // RespondsToSelector.m
 int test_method_setImplementation(void);   // RespondsToSelector.m
+int test_method_exchangeImplementations(void); // RespondsToSelector.m
 int test_Initialize(void);              // Initialize.m
 
 #ifndef DEFINE_ME_WHEN_BUILDING_ON_MACOS
@@ -2828,6 +2829,21 @@ int test_strcoll_C_locale() {
   return 0;
 }
 
+int test_strcasestr_C_locale() {
+  const char *haystack = "One Two THREE";
+  if (strcasestr(haystack, "two") != haystack + 4)
+    return -1;
+  if (strcasestr(haystack, "ThReE") != haystack + 8)
+    return -2;
+  if (strcasestr(haystack, "") != haystack)
+    return -3;
+  if (strcasestr(haystack, "four") != NULL)
+    return -4;
+  if (strcasestr("short", "a much longer needle") != NULL)
+    return -5;
+  return 0;
+}
+
 int test_NSBundle_bundleForClass_nil() {
   NSBundle *mainBundle = [NSBundle mainBundle];
   if (mainBundle == nil)
@@ -4395,6 +4411,16 @@ int test_CFMutableDictionary_NullCallbacks() {
     CFRelease(dict);
     return -104;
   }
+  CFTypeID stringType = CFStringGetTypeID();
+  CFMutableStringRef mutableString = CFStringCreateMutable(NULL, 0);
+  CFStringAppend(mutableString, CFSTR("mutable"));
+  if (stringType == 0 || CFGetTypeID(CFSTR("constant")) != stringType ||
+      CFGetTypeID(mutableString) != stringType || stringType == dictionaryType) {
+    CFRelease(mutableString);
+    CFRelease(dict);
+    return -105;
+  }
+  CFRelease(mutableString);
 
   const char *key = "Key";
   const char *value = "Value";
@@ -7385,6 +7411,20 @@ int test_NSNumber_stringValue() {
     return -11;
   }
 
+  // UnsignedLong uses the 32-bit guest ABI and preserves the full range.
+  num = [NSNumber numberWithUnsignedLong:4000000000UL];
+  if ([num unsignedLongValue] != 4000000000UL ||
+      [num unsignedIntValue] != 4000000000U) {
+    [pool drain];
+    return -30;
+  }
+  result = [num stringValue];
+  expected = [NSString stringWithUTF8String:"4000000000"];
+  if (![result isEqualToString:expected]) {
+    [pool drain];
+    return -31;
+  }
+
   // UnsignedLongLong: 0 -> "0"
   num = [NSNumber numberWithUnsignedLongLong:0ULL];
   result = [num stringValue];
@@ -8344,6 +8384,7 @@ struct {
     FUNC_DEF(test_strlcpy),
     FUNC_DEF(test_setlocale),
     FUNC_DEF(test_strcoll_C_locale),
+    FUNC_DEF(test_strcasestr_C_locale),
     FUNC_DEF(test_NSBundle_bundleForClass_nil),
     FUNC_DEF(test_access_combined_mode),
     FUNC_DEF(test_strtoul),
@@ -8438,6 +8479,7 @@ struct {
     FUNC_DEF(test_class_getInstanceMethod),
     FUNC_DEF(test_object_getInstanceVariable),
     FUNC_DEF(test_method_setImplementation),
+    FUNC_DEF(test_method_exchangeImplementations),
 #ifndef DEFINE_ME_WHEN_BUILDING_ON_MACOS
     FUNC_DEF(test_dispatch_once),
 #endif

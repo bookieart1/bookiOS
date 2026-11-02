@@ -300,6 +300,27 @@ fn strncat(env: &mut Environment, s1: MutPtr<u8>, s2: ConstPtr<u8>, n: GuestUSiz
 fn strstr(env: &mut Environment, string: ConstPtr<u8>, substring: ConstPtr<u8>) -> ConstPtr<u8> {
     GenericChar::<u8>::strstr(env, string, substring)
 }
+fn strcasestr(
+    env: &mut Environment,
+    string: ConstPtr<u8>,
+    substring: ConstPtr<u8>,
+) -> ConstPtr<u8> {
+    let string_len = strlen(env, string);
+    let substring_len = strlen(env, substring);
+    if substring_len == 0 {
+        return string;
+    }
+    if substring_len > string_len {
+        return Ptr::null();
+    }
+
+    for offset in 0..=(string_len - substring_len) {
+        if strncasecmp(env, string + offset, substring, substring_len) == 0 {
+            return string + offset;
+        }
+    }
+    Ptr::null()
+}
 fn strchr(env: &mut Environment, path: ConstPtr<u8>, c: u8) -> ConstPtr<u8> {
     GenericChar::<u8>::strchr(env, path, c)
 }
@@ -351,8 +372,28 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(strncasecmp(_, _, _)),
     export_c_func!(strncat(_, _, _)),
     export_c_func!(strstr(_, _)),
+    export_c_func!(strcasestr(_, _)),
     export_c_func!(strchr(_, _)),
     export_c_func!(strrchr(_, _)),
     export_c_func!(strpbrk(_, _)),
     export_c_func!(strlcpy(_, _, _)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strcasestr_finds_case_insensitive_offsets_and_edges() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let haystack = env.mem.alloc_and_write_cstr(b"One Two THREE").cast_const();
+        let two = env.mem.alloc_and_write_cstr(b"two").cast_const();
+        let three = env.mem.alloc_and_write_cstr(b"ThReE").cast_const();
+        let empty = env.mem.alloc_and_write_cstr(b"").cast_const();
+        let missing = env.mem.alloc_and_write_cstr(b"four").cast_const();
+        assert_eq!(strcasestr(&mut env, haystack, two), haystack + 4);
+        assert_eq!(strcasestr(&mut env, haystack, three), haystack + 8);
+        assert_eq!(strcasestr(&mut env, haystack, empty), haystack);
+        assert!(strcasestr(&mut env, haystack, missing).is_null());
+    }
+}

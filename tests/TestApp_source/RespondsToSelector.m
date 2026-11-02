@@ -181,3 +181,42 @@ int test_method_setImplementation(void) {
   [instance release];
   return 0;
 }
+
+int test_method_exchangeImplementations(void) {
+  TestClass *instance = [TestClass new];
+  SEL answer_sel =
+      NSSelectorFromString([NSString stringWithUTF8String:"answer"]);
+  SEL alternate_sel =
+      NSSelectorFromString([NSString stringWithUTF8String:"alternateAnswer"]);
+  Method answer = class_getInstanceMethod([TestClass class], answer_sel);
+  Method alternate = class_getInstanceMethod([TestClass class], alternate_sel);
+  void (*answer_imp)(void) = method_getImplementation(answer);
+  void (*alternate_imp)(void) = method_getImplementation(alternate);
+
+  method_exchangeImplementations(answer, alternate);
+  if ([instance answer] != 84 || [instance alternateAnswer] != 42) {
+    method_exchangeImplementations(answer, alternate);
+    [instance release];
+    return -1;
+  }
+  if (method_getImplementation(answer) != alternate_imp ||
+      method_getImplementation(alternate) != answer_imp) {
+    method_exchangeImplementations(answer, alternate);
+    [instance release];
+    return -2;
+  }
+
+  method_exchangeImplementations(answer, alternate);
+  if ([instance answer] != 42 || [instance alternateAnswer] != 84) {
+    [instance release];
+    return -3;
+  }
+  // Exchanging a method with itself is a no-op.
+  method_exchangeImplementations(answer, answer);
+  if ([instance answer] != 42) {
+    [instance release];
+    return -4;
+  }
+  [instance release];
+  return 0;
+}
