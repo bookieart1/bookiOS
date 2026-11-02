@@ -138,6 +138,7 @@ fn rmdir(env: &mut Environment, path: ConstPtr<u8>) -> i32 {
         set_errno(env, EFAULT);
         return -1;
     };
+    let path_str = path_str.to_owned();
     let guest_path = GuestPath::new(&path_str);
     if !env.fs.exists(guest_path) {
         set_errno(env, ENOENT);
