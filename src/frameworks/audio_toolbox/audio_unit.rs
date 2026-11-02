@@ -63,6 +63,7 @@ const kAudioUnitProperty_SampleRate: AudioUnitPropertyID = 2;
 const kAudioUnitProperty_SetRenderCallback: AudioUnitPropertyID = 23;
 const kAudioUnitProperty_MaximumFramesPerSlice: AudioUnitPropertyID = 14;
 const kAudioUnitProperty_StreamFormat: AudioUnitPropertyID = 8;
+const kAudioUnitProperty_MakeConnection: AudioUnitPropertyID = 9;
 
 const kAudioUnitProperty_ShouldAllocateBuffer: AudioUnitPropertyID = 51;
 
@@ -85,6 +86,15 @@ const INPUT_ELEMENT: AudioUnitElement = 1;
 const kAudioUnitRenderAction_PreRender: u32 = 1 << 2;
 const kAudioUnitRenderAction_PostRender: u32 = 1 << 3;
 const kAudioUnitRenderAction_PostRenderError: u32 = 1 << 4;
+
+#[derive(Copy, Clone, Debug)]
+#[repr(C, packed)]
+struct AudioUnitConnection {
+    source_audio_unit: AudioUnit,
+    source_output_number: u32,
+    dest_input_number: u32,
+}
+unsafe impl SafeRead for AudioUnitConnection {}
 
 fn AudioUnitAddRenderNotify(
     env: &mut Environment,
@@ -131,18 +141,31 @@ fn AudioUnitRemoveRenderNotify(
 }
 
 fn AudioUnitInitialize(env: &mut Environment, in_unit: AudioUnit) -> OSStatus {
-    if !audio_components::State::get(&mut env.framework_state)
+    let Some(kind) = audio_components::State::get(&mut env.framework_state)
         .audio_component_instances
-        .contains_key(&in_unit)
-    {
+        .get(&in_unit)
+        .map(|host| host.kind)
+    else {
         return paramErr;
+    };
+    if kind == audio_components::AudioComponentKind::Output {
+        let run_loop = CFRunLoopGetMain(env);
+        ns_run_loop::add_audio_unit(env, run_loop, in_unit);
     }
-    let run_loop = CFRunLoopGetMain(env);
-    ns_run_loop::add_audio_unit(env, run_loop, in_unit);
     0 // success
 }
 
 fn AudioUnitUninitialize(env: &mut Environment, in_unit: AudioUnit) -> OSStatus {
+    let Some(kind) = audio_components::State::get(&mut env.framework_state)
+        .audio_component_instances
+        .get(&in_unit)
+        .map(|host| host.kind)
+    else {
+        return paramErr;
+    };
+    if kind == audio_components::AudioComponentKind::Mixer3D {
+        return 0;
+    }
     let run_loop = CFRunLoopGetMain(env);
     match ns_run_loop::remove_audio_unit(env, run_loop, in_unit) {
         Ok(_) => 0,
@@ -159,6 +182,37 @@ fn AudioUnitSetProperty(
     in_data: ConstVoidPtr,
     in_data_size: u32,
 ) -> OSStatus {
+    if in_id == kAudioUnitProperty_MakeConnection {
+        if !matches!(in_scope, kAudioUnitScope_Global | kAudioUnitScope_Input)
+            || in_data_size != guest_size_of::<AudioUnitConnection>()
+        {
+            return paramErr;
+        }
+        let connection = env.mem.read(in_data.cast::<AudioUnitConnection>());
+        let source = connection.source_audio_unit;
+        let source_output = connection.source_output_number;
+        let dest_input = connection.dest_input_number;
+        let state = audio_components::State::get(&mut env.framework_state);
+        if source_output != 0
+            || dest_input != in_element
+            || !state.audio_component_instances.contains_key(&source)
+        {
+            return paramErr;
+        }
+        let Some(destination) = state.audio_component_instances.get_mut(&in_unit) else {
+            return paramErr;
+        };
+        destination.connected_source = Some(source);
+        log_dbg!(
+            "AudioUnitSetProperty({:?}, kAudioUnitProperty_MakeConnection, source={:?}, source-output={}, dest-input={}) -> 0",
+            in_unit,
+            source,
+            source_output,
+            dest_input
+        );
+        return 0;
+    }
+
     let Some(host_object) = audio_components::State::get(&mut env.framework_state)
         .audio_component_instances
         .get_mut(&in_unit)
@@ -334,9 +388,11 @@ fn AudioUnitGetProperty(
 }
 
 fn AudioOutputUnitStart(env: &mut Environment, ci: AudioUnit) -> OSStatus {
-    if !audio_components::State::get(&mut env.framework_state)
+    if audio_components::State::get(&mut env.framework_state)
         .audio_component_instances
-        .contains_key(&ci)
+        .get(&ci)
+        .map(|host| host.kind)
+        != Some(audio_components::AudioComponentKind::Output)
     {
         return paramErr;
     }
@@ -414,23 +470,48 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
     } = at_state.audio_session;
 
     let audio_components_state = &mut at_state.audio_components;
+    let Some(output_snapshot) = audio_components_state
+        .audio_component_instances
+        .get(&audio_unit)
+        .cloned()
+    else {
+        return;
+    };
+
+    if !output_snapshot.started {
+        return;
+    }
+
+    if output_snapshot.is_running_handler {
+        return;
+    }
+
+    let callback_snapshot = if output_snapshot.render_callback.is_none() {
+        output_snapshot.connected_source.and_then(|source| {
+            audio_components_state
+                .audio_component_instances
+                .get(&source)
+                .cloned()
+        })
+    } else {
+        None
+    };
+    let effective = callback_snapshot.as_ref().unwrap_or(&output_snapshot);
+    let Some(render_callback) = effective.render_callback else {
+        log!(
+            "Warning: started AudioUnit {:?} has neither a render callback nor a connected source callback; skipping render",
+            audio_unit
+        );
+        return;
+    };
     let audio_unit_host_object = audio_components_state
         .audio_component_instances
         .get_mut(&audio_unit)
-        .unwrap();
-
-    if !audio_unit_host_object.started {
-        return;
-    }
-
-    if audio_unit_host_object.is_running_handler {
-        return;
-    }
-
+        .expect("validated Audio Unit disappeared");
     audio_unit_host_object.is_running_handler = true;
 
-    let input_stream_format = audio_unit_host_object.input_stream_format;
-    let output_stream_format = audio_unit_host_object.output_stream_format;
+    let input_stream_format = effective.input_stream_format;
+    let output_stream_format = effective.output_stream_format;
     let stream_format = if input_stream_format.is_some()
         && output_stream_format.is_some()
         && input_stream_format != output_stream_format
@@ -442,12 +523,12 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
         // output format is defined by the application.
         // (but not both at the same time, see the check above)
         input_stream_format
-            .unwrap_or(output_stream_format.unwrap_or(audio_unit_host_object.global_stream_format))
+            .unwrap_or(output_stream_format.unwrap_or(effective.global_stream_format))
     };
     let sample_rate = render_sample_rate(
         input_stream_format.as_ref(),
         output_stream_format.as_ref(),
-        &audio_unit_host_object.global_stream_format,
+        &effective.global_stream_format,
         current_hardware_sample_rate,
     );
 
@@ -537,8 +618,11 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
     let AURenderCallbackStruct {
         input_proc: inputProc,
         input_proc_ref_con: inputProcRefCon,
-    } = audio_unit_host_object.render_callback.unwrap();
-    let render_notifies = audio_unit_host_object.render_notifies.clone();
+    } = render_callback;
+    let mut render_notifies = audio_unit_host_object.render_notifies.clone();
+    if let Some(source) = callback_snapshot.as_ref() {
+        render_notifies.extend(source.render_notifies.iter().copied());
+    }
     let frames_rendered = audio_unit_host_object.frames_rendered;
     let host_time = crate::libc::mach::time::mach_absolute_time(env);
     let time_stamp = env.mem.alloc_and_write(AudioTimeStamp {

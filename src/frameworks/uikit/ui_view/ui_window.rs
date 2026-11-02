@@ -370,6 +370,9 @@ pub const UIKeyboardDidShowNotification: &str = "UIKeyboardDidShowNotification";
 pub const UIKeyboardWillHideNotification: &str = "UIKeyboardWillHideNotification";
 pub const UIKeyboardDidHideNotification: &str = "UIKeyboardDidHideNotification";
 pub const UIKeyboardBoundsUserInfoKey: &str = "UIKeyboardBoundsUserInfoKey";
+pub const UIKeyboardAnimationDurationUserInfoKey: &str =
+    "UIKeyboardAnimationDurationUserInfoKey";
+pub const UIKeyboardAnimationCurveUserInfoKey: &str = "UIKeyboardAnimationCurveUserInfoKey";
 
 pub const CONSTANTS: ConstantExports = &[
     (
@@ -395,6 +398,14 @@ pub const CONSTANTS: ConstantExports = &[
     (
         "_UIKeyboardBoundsUserInfoKey",
         HostConstant::NSString(UIKeyboardBoundsUserInfoKey),
+    ),
+    (
+        "_UIKeyboardAnimationDurationUserInfoKey",
+        HostConstant::NSString(UIKeyboardAnimationDurationUserInfoKey),
+    ),
+    (
+        "_UIKeyboardAnimationCurveUserInfoKey",
+        HostConstant::NSString(UIKeyboardAnimationCurveUserInfoKey),
     ),
     (
         "_UIWindowLevelNormal",

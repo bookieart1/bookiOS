@@ -284,11 +284,28 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())invoke {
     record_invocation_state(env, "invoke", this, -1);
-    // Safeguard: all arguments must be set (except first two)
-    let arguments: &Vec<Option<MutVoidPtr>> = env.objc.borrow::<NSInvocationHostObject>(this).arguments.as_ref();
-    let set_count = arguments.iter().flatten().count();
-    let all_count = arguments.len();
-    assert_eq!(set_count + 2, all_count);
+    // Native NSInvocation storage is zero-filled. Preserve strict handling for
+    // unsupported scalar layouts, but materialize omitted object arguments as
+    // nil instead of treating the untouched zero slot as an emulator fault.
+    let missing_object_arguments: Vec<usize> = {
+        let host = env.objc.borrow::<NSInvocationHostObject>(this);
+        host.arguments
+            .iter()
+            .enumerate()
+            .skip(2)
+            .filter_map(|(index, argument)| {
+                argument.is_none().then(|| {
+                    assert_eq!(host.argument_types[index], "@");
+                    index
+                })
+            })
+            .collect()
+    };
+    for index in missing_object_arguments {
+        let zero = env.mem.alloc_and_write(nil).cast();
+        env.objc.borrow_mut::<NSInvocationHostObject>(this).arguments[index] = Some(zero);
+        record_invocation_state(env, "default-nil-argument", this, index as i32);
+    }
 
     // `call_from_host` re-use
     // TODO: retval_ptr

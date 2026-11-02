@@ -29,6 +29,7 @@ struct NSNumberFormatterHostObject {
     lenient: bool,
     positive_format: id,
     negative_format: id,
+    locale: id,
 }
 impl HostObject for NSNumberFormatterHostObject {}
 
@@ -50,20 +51,23 @@ pub const CLASSES: ClassExports = objc_classes! {
         lenient: false,
         positive_format: nil,
         negative_format: nil,
+        locale: nil,
     });
     env.objc.alloc_object(this, host_object, &mut env.mem)
 }
 
 - (())dealloc {
-    let (positive_format, negative_format) = {
+    let (positive_format, negative_format, locale) = {
         let state = env.objc.borrow_mut::<NSNumberFormatterHostObject>(this);
         (
             std::mem::replace(&mut state.positive_format, nil),
             std::mem::replace(&mut state.negative_format, nil),
+            std::mem::replace(&mut state.locale, nil),
         )
     };
     release(env, positive_format);
     release(env, negative_format);
+    release(env, locale);
     env.objc.dealloc_object(this, &mut env.mem)
 }
 
@@ -129,6 +133,18 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (())setNegativeFormat:(id)format {
     set_format(env, this, format, false);
+}
+
+- (id)locale {
+    env.objc.borrow::<NSNumberFormatterHostObject>(this).locale
+}
+- (())setLocale:(id)locale {
+    let copied: id = if locale == nil { nil } else { msg![env; locale copy] };
+    let old = std::mem::replace(
+        &mut env.objc.borrow_mut::<NSNumberFormatterHostObject>(this).locale,
+        copied,
+    );
+    release(env, old);
 }
 
 - (id)stringFromNumber:(id)number {
@@ -386,6 +402,19 @@ mod tests {
         () = msg![env; formatter setFormatterBehavior:1040u32];
         let behavior: NSUInteger = msg![env; formatter formatterBehavior];
         assert_eq!(behavior, 1040);
+        release(env, formatter);
+    }
+
+    #[test]
+    fn locale_is_copied_and_round_trips() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let formatter: id = msg_class![env; NSNumberFormatter new];
+        let locale = ns_string::from_rust_string(env, "en_US".to_owned());
+        () = msg![env; formatter setLocale:locale];
+        release(env, locale);
+        let stored: id = msg![env; formatter locale];
+        assert_eq!(ns_string::to_rust_string(env, stored), "en_US");
         release(env, formatter);
     }
 }

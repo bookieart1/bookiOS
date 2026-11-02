@@ -24,11 +24,19 @@ use crate::mem::{ConstPtr, ConstVoidPtr, MutPtr, SafeRead};
 const kAudioUnitType_Output: u32 = fourcc(b"auou");
 const kAudioUnitSubType_RemoteIO: u32 = fourcc(b"rioc");
 const kAudioUnitSubType_VoiceProcessingIO: u32 = fourcc(b"vpio");
+const kAudioUnitType_Mixer: u32 = fourcc(b"aumx");
+const kAudioUnitSubType_3DMixer: u32 = fourcc(b"3dem");
 const kAudioUnitManufacturer_Apple: u32 = fourcc(b"appl");
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum AudioComponentKind {
+    Output,
+    Mixer3D,
+}
 
 #[derive(Default)]
 pub struct State {
-    pub audio_component: AudioComponent,
+    audio_components: HashMap<AudioComponent, AudioComponentKind>,
     pub audio_component_instances:
         HashMap<AudioComponentInstance, AudioComponentInstanceHostObject>,
 }
@@ -40,6 +48,7 @@ impl State {
 
 #[derive(Clone)]
 pub struct AudioComponentInstanceHostObject {
+    pub kind: AudioComponentKind,
     pub started: bool,
     pub maximum_frames_per_slice: u32,
     pub global_stream_format: AudioStreamBasicDescription,
@@ -52,12 +61,14 @@ pub struct AudioComponentInstanceHostObject {
     pub frames_rendered: u64,
     pub al_source: Option<ALuint>,
     pub is_running_handler: bool,
+    pub connected_source: Option<AudioComponentInstance>,
 }
 impl Default for AudioComponentInstanceHostObject {
     fn default() -> Self {
         // Default values obtained from an iPod Touch 4 running iOS 6.1.6
         // through a test app built targetting iOS 2.0
         AudioComponentInstanceHostObject {
+            kind: AudioComponentKind::Output,
             started: false,
             // returning 1024 based on https://developer.apple.com/documentation/audiotoolbox/kaudiounitproperty_maximumframesperslice
             maximum_frames_per_slice: 1024,
@@ -83,6 +94,7 @@ impl Default for AudioComponentInstanceHostObject {
             frames_rendered: 0,
             al_source: None,
             is_running_handler: false,
+            connected_source: None,
         }
     }
 }
@@ -135,14 +147,25 @@ fn AudioComponentFindNext(
     let component_type = audio_comp_descr.component_type;
     let component_sub_type = audio_comp_descr.component_sub_type;
     let component_manufacturer = audio_comp_descr.component_manufacturer;
-    // Only output is supported. VoiceProcessingIO is RemoteIO with echo
-    // cancellation for voice chat, so it's treated as RemoteIO. A field of 0
-    // matches anything.
-    let is_supported = component_type == kAudioUnitType_Output
+    // VoiceProcessingIO is RemoteIO with echo cancellation for voice chat, so
+    // it is treated as RemoteIO. Peggle and other OpenAL-era titles use the
+    // historical Apple 3D mixer in front of RemoteIO. A field of 0 matches any
+    // manufacturer.
+    let kind = if component_type == kAudioUnitType_Output
         && (component_sub_type == kAudioUnitSubType_RemoteIO
             || component_sub_type == kAudioUnitSubType_VoiceProcessingIO)
-        && matches!(component_manufacturer, 0 | kAudioUnitManufacturer_Apple);
-    if !is_supported {
+        && matches!(component_manufacturer, 0 | kAudioUnitManufacturer_Apple)
+    {
+        Some(AudioComponentKind::Output)
+    } else if component_type == kAudioUnitType_Mixer
+        && component_sub_type == kAudioUnitSubType_3DMixer
+        && matches!(component_manufacturer, 0 | kAudioUnitManufacturer_Apple)
+    {
+        Some(AudioComponentKind::Mixer3D)
+    } else {
+        None
+    };
+    let Some(kind) = kind else {
         // As on a device without such a component.
         log!(
             "Warning: AudioComponentFindNext() for unsupported component {} {} {}, returning NULL",
@@ -151,14 +174,18 @@ fn AudioComponentFindNext(
             debug_fourcc(component_manufacturer)
         );
         return AudioComponent::null();
-    }
+    };
 
     let state = State::get(&mut env.framework_state);
-    if state.audio_component.is_null() {
-        state.audio_component = env.mem.alloc_and_write(OpaqueAudioComponent { _pad: 0 });
+    if let Some((&component, _)) = state
+        .audio_components
+        .iter()
+        .find(|(_, existing_kind)| **existing_kind == kind)
+    {
+        return component;
     }
-
-    let out_component: AudioComponent = state.audio_component;
+    let out_component = env.mem.alloc_and_write(OpaqueAudioComponent { _pad: 0 });
+    state.audio_components.insert(out_component, kind);
 
     log!(
         "TODO: AudioComponentFindNext({:?}, {:?}) -> {:?}",
@@ -174,7 +201,20 @@ fn AudioComponentInstanceNew(
     in_component: AudioComponent,
     out_instance: MutPtr<AudioComponentInstance>,
 ) -> OSStatus {
-    let host_object = AudioComponentInstanceHostObject::default();
+    if out_instance.is_null() {
+        return paramErr;
+    }
+    let Some(&kind) = State::get(&mut env.framework_state)
+        .audio_components
+        .get(&in_component)
+    else {
+        env.mem.write(out_instance, AudioComponentInstance::null());
+        return paramErr;
+    };
+    let host_object = AudioComponentInstanceHostObject {
+        kind,
+        ..Default::default()
+    };
 
     let guest_instance: AudioComponentInstance = env
         .mem
@@ -199,12 +239,14 @@ fn AudioComponentInstanceDispose(
     env: &mut Environment,
     in_instance: AudioComponentInstance,
 ) -> OSStatus {
-    let result = if in_instance.is_null() {
+    let result = if in_instance.is_null()
+        || State::get(&mut env.framework_state)
+            .audio_component_instances
+            .remove(&in_instance)
+            .is_none()
+    {
         paramErr
     } else {
-        State::get(&mut env.framework_state)
-            .audio_component_instances
-            .remove(&in_instance);
         env.mem.free(in_instance.cast());
         0
     };

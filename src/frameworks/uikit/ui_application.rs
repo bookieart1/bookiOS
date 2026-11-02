@@ -601,6 +601,17 @@ const UIApplicationLaunchOptionsRemoteNotificationKey: &str =
 const UIApplicationLaunchOptionsURLKey: &str = "UIApplicationLaunchOptionsURLKey";
 const UIApplicationDidReceiveMemoryWarningNotification: &str =
     "UIApplicationDidReceiveMemoryWarningNotification";
+const UIApplicationWillChangeStatusBarOrientationNotification: &str =
+    "UIApplicationWillChangeStatusBarOrientationNotification";
+const UIApplicationDidChangeStatusBarOrientationNotification: &str =
+    "UIApplicationDidChangeStatusBarOrientationNotification";
+const UIApplicationWillChangeStatusBarFrameNotification: &str =
+    "UIApplicationWillChangeStatusBarFrameNotification";
+const UIApplicationDidChangeStatusBarFrameNotification: &str =
+    "UIApplicationDidChangeStatusBarFrameNotification";
+const UIApplicationStatusBarOrientationUserInfoKey: &str =
+    "UIApplicationStatusBarOrientationUserInfoKey";
+const UIApplicationStatusBarFrameUserInfoKey: &str = "UIApplicationStatusBarFrameUserInfoKey";
 
 /// `UIApplicationLaunchOptionsKey` and `NSNotificationName` values.
 /// (Both types are strings)
@@ -640,6 +651,30 @@ pub const CONSTANTS: ConstantExports = &[
     (
         "_UIApplicationLaunchOptionsURLKey",
         HostConstant::NSString(UIApplicationLaunchOptionsURLKey),
+    ),
+    (
+        "_UIApplicationWillChangeStatusBarOrientationNotification",
+        HostConstant::NSString(UIApplicationWillChangeStatusBarOrientationNotification),
+    ),
+    (
+        "_UIApplicationDidChangeStatusBarOrientationNotification",
+        HostConstant::NSString(UIApplicationDidChangeStatusBarOrientationNotification),
+    ),
+    (
+        "_UIApplicationWillChangeStatusBarFrameNotification",
+        HostConstant::NSString(UIApplicationWillChangeStatusBarFrameNotification),
+    ),
+    (
+        "_UIApplicationDidChangeStatusBarFrameNotification",
+        HostConstant::NSString(UIApplicationDidChangeStatusBarFrameNotification),
+    ),
+    (
+        "_UIApplicationStatusBarOrientationUserInfoKey",
+        HostConstant::NSString(UIApplicationStatusBarOrientationUserInfoKey),
+    ),
+    (
+        "_UIApplicationStatusBarFrameUserInfoKey",
+        HostConstant::NSString(UIApplicationStatusBarFrameUserInfoKey),
     ),
 ];
 

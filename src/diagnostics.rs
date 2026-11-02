@@ -26,16 +26,16 @@ const BUNDLE_CANDIDATES: usize = 16;
 const BUNDLE_DIRECTORY_ENTRIES: usize = 24;
 const COLLECTION_EVENTS: usize = 48;
 const INVOCATION_EVENTS: usize = 32;
-const ARRAY_EVENTS: usize = 48;
+const ARRAY_EVENTS: usize = 256;
 const WATCHED_OBJECTS: usize = 16;
 const OBJECT_LIFETIME_EVENTS: usize = 64;
-const DICTIONARY_ORIGINS: usize = 256;
+const DICTIONARY_ORIGINS: usize = 1024;
 const HEALTHY_PRESENT_INTERVAL: Duration = Duration::from_millis(100);
 const SLOW_PRESENT_INTERVAL: Duration = Duration::from_millis(180);
 const HEALTHY_PRESENT_STREAK: u16 = 30;
 const SLOW_PRESENT_STREAK: u8 = 3;
 #[cfg(test)]
-const MAX_RECORDER_BYTES: usize = 192 * 1024;
+const MAX_RECORDER_BYTES: usize = 320 * 1024;
 
 #[derive(Clone, Copy, Debug)]
 struct Text {

@@ -318,17 +318,25 @@ forControlEvents:(UIControlEvents)events {
             msg![env; this nextResponder]
         };
         let mut found = nil;
-        // A malformed responder cycle must not hang the emulator.
-        for _ in 0..64 {
-            if candidate == nil {
+        // A malformed responder cycle must not hang the emulator. If a stale
+        // first responder no longer leads into the active hierarchy, UIKit can
+        // still resolve the action from the sending control's chain.
+        for start in [candidate, msg![env; this nextResponder]] {
+            candidate = start;
+            for _ in 0..64 {
+                if candidate == nil {
+                    break;
+                }
+                let responds: bool = msg![env; candidate respondsToSelector:action];
+                if responds {
+                    found = candidate;
+                    break;
+                }
+                candidate = msg![env; candidate nextResponder];
+            }
+            if found != nil {
                 break;
             }
-            let responds: bool = msg![env; candidate respondsToSelector:action];
-            if responds {
-                found = candidate;
-                break;
-            }
-            candidate = msg![env; candidate nextResponder];
         }
         if found == nil {
             log!(

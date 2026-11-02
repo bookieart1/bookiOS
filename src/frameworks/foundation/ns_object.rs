@@ -64,6 +64,42 @@ fn method_signature(env: &mut Environment, class: Class, sel: SEL) -> id {
     msg_class![env; NSMethodSignature signatureWithObjCTypes:sig]
 }
 
+fn perform_selector_on_thread(
+    env: &mut Environment,
+    receiver: id,
+    sel: SEL,
+    thread: id,
+    arg: id,
+    wait: bool,
+) {
+    log_dbg!(
+        "performSelector:{} onThread:{:?} withObject:{:?} waitUntilDone:{}",
+        sel.as_str(&env.mem),
+        thread,
+        arg,
+        wait
+    );
+
+    let thread_id = thread_id_for_ns_thread(env, thread)
+        .expect("performSelector:onThread: target NSThread has not been started");
+    if wait && thread_id == env.current_thread {
+        if sel.as_str(&env.mem).ends_with(':') {
+            () = msg_send_no_type_checking(env, (receiver, sel, arg));
+        } else {
+            () = msg_send(env, (receiver, sel));
+        }
+        return;
+    }
+
+    let run_loop_class = env.objc.get_known_class("NSRunLoop", &mut env.mem);
+    let run_loop = run_loop_for_thread(env, run_loop_class, thread_id);
+    let sem = add_perform_request(env, run_loop, receiver, sel, arg, None, wait);
+    if wait {
+        sem_wait(env, sem);
+        host_destroy_semaphore(env, sem);
+    }
+}
+
 pub const CLASSES: ClassExports = objc_classes! {
 
 (env, this, _cmd);
@@ -716,32 +752,18 @@ forUndefinedKey:(id)key { // NSString*
               onThread:(id)thread
             withObject:(id)arg
          waitUntilDone:(bool)wait {
-    log_dbg!(
-        "performSelector:{} onThread:{:?} withObject:{:?} waitUntilDone:{}",
-        sel.as_str(&env.mem),
-        thread,
-        arg,
-        wait
-    );
+    perform_selector_on_thread(env, this, sel, thread, arg, wait);
+}
 
-    let thread_id = thread_id_for_ns_thread(env, thread)
-        .expect("performSelector:onThread: target NSThread has not been started");
-    if wait && thread_id == env.current_thread {
-        if sel.as_str(&env.mem).ends_with(':') {
-            () = msg_send_no_type_checking(env, (this, sel, arg));
-        } else {
-            () = msg_send(env, (this, sel));
-        }
-        return;
-    }
-
-    let run_loop_class = env.objc.get_known_class("NSRunLoop", &mut env.mem);
-    let run_loop = run_loop_for_thread(env, run_loop_class, thread_id);
-    let sem = add_perform_request(env, run_loop, this, sel, arg, None, wait);
-    if wait {
-        sem_wait(env, sem);
-        host_destroy_semaphore(env, sem);
-    }
+- (())performSelector:(SEL)sel
+              onThread:(id)thread
+            withObject:(id)arg
+         waitUntilDone:(bool)wait
+                 modes:(id)_modes {
+    // The emulated run loop currently has a single effective mode, so all
+    // accepted mode arrays map to that queue. Scheduling and wait semantics
+    // are otherwise shared with the four-argument API.
+    perform_selector_on_thread(env, this, sel, thread, arg, wait);
 }
 
 - (())performSelectorOnMainThread:(SEL)sel withObject:(id)arg waitUntilDone:(bool)wait {

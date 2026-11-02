@@ -6,7 +6,7 @@
 //! `UIButton`.
 
 use super::{UIControlState, UIControlStateNormal};
-use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect};
+use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect, CGSize};
 use crate::frameworks::foundation::ns_string::{from_rust_string, get_static_str, to_rust_string};
 use crate::frameworks::foundation::{NSInteger, NSUInteger};
 use crate::frameworks::uikit::ui_font::UITextAlignmentCenter;
@@ -59,6 +59,7 @@ pub struct UIButtonHostObject {
     title_colors_for_states: HashMap<UIControlState, id>,
     /// Values are `UIColor*`
     title_shadow_colors_for_states: HashMap<UIControlState, id>,
+    title_shadow_offset: CGSize,
     /// Values are `UIImage*`
     images_for_states: HashMap<UIControlState, id>,
     /// Values are `UIImage*`
@@ -76,6 +77,7 @@ impl Default for UIButtonHostObject {
             titles_for_states: HashMap::new(),
             title_colors_for_states: HashMap::new(),
             title_shadow_colors_for_states: HashMap::new(),
+            title_shadow_offset: CGSize::default(),
             images_for_states: HashMap::new(),
             background_images_for_states: HashMap::new(),
         }
@@ -254,6 +256,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         titles_for_states,
         title_colors_for_states,
         title_shadow_colors_for_states,
+        title_shadow_offset: _,
         images_for_states,
         background_images_for_states
     } = std::mem::take(env.objc.borrow_mut(this));
@@ -309,6 +312,18 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())setEnabled:(bool)enabled {
     () = msg_super![env; this setEnabled:enabled];
     update(env, this);
+}
+
+- (CGSize)titleShadowOffset {
+    env.objc.borrow::<UIButtonHostObject>(this).title_shadow_offset
+}
+- (())setTitleShadowOffset:(CGSize)offset {
+    let title_label = {
+        let host = env.objc.borrow_mut::<UIButtonHostObject>(this);
+        host.title_shadow_offset = offset;
+        host.title_label
+    };
+    () = msg![env; title_label setShadowOffset:offset];
 }
 - (())setSelected:(bool)selected {
     () = msg_super![env; this setSelected:selected];

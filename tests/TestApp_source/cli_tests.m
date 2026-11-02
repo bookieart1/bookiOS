@@ -4286,6 +4286,8 @@ int test_NSURL_path_components() {
     return -5;
   if (![[url path] isEqualToString:@"/a path/file"])
     return -2;
+  if (![[url query] isEqualToString:@"query=/ignored"])
+    return -8;
 
   NSURL *emptyPath = [NSURL URLWithString:@"https://example.com"];
   if (![[emptyPath path] isEqualToString:@""])
@@ -4300,6 +4302,8 @@ int test_NSURL_path_components() {
   NSURL *fileURL = [NSURL fileURLWithPath:@"/tmp/test"];
   if (![[fileURL scheme] isEqualToString:@"file"])
     return -7;
+  if ([fileURL query] != nil)
+    return -9;
   return 0;
 }
 
@@ -6782,6 +6786,20 @@ int test_NSInvocation() {
   return 0;
 }
 
+int test_NSInvocation_omitted_object_argument_defaults_to_nil() {
+  NSAutoreleasePool *pool = [NSAutoreleasePool new];
+  InvocationTarget *target = [InvocationTarget new];
+  NSMethodSignature *sig =
+      [NSMethodSignature signatureWithObjCTypes:"v12@0:4@8"];
+  NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+  [inv setTarget:target];
+  [inv setSelector:NSSelectorFromString(@"storeValue:")];
+  [inv invoke];
+  int result = target->receivedValue == nil ? 0 : -1;
+  [pool drain];
+  return result;
+}
+
 int test_NSInvocation_invokeWithTarget() {
   NSAutoreleasePool *pool = [NSAutoreleasePool new];
 
@@ -8680,6 +8698,9 @@ int test_AudioUnit_invalid_instance_contract() {
     return -3;
   if (AudioOutputUnitStart(NULL) != -50)
     return -4;
+  AudioUnit unit = (AudioUnit)0x1;
+  if (AudioComponentInstanceNew(NULL, &unit) != -50 || unit != NULL)
+    return -5;
   return 0;
 #endif
 }
@@ -9014,6 +9035,7 @@ struct {
     FUNC_DEF(test_NSNumber_stringValue),
     FUNC_DEF(test_NSMethodSignature),
     FUNC_DEF(test_NSInvocation),
+    FUNC_DEF(test_NSInvocation_omitted_object_argument_defaults_to_nil),
     FUNC_DEF(test_NSInvocation_invokeWithTarget),
     FUNC_DEF(test_NSInvocation_retainArguments),
     FUNC_DEF(test_NSInvocation_pointer),

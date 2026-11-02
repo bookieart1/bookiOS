@@ -220,6 +220,18 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, path)
 }
 
+- (id)query {
+    let url = match *env.objc.borrow(this) {
+        NSURLHostObject::FileURL { .. } => return nil,
+        NSURLHostObject::OtherURL { ns_string } => to_rust_string(env, ns_string).into_owned(),
+    };
+    let Some(query) = url_query(&url) else {
+        return nil;
+    };
+    let query = from_rust_string(env, query);
+    autorelease(env, query)
+}
+
 - (id)absoluteString {
     match *env.objc.borrow(this) {
         // FIXME: don't assume URL is already absolute
@@ -377,6 +389,10 @@ fn url_path(url: &str) -> Option<String> {
     Some(path)
 }
 
+fn url_query(url: &str) -> Option<String> {
+    split_url(url).3.map(str::to_string)
+}
+
 /// Shortcut for host code, provides a view of a URL as a path.
 /// TODO: Try to avoid allocating a new GuestPathBuf in more cases.
 pub fn to_rust_path(env: &mut Environment, url: id) -> Cow<'static, GuestPath> {
@@ -496,7 +512,7 @@ fn resolve_url_reference(base: &str, reference: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{resolve_url_reference, url_host, url_path, url_scheme};
+    use super::{resolve_url_reference, url_host, url_path, url_query, url_scheme};
 
     #[test]
     fn test_resolve_url_reference() {
@@ -602,5 +618,15 @@ mod tests {
         assert_eq!(url_scheme("relative/path"), None);
         assert_eq!(url_scheme("1invalid:value"), None);
         assert_eq!(url_scheme("invalid space:value"), None);
+    }
+
+    #[test]
+    fn test_url_query() {
+        assert_eq!(
+            url_query("https://example.com/path?name=one%20two&empty=#fragment"),
+            Some("name=one%20two&empty=".to_string())
+        );
+        assert_eq!(url_query("https://example.com/path?"), Some(String::new()));
+        assert_eq!(url_query("https://example.com/path#fragment"), None);
     }
 }

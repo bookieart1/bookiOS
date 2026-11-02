@@ -3,7 +3,7 @@
 //! See also [crate::frameworks::core_graphics::cg_geometry].
 
 use crate::abi::GuestArg;
-use crate::dyld::{export_c_func, FunctionExports};
+use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
 use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect, CGSize};
 use crate::frameworks::foundation::ns_string;
 use crate::objc::{autorelease, id};
@@ -78,3 +78,13 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(NSStringFromCGSize(_)),
     export_c_func!(NSStringFromCGRect(_)),
 ];
+
+pub const CONSTANTS: ConstantExports = &[(
+    "_UIEdgeInsetsZero",
+    HostConstant::Custom(|env| {
+        env.mem
+            .alloc_and_write(UIEdgeInsets::default())
+            .cast()
+            .cast_const()
+    }),
+)];

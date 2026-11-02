@@ -737,6 +737,7 @@ fn get_equivalent_font(system_font: &str) -> Option<FontKind> {
         "STHeitiSC-Medium" => None,
         "STHeitiSC-Light" => None,
         // Font Family: American Typewriter
+        "American Typewriter" => Some(FontKind::MonoRegular),
         "AmericanTypewriter" => Some(FontKind::MonoRegular),
         "AmericanTypewriter-Bold" => Some(FontKind::MonoBold),
         // Font Family: Helvetica
