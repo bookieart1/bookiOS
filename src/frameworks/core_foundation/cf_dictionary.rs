@@ -35,7 +35,11 @@ fn CFDictionaryCreateMutable(
     value_callbacks: ConstPtr<CFDictionaryValueCallBacks>,
 ) -> CFMutableDictionaryRef {
     assert!(allocator == kCFAllocatorDefault || env.mem.read(allocator).is_system_default()); // unimplemented
-    assert_eq!(capacity, 0); // TODO: fixed capacity support
+    // Core Foundation treats this as an initial-capacity hint, not a fixed
+    // limit. The backing NSMutableDictionary grows dynamically, so it is
+    // correct to accept any non-negative hint even though it does not need to
+    // reserve storage eagerly.
+    assert!(capacity >= 0);
 
     let new = msg_class![env; _touchHLE_NSMutableDictionary_non_retaining alloc];
     msg![env; new initWithKeyCallbacks:key_callbacks andValueCallbacks:value_callbacks]

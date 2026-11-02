@@ -1263,6 +1263,22 @@ pub(super) fn class_getInstanceMethod(
     ptr
 }
 
+/// Returns the class method named by `name`, searching superclass metaclasses
+/// just as the Objective-C runtime does. Class methods are ordinary instance
+/// methods on the receiver's metaclass, so the existing canonical Method
+/// handle machinery applies unchanged.
+pub(super) fn class_getClassMethod(
+    env: &mut Environment,
+    cls: Class,
+    name: SEL,
+) -> MutPtr<method_t> {
+    if cls == nil {
+        return Ptr::null();
+    }
+    let metaclass = ObjC::read_isa(cls, &env.mem);
+    class_getInstanceMethod(env, metaclass, name)
+}
+
 pub(super) fn method_getImplementation(
     env: &mut Environment,
     method: ConstPtr<method_t>,

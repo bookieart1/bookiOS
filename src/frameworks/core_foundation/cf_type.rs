@@ -13,6 +13,17 @@ use crate::{msg, objc};
 use crate::{msg_class, Environment};
 
 pub type CFTypeRef = objc::id;
+pub type CFTypeID = u32;
+
+/// Core Foundation type identifiers are opaque and process-local. Every Core
+/// Foundation object in touchHLE is toll-free bridged to an Objective-C object,
+/// so its stable dynamic class is the corresponding stable type identity.
+/// Apps must compare the returned value, not depend on a release-specific
+/// numeric constant.
+pub fn CFGetTypeID(env: &mut Environment, object: CFTypeRef) -> CFTypeID {
+    assert!(!object.is_null());
+    ObjC::read_isa(object, &env.mem).to_bits()
+}
 
 pub fn CFRetain(env: &mut Environment, object: CFTypeRef) -> CFTypeRef {
     assert!(!object.is_null()); // not allowed, unlike for normal objc objects
@@ -60,6 +71,7 @@ pub fn CFHash(env: &mut Environment, object: CFTypeRef) -> CFHashCode {
 }
 
 pub const FUNCTIONS: FunctionExports = &[
+    export_c_func!(CFGetTypeID(_)),
     export_c_func!(CFRetain(_)),
     export_c_func!(CFRelease(_)),
     export_c_func!(CFGetRetainCount(_)),

@@ -61,6 +61,8 @@ static inline NSRange NSMakeRange(NSUInteger loc, NSUInteger len) {
 typedef struct objc_method *Method;
 typedef struct objc_ivar *Ivar;
 Method class_getInstanceMethod(Class cls, SEL name);
+Method class_getClassMethod(Class cls, SEL name);
+const char *class_getName(Class cls);
 void (*method_getImplementation(Method m))(void);
 void (*method_setImplementation(Method m, void (*imp)(void)))(void);
 Ivar object_getInstanceVariable(id obj, const char *name, void **outValue);

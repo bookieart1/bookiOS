@@ -78,6 +78,17 @@ int test_class_getInstanceMethod(void) {
   if (class_getInstanceMethod([TestClass class], class_sel) != 0) {
     return -4;
   }
+  Method class_method = class_getClassMethod([TestClass class], class_sel);
+  if (class_method == 0 || test_method_name(class_method) != class_sel ||
+      class_getClassMethod([TestClass class], class_sel) != class_method ||
+      class_getClassMethod([TestClass class], answer_sel) != 0 ||
+      class_getClassMethod((Class)0, class_sel) != 0) {
+    return -7;
+  }
+  if (strcmp(class_getName([TestClass class]), "TestClass") != 0 ||
+      strcmp(class_getName((Class)0), "") != 0) {
+    return -8;
+  }
   // Inherited from touchHLE's NSObject.
   SEL retain_count_sel =
       NSSelectorFromString([NSString stringWithUTF8String:"retainCount"]);

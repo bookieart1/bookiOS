@@ -79,6 +79,8 @@ pub(super) struct EAGLContextHostObject {
     /// other platforms, where binding 0 is genuinely the default
     /// framebuffer.
     drawable_framebuffer: GLuint,
+    /// Number of bounded first-presentation state snapshots already logged.
+    diagnostic_present_snapshots: u8,
 }
 impl HostObject for EAGLContextHostObject {}
 
@@ -96,6 +98,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         next_frame_due: None,
         mapped_buffers: HashMap::new(),
         drawable_framebuffer: 0,
+        diagnostic_present_snapshots: 0,
     });
     env.objc.alloc_object(this, host_object, &mut env.mem)
 }
@@ -266,7 +269,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     let window = env.window.as_mut().expect("OpenGL ES is not supported in headless mode");
 
-    let renderbuffer = {
+    let (renderbuffer, framebuffer) = {
         // Unclear from documentation if this method requires an appropriate
         // context to already be active, but that seems to be the case
         // in practice?
@@ -275,9 +278,21 @@ pub const CLASSES: ClassExports = objc_classes! {
             gles.RenderbufferStorageOES(target, internalformat, width.try_into().unwrap(), height.try_into().unwrap());
             let mut renderbuffer = 0;
             gles.GetIntegerv(gles11::RENDERBUFFER_BINDING_OES, &mut renderbuffer);
-            renderbuffer as _
+            let mut framebuffer = 0;
+            gles.GetIntegerv(gles11::FRAMEBUFFER_BINDING_OES, &mut framebuffer);
+            (renderbuffer as _, framebuffer as GLuint)
         }
     };
+
+    log!(
+        "EAGL drawable storage: context={:?} drawable={:?} size={}x{} renderbuffer={} framebuffer={}",
+        this,
+        drawable,
+        width,
+        height,
+        renderbuffer,
+        framebuffer
+    );
 
     retain(env, drawable);
     let host_obj = env.objc.borrow_mut::<EAGLContextHostObject>(this);
@@ -308,6 +323,16 @@ pub const CLASSES: ClassExports = objc_classes! {
             .count_frame(format_args!("EAGLContext {this:?}"));
     }
 
+    let diagnostic_snapshot = {
+        let host = env.objc.borrow_mut::<EAGLContextHostObject>(this);
+        if host.diagnostic_present_snapshots < 3 {
+            host.diagnostic_present_snapshots += 1;
+            Some(host.diagnostic_present_snapshots)
+        } else {
+            None
+        }
+    };
+
     let fullscreen_layer = find_fullscreen_eagl_layer(env);
 
     // Unclear from documentation if this method requires the context to be
@@ -320,6 +345,30 @@ pub const CLASSES: ClassExports = objc_classes! {
         gles.GetIntegerv(gles11::RENDERBUFFER_BINDING_OES, &mut renderbuffer);
         renderbuffer as _
     };
+
+    if let Some(snapshot) = diagnostic_snapshot {
+        let (render_width, render_height) = unsafe { get_renderbuffer_size(gles.as_mut()) };
+        let viewport = unsafe { get_ints(gles.as_mut(), gles11::VIEWPORT) };
+        let scissor = unsafe { get_ints(gles.as_mut(), gles11::SCISSOR_BOX) };
+        let framebuffer = unsafe { get_int(gles.as_mut(), gles11::FRAMEBUFFER_BINDING_OES) };
+        let framebuffer_status = unsafe {
+            gles.CheckFramebufferStatusOES(gles11::FRAMEBUFFER_OES)
+        };
+        let scissor_enabled = unsafe { gles.IsEnabled(gles11::SCISSOR_TEST) } != gles11::FALSE;
+        log!(
+            "EAGL present state {}/3: context={:?} renderbuffer={} size={}x{} framebuffer={} status={:#x} viewport={:?} scissor-enabled={} scissor={:?}",
+            snapshot,
+            this,
+            renderbuffer,
+            render_width,
+            render_height,
+            framebuffer,
+            framebuffer_status,
+            viewport,
+            scissor_enabled,
+            scissor
+        );
+    }
 
     std::mem::drop(gles);
 

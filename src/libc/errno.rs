@@ -40,6 +40,7 @@ pub const ETIMEDOUT: i32 = 60;
 pub const ECONNREFUSED: i32 = 61;
 pub const EHOSTUNREACH: i32 = 65;
 pub const EOVERFLOW: i32 = 84;
+pub const EILSEQ: i32 = 92;
 
 #[derive(Default)]
 pub struct State {
@@ -136,6 +137,7 @@ fn strerror(env: &mut Environment, err_num: i32) -> ConstPtr<u8> {
             ECONNRESET => "Connection reset by peer",
             ETIMEDOUT => "Operation timed out",
             EOVERFLOW => "Value too large to be stored in data type",
+            EILSEQ => "Illegal byte sequence",
             _ => unimplemented!("strerror({})", err_num),
         };
         let new_c_str = env.mem.alloc_and_write_cstr(str.as_bytes()).cast_const();

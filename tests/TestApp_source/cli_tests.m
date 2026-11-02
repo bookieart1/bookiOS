@@ -3783,6 +3783,26 @@ int test_mbstowcs() {
     return -3;
   }
 
+  const char *restart_source = "A\xC2\xA2Z";
+  const char *restart_cursor = restart_source;
+  memset(wbuffer, 0, sizeof(wbuffer));
+  res = mbsrtowcs(wbuffer, &restart_cursor, 2, NULL);
+  if (res != 2 || wbuffer[0] != L'A' || wbuffer[1] != 0x00A2 ||
+      strcmp(restart_cursor, "Z") != 0) {
+    return -4;
+  }
+  res = mbsrtowcs(wbuffer + 2, &restart_cursor, 62, NULL);
+  if (res != 1 || wbuffer[2] != L'Z' || wbuffer[3] != L'\0' ||
+      restart_cursor != NULL) {
+    return -5;
+  }
+
+  restart_cursor = restart_source;
+  res = mbsrtowcs(NULL, &restart_cursor, 0, NULL);
+  if (res != 3 || restart_cursor != restart_source) {
+    return -6;
+  }
+
   return 0;
 }
 
@@ -4370,6 +4390,11 @@ int test_CFMutableDictionary_NullCallbacks() {
   if (dict == NULL) {
     return -1;
   }
+  CFTypeID dictionaryType = CFGetTypeID(dict);
+  if (dictionaryType == 0 || CFGetTypeID(dict) != dictionaryType) {
+    CFRelease(dict);
+    return -104;
+  }
 
   const char *key = "Key";
   const char *value = "Value";
@@ -4466,6 +4491,26 @@ int test_CFMutableDictionary_NullCallbacks() {
     return -11;
   }
 
+  CFRelease(dict);
+
+  // Capacity is an initial sizing hint, not a fixed limit. It must accept a
+  // positive value and still grow past it.
+  dict = CFDictionaryCreateMutable(NULL, 1, NULL, NULL);
+  if (dict == NULL) {
+    return -12;
+  }
+  if (CFGetTypeID(dict) != dictionaryType) {
+    CFRelease(dict);
+    return -14;
+  }
+  const char *secondKey = "SecondKey";
+  CFDictionaryAddValue(dict, key, value);
+  CFDictionaryAddValue(dict, secondKey, valueNew);
+  if (CFDictionaryGetCount(dict) != 2 ||
+      CFDictionaryGetValue(dict, secondKey) != valueNew) {
+    CFRelease(dict);
+    return -13;
+  }
   CFRelease(dict);
   return 0;
 }

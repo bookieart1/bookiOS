@@ -28,7 +28,7 @@ use std::f32::consts::{FRAC_PI_2, PI};
 use std::num::NonZeroU32;
 use std::ptr::null_mut;
 #[cfg(target_os = "ios")]
-use std::sync::OnceLock;
+use std::sync::{atomic::{AtomicBool, Ordering}, OnceLock};
 use std::time::{Duration, Instant};
 
 #[repr(C)]
@@ -39,6 +39,69 @@ struct SDL_SysWMinfoUIKit {
     framebuffer: std::ffi::c_uint,
     colorbuffer: std::ffi::c_uint,
     resolve_framebuffer: std::ffi::c_uint,
+}
+
+#[cfg(target_os = "ios")]
+type HostObjcId = *mut std::ffi::c_void;
+
+#[cfg(target_os = "ios")]
+static NATIVE_HOME_BUTTON_TAPPED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "ios")]
+unsafe extern "C" fn native_home_button_tapped(
+    _receiver: HostObjcId,
+    _selector: HostObjcId,
+    _sender: HostObjcId,
+) {
+    NATIVE_HOME_BUTTON_TAPPED.store(true, Ordering::Release);
+}
+
+/// A tiny native target class lets the host Home control work even when the
+/// guest never presents an OpenGL frame. The callback only sets an atomic flag;
+/// normal event dispatch still happens in `poll_for_events` on the main stack.
+#[cfg(target_os = "ios")]
+unsafe fn native_home_button_target_class() -> HostObjcId {
+    use std::os::raw::{c_char, c_void};
+
+    #[link(name = "objc")]
+    extern "C" {
+        fn objc_getClass(name: *const c_char) -> HostObjcId;
+        fn objc_allocateClassPair(
+            superclass: HostObjcId,
+            name: *const c_char,
+            extra_bytes: usize,
+        ) -> HostObjcId;
+        fn objc_registerClassPair(cls: HostObjcId);
+        fn class_addMethod(
+            cls: HostObjcId,
+            name: HostObjcId,
+            imp: *const c_void,
+            types: *const c_char,
+        ) -> bool;
+        fn sel_registerName(name: *const c_char) -> HostObjcId;
+    }
+
+    static CLASS: OnceLock<usize> = OnceLock::new();
+    *CLASS.get_or_init(|| {
+        let name = b"iDaredNativeHomeButtonTarget\0";
+        let existing = objc_getClass(name.as_ptr().cast());
+        if !existing.is_null() {
+            return existing as usize;
+        }
+        let superclass = objc_getClass(b"NSObject\0".as_ptr().cast());
+        let class = objc_allocateClassPair(superclass, name.as_ptr().cast(), 0);
+        assert!(!class.is_null());
+        let selector = sel_registerName(b"touchHLEHomeButtonTapped:\0".as_ptr().cast());
+        let added = class_addMethod(
+            class,
+            selector,
+            native_home_button_tapped as *const () as *const c_void,
+            b"v@:@\0".as_ptr().cast(),
+        );
+        assert!(added);
+        objc_registerClassPair(class);
+        class as usize
+    }) as HostObjcId
 }
 
 #[allow(non_camel_case_types)]
@@ -349,6 +412,12 @@ pub struct Window {
     /// [Self::enable_on_screen_home_button].
     on_screen_home_button: bool,
     home_button_press: Option<HomeButtonPress>,
+    /// Native UIKit control and its retained target. Unlike the OpenGL
+    /// decoration, this remains available when a guest presents no frames.
+    #[cfg(target_os = "ios")]
+    native_home_button: HostObjcId,
+    #[cfg(target_os = "ios")]
+    native_home_button_target: HostObjcId,
     /// Direct host touches which began on the emulated touchscreen. A touch
     /// may subsequently move into a letterbox bar and remains captured at the
     /// guest edge, just like a finger reaching an original device's edge.
@@ -532,6 +601,10 @@ impl Window {
             controller_back_held_since: None,
             on_screen_home_button: false,
             home_button_press: None,
+            #[cfg(target_os = "ios")]
+            native_home_button: std::ptr::null_mut(),
+            #[cfg(target_os = "ios")]
+            native_home_button_target: std::ptr::null_mut(),
             active_direct_touches: HashSet::new(),
             on_main_stack: true,
         };
@@ -569,6 +642,15 @@ impl Window {
             return;
         }
         self.last_polled = now;
+
+        #[cfg(target_os = "ios")]
+        unsafe {
+            self.update_native_home_button();
+            if NATIVE_HOME_BUTTON_TAPPED.swap(false, Ordering::AcqRel) {
+                echo!("Native on-screen Home button touched, HomeButton event queued.");
+                self.event_queue.push_back(Event::HomeButton);
+            }
+        }
 
         fn transform_input_coords(
             window: &Window,
@@ -1136,6 +1218,180 @@ impl Window {
         self.on_screen_home_button = ON_SCREEN_HOME_BUTTON_PLATFORM;
     }
 
+    #[cfg(target_os = "ios")]
+    unsafe fn ensure_native_home_button(&mut self) {
+        use std::os::raw::c_char;
+
+        if !self.native_home_button.is_null() {
+            return;
+        }
+
+        #[link(name = "objc")]
+        extern "C" {
+            fn objc_getClass(name: *const c_char) -> HostObjcId;
+            fn sel_registerName(name: *const c_char) -> HostObjcId;
+            fn objc_msgSend();
+        }
+        let send: unsafe extern "C" fn(HostObjcId, HostObjcId) -> HostObjcId =
+            std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+        let send_integer: unsafe extern "C" fn(HostObjcId, HostObjcId, usize) -> HostObjcId =
+            std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+        let send_cstr: unsafe extern "C" fn(
+            HostObjcId,
+            HostObjcId,
+            *const c_char,
+        ) -> HostObjcId = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+        let send_double_double: unsafe extern "C" fn(
+            HostObjcId,
+            HostObjcId,
+            f64,
+            f64,
+        ) -> HostObjcId = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+        let send_id: unsafe extern "C" fn(HostObjcId, HostObjcId, HostObjcId) =
+            std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+        let send_id_integer: unsafe extern "C" fn(
+            HostObjcId,
+            HostObjcId,
+            HostObjcId,
+            usize,
+        ) = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+        let send_target: unsafe extern "C" fn(
+            HostObjcId,
+            HostObjcId,
+            HostObjcId,
+            HostObjcId,
+            usize,
+        ) = std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+        let sel = |name: &[u8]| sel_registerName(name.as_ptr().cast());
+
+        let host_window = self.get_sys_wm_info_ios()._window as HostObjcId;
+        if host_window.is_null() {
+            log!("Unable to attach native Home button: SDL did not expose a UIWindow");
+            return;
+        }
+
+        let button = send_integer(
+            objc_getClass(b"UIButton\0".as_ptr().cast()),
+            sel(b"buttonWithType:\0"),
+            0,
+        );
+        let target = send(
+            send(native_home_button_target_class(), sel(b"alloc\0")),
+            sel(b"init\0"),
+        );
+        assert!(!button.is_null() && !target.is_null());
+        let _ = send(button, sel(b"retain\0"));
+
+        let title = send_cstr(
+            objc_getClass(b"NSString\0".as_ptr().cast()),
+            sel(b"stringWithUTF8String:\0"),
+            b"X\0".as_ptr().cast(),
+        );
+        let foreground = send_double_double(
+            objc_getClass(b"UIColor\0".as_ptr().cast()),
+            sel(b"colorWithWhite:alpha:\0"),
+            0.78,
+            0.95,
+        );
+        let background = send_double_double(
+            objc_getClass(b"UIColor\0".as_ptr().cast()),
+            sel(b"colorWithWhite:alpha:\0"),
+            0.08,
+            0.62,
+        );
+        send_id_integer(button, sel(b"setTitle:forState:\0"), title, 0);
+        send_id_integer(
+            button,
+            sel(b"setTitleColor:forState:\0"),
+            foreground,
+            0,
+        );
+        send_id(button, sel(b"setBackgroundColor:\0"), background);
+        send_target(
+            button,
+            sel(b"addTarget:action:forControlEvents:\0"),
+            target,
+            sel(b"touchHLEHomeButtonTapped:\0"),
+            1 << 6, // UIControlEventTouchUpInside
+        );
+        send_id(host_window, sel(b"addSubview:\0"), button);
+
+        self.native_home_button = button;
+        self.native_home_button_target = target;
+        log!("Native iOS Home button attached independently of guest presentation");
+    }
+
+    #[cfg(target_os = "ios")]
+    unsafe fn update_native_home_button(&mut self) {
+        use std::os::raw::c_char;
+
+        if !self.on_screen_home_button {
+            return;
+        }
+        self.ensure_native_home_button();
+        let button = self.native_home_button;
+        if button.is_null() {
+            return;
+        }
+
+        #[repr(C)]
+        struct HostCGPoint {
+            x: f64,
+            y: f64,
+        }
+        #[repr(C)]
+        struct HostCGSize {
+            width: f64,
+            height: f64,
+        }
+        #[repr(C)]
+        struct HostCGRect {
+            origin: HostCGPoint,
+            size: HostCGSize,
+        }
+        #[link(name = "objc")]
+        extern "C" {
+            fn sel_registerName(name: *const c_char) -> HostObjcId;
+            fn objc_msgSend();
+        }
+        let send_bool: unsafe extern "C" fn(HostObjcId, HostObjcId, i8) =
+            std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+        let send_frame: unsafe extern "C" fn(HostObjcId, HostObjcId, HostCGRect) =
+            std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+        let send_id: unsafe extern "C" fn(HostObjcId, HostObjcId, HostObjcId) =
+            std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+        let send: unsafe extern "C" fn(HostObjcId, HostObjcId) -> HostObjcId =
+            std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+        let send_double: unsafe extern "C" fn(HostObjcId, HostObjcId, f64) =
+            std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+        let sel = |name: &[u8]| sel_registerName(name.as_ptr().cast());
+
+        let Some((x, y, radius)) = self.home_button_geometry() else {
+            send_bool(button, sel(b"setHidden:\0"), 1);
+            return;
+        };
+        let (drawable_width, _) = self.window.drawable_size();
+        let points_per_pixel = self.window.size().0 as f64 / drawable_width as f64;
+        let radius_points = radius as f64 * points_per_pixel;
+        let frame = HostCGRect {
+            origin: HostCGPoint {
+                x: x as f64 * points_per_pixel - radius_points,
+                y: y as f64 * points_per_pixel - radius_points,
+            },
+            size: HostCGSize {
+                width: radius_points * 2.0,
+                height: radius_points * 2.0,
+            },
+        };
+        send_frame(button, sel(b"setFrame:\0"), frame);
+        send_bool(button, sel(b"setHidden:\0"), 0);
+        let layer = send(button, sel(b"layer\0"));
+        send_double(layer, sel(b"setCornerRadius:\0"), radius_points);
+        send_bool(button, sel(b"setClipsToBounds:\0"), 1);
+        let host_window = self.get_sys_wm_info_ios()._window as HostObjcId;
+        send_id(host_window, sel(b"bringSubviewToFront:\0"), button);
+    }
+
     /// Where the on-screen Home button is, if it's shown: its centre and
     /// radius, in drawable pixels from the top left.
     ///
@@ -1176,6 +1432,12 @@ impl Window {
 
     /// The on-screen Home button to draw over the app, if it's shown.
     pub fn home_button_overlay(&self) -> Option<HomeButtonOverlay> {
+        // iOS uses a native UIKit control so it remains visible even when the
+        // guest never calls presentRenderbuffer:. Other hosts retain the OpenGL
+        // decoration used by screenshots and tests.
+        if cfg!(target_os = "ios") {
+            return None;
+        }
         let (x, y, radius) = self.home_button_geometry()?;
         let (screen_width, screen_height) = self.window.drawable_size();
         let pressed = self.home_button_press.is_some();
@@ -2037,6 +2299,39 @@ impl Window {
 
     pub fn on_main_stack(&self) -> bool {
         self.on_main_stack
+    }
+}
+
+#[cfg(target_os = "ios")]
+impl Drop for Window {
+    fn drop(&mut self) {
+        use std::os::raw::c_char;
+
+        unsafe {
+            #[link(name = "objc")]
+            extern "C" {
+                fn sel_registerName(name: *const c_char) -> HostObjcId;
+                fn objc_msgSend();
+            }
+            let send: unsafe extern "C" fn(HostObjcId, HostObjcId) =
+                std::mem::transmute(objc_msgSend as unsafe extern "C" fn());
+            if !self.native_home_button.is_null() {
+                send(
+                    self.native_home_button,
+                    sel_registerName(b"removeFromSuperview\0".as_ptr().cast()),
+                );
+                send(
+                    self.native_home_button,
+                    sel_registerName(b"release\0".as_ptr().cast()),
+                );
+            }
+            if !self.native_home_button_target.is_null() {
+                send(
+                    self.native_home_button_target,
+                    sel_registerName(b"release\0".as_ptr().cast()),
+                );
+            }
+        }
     }
 }
 

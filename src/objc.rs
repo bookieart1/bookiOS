@@ -47,10 +47,10 @@ pub use selectors::{selector, SEL};
 use crate::mem::{ConstPtr, ConstVoidPtr, MutPtr, Ptr};
 use crate::Environment;
 use classes::{
-    class_addMethod, class_copyPropertyList, class_getInstanceMethod, class_getInstanceSize,
-    class_getMethodImplementation, class_getProperty, class_getSuperclass, class_replaceMethod,
-    method_getImplementation, method_getTypeEncoding, method_setImplementation, objc_getClass,
-    ClassHostObject, FakeClass, UnimplementedClass,
+    class_addMethod, class_copyPropertyList, class_getClassMethod, class_getInstanceMethod,
+    class_getInstanceSize, class_getMethodImplementation, class_getProperty, class_getSuperclass,
+    class_replaceMethod, method_getImplementation, method_getTypeEncoding,
+    method_setImplementation, objc_getClass, ClassHostObject, FakeClass, UnimplementedClass,
 };
 pub(crate) use messages::objc_msgSend;
 use messages::{
@@ -256,15 +256,16 @@ fn _Block_object_dispose(env: &mut Environment, object: ConstVoidPtr, flags: i32
     );
 }
 
-fn object_getClassName(env: &mut Environment, object: id) -> ConstPtr<u8> {
-    let class = object_getClass(env, object);
-    if class == nil {
-        return Ptr::null();
-    }
+fn class_getName(env: &mut Environment, class: Class) -> ConstPtr<u8> {
     if let Some(&name) = env.objc.class_name_cstrings.get(&class) {
         return name;
     }
-    let class_name = env.objc.get_class_name(class).to_owned();
+    // Apple's runtime returns an empty string for Nil, rather than NULL.
+    let class_name = if class == nil {
+        String::new()
+    } else {
+        env.objc.get_class_name(class).to_owned()
+    };
     let name = env
         .mem
         .alloc_and_write_cstr(class_name.as_bytes())
@@ -273,12 +274,22 @@ fn object_getClassName(env: &mut Environment, object: id) -> ConstPtr<u8> {
     name
 }
 
+fn object_getClassName(env: &mut Environment, object: id) -> ConstPtr<u8> {
+    let class = object_getClass(env, object);
+    if class == nil {
+        return Ptr::null();
+    }
+    class_getName(env, class)
+}
+
 const FUNCTIONS: FunctionExports = &[
     export_c_func!(class_copyPropertyList(_, _)),
     export_c_func!(class_getInstanceSize(_)),
     export_c_func!(class_getSuperclass(_)),
     export_c_func!(class_getProperty(_, _)),
     export_c_func!(class_getInstanceMethod(_, _)),
+    export_c_func!(class_getClassMethod(_, _)),
+    export_c_func!(class_getName(_)),
     export_c_func!(class_addMethod(_, _, _, _)),
     export_c_func!(method_getImplementation(_)),
     export_c_func!(method_setImplementation(_, _)),

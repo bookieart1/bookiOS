@@ -3904,3 +3904,22 @@ Dev 1.96 adds only the general POSIX `sync()` export plus focused guest ABI
 coverage. It does not change Marblenauts rendering/resources, fabricate files,
 relax memory checks or change the universal recorder. Engineering detail:
 `dev-docs/compatibility-1.96-posix-sync-contract.md`.
+
+## Dev 1.97 candidate: shared runtime/text contracts and graphics evidence
+
+Dev 1.97 combines five independently testable general compatibility contracts
+with the bounded evidence needed for the two distinct Dev 1.96 black-screen
+families. It accepts positive `CFDictionaryCreateMutable` capacity hints;
+implements `class_getClassMethod`, `class_getName`, `CFGetTypeID`, and
+restartable UTF-8 `mbsrtowcs`; records no more than three GL state snapshots per
+EAGL context; and moves the iOS Home control into a native host overlay so a
+zero-present guest cannot remove the user's escape path. It does not alter
+guest rendering state, suppress failures, fabricate resources, or branch on an
+app identity.
+
+Physical-device status is **pending**. The target batch is 8bitninja 1.2,
+DizzyWizards, DoDoFly, LegendaryWar, Marblenauts, Peggle, SpaceMnkey,
+TrenchesVS and ZA! 2ndWave. Blot, Cube and Spoing are focused regression tests.
+Removing an initial missing-symbol/assertion blocker is not a claim of gameplay
+compatibility. Engineering record:
+`dev-docs/compatibility-1.97-shared-runtime-text-and-graphics-evidence.md`.

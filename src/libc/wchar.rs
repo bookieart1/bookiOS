@@ -6,6 +6,7 @@
 //! `wchar.h`
 
 use crate::dyld::{export_c_func, FunctionExports};
+use crate::libc::errno::{set_errno, EILSEQ};
 use crate::libc::clocale::{setlocale, LC_CTYPE};
 use crate::libc::stdlib::mbstowcs;
 use crate::libc::time::{strftime, tm};
@@ -43,6 +44,63 @@ fn wctob(_env: &mut Environment, c: wint_t) -> i32 {
     } else {
         WEOF
     }
+}
+
+/// Restartable multibyte-to-wide conversion for the UTF-8 locale used by the
+/// emulator. UTF-8 has no shift state, so a non-null mbstate_t remains in its
+/// initial state. When `dst` is null this performs the standard count-only
+/// operation without changing `*src`.
+fn mbsrtowcs(
+    env: &mut Environment,
+    dst: MutPtr<wchar_t>,
+    src: MutPtr<ConstPtr<u8>>,
+    len: GuestUSize,
+    _state: crate::mem::MutVoidPtr,
+) -> GuestUSize {
+    let start = env.mem.read(src);
+    if start.is_null() {
+        return 0;
+    }
+
+    let bytes = env.mem.cstr_at(start).to_vec();
+    let valid = match std::str::from_utf8(&bytes) {
+        Ok(valid) => valid,
+        Err(error) => {
+            let prefix = std::str::from_utf8(&bytes[..error.valid_up_to()]).unwrap();
+            let prefix_chars = prefix.chars().count() as GuestUSize;
+            if dst.is_null() || prefix_chars < len {
+                if !dst.is_null() {
+                    for (index, character) in prefix.chars().enumerate() {
+                        env.mem
+                            .write(dst + index as GuestUSize, character as wchar_t);
+                    }
+                    env.mem.write(src, start + error.valid_up_to() as GuestUSize);
+                }
+                set_errno(env, EILSEQ);
+                return GuestUSize::MAX;
+            }
+            prefix
+        }
+    };
+
+    if dst.is_null() {
+        return valid.chars().count() as GuestUSize;
+    }
+
+    let mut written = 0;
+    let mut consumed = 0;
+    for character in valid.chars().take(len as usize) {
+        env.mem.write(dst + written, character as wchar_t);
+        written += 1;
+        consumed += character.len_utf8() as GuestUSize;
+    }
+    if written < len && consumed as usize == bytes.len() {
+        env.mem.write(dst + written, wchar_t::default());
+        env.mem.write(src, Ptr::null());
+    } else {
+        env.mem.write(src, start + consumed);
+    }
+    written
 }
 
 // Functions shared with string.rs
@@ -223,6 +281,7 @@ fn wcsftime(
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(btowc(_)),
     export_c_func!(wctob(_)),
+    export_c_func!(mbsrtowcs(_, _, _, _)),
     // Functions shared with string.rs
     export_c_func!(wmemset(_, _, _)),
     export_c_func!(wmemcpy(_, _, _)),
