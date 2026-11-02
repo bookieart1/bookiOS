@@ -348,8 +348,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     if let Some(snapshot) = diagnostic_snapshot {
         let (render_width, render_height) = unsafe { get_renderbuffer_size(gles.as_mut()) };
-        let viewport = unsafe { get_ints(gles.as_mut(), gles11::VIEWPORT) };
-        let scissor = unsafe { get_ints(gles.as_mut(), gles11::SCISSOR_BOX) };
+        let viewport: [GLint; 4] = unsafe { get_ints(gles.as_mut(), gles11::VIEWPORT) };
+        let scissor: [GLint; 4] = unsafe { get_ints(gles.as_mut(), gles11::SCISSOR_BOX) };
         let framebuffer = unsafe { get_int(gles.as_mut(), gles11::FRAMEBUFFER_BINDING_OES) };
         let framebuffer_status = unsafe {
             gles.CheckFramebufferStatusOES(gles11::FRAMEBUFFER_OES)
