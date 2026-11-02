@@ -164,7 +164,7 @@ int main(void) {
     assert([[headerRequest.allHTTPHeaderFields objectForKey:@"X-First"] isEqual:@"one"]);
     assert([headerRequest.allHTTPHeaderFields objectForKey:@"X-Second"] == nil);
     headerRequest.allHTTPHeaderFields = nil;
-    assert(headerRequest.allHTTPHeaderFields == nil);
+    assert(headerRequest.allHTTPHeaderFields.count == 0);
 
     NSMutableDictionary *mutableDictionary =
         [NSMutableDictionary dictionaryWithObject:@"one" forKey:@"first"];

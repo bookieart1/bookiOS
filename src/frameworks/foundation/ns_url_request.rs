@@ -298,7 +298,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())setAllHTTPHeaderFields:(id)header_fields { // NSDictionary<NSString*, NSString*>*
     log_dbg!("[(NSURLRequest*){:?} setAllHTTPHeaderFields:{:?}]", this, header_fields);
     let header_fields: id = if header_fields == nil {
-        nil
+        // Native Foundation treats nil as clearing the property, but its
+        // getter subsequently exposes an empty dictionary rather than nil.
+        msg_class![env; NSMutableDictionary new]
     } else {
         // Keep a private mutable backing dictionary while honoring the public
         // copy property: later mutations of the caller's dictionary must not
@@ -353,7 +355,8 @@ mod tests {
 
         () = msg![env; request setAllHTTPHeaderFields:nil];
         let cleared: id = msg![env; request allHTTPHeaderFields];
-        assert_eq!(cleared, nil);
+        let cleared_count: NSUInteger = msg![env; cleared count];
+        assert_eq!(cleared_count, 0);
 
         // Per-field mutation remains usable after clearing the aggregate
         // property and lazily creates a fresh backing dictionary.
