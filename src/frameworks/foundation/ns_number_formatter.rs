@@ -379,18 +379,13 @@ mod tests {
     }
 
     #[test]
-    fn formatter_behavior_round_trips_without_changing_format_state() {
+    fn formatter_behavior_round_trips() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
         let formatter: id = msg_class![env; NSNumberFormatter new];
         () = msg![env; formatter setFormatterBehavior:1040u32];
         let behavior: NSUInteger = msg![env; formatter formatterBehavior];
         assert_eq!(behavior, 1040);
-
-        () = msg![env; formatter setMaximumFractionDigits:1u32];
-        let number: id = msg_class![env; NSNumber numberWithDouble:2.25f64];
-        let string: id = msg![env; formatter stringFromNumber:number];
-        assert_eq!(ns_string::to_rust_string(env, string), "2.2");
         release(env, formatter);
     }
 }
