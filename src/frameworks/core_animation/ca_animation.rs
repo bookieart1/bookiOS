@@ -13,8 +13,8 @@ use crate::frameworks::foundation::ns_string::{get_static_str, to_rust_string};
 use crate::frameworks::foundation::NSUInteger;
 use crate::objc::msg_send;
 use crate::objc::{
-    autorelease, id, msg, nil, objc_classes, release, retain, todo_objc_setter, Class,
-    ClassExports, HostObject, NSZonePtr,
+    autorelease, id, msg, nil, objc_classes, release, retain, Class, ClassExports, HostObject,
+    NSZonePtr,
 };
 use crate::Environment;
 use crate::{impl_HostObject_with_superclass, msg_class, msg_super};
@@ -236,6 +236,14 @@ struct CAAnimationGroupHostObject {
 }
 impl_HostObject_with_superclass!(CAAnimationGroupHostObject);
 
+#[derive(Default)]
+struct CATransitionHostObject {
+    superclass: CAAnimationHostObject,
+    transition_type: id, // NSString*
+    subtype: id,         // NSString*
+}
+impl_HostObject_with_superclass!(CATransitionHostObject);
+
 /// The animations of a group, or [None] if it's not a group.
 pub fn get_group_animations(env: &mut Environment, animation: id) -> Option<Vec<id>> {
     let class = env.objc.get_known_class("CAAnimationGroup", &mut env.mem);
@@ -444,7 +452,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         // Properties holding objects.
         "delegate" | "timingFunction" | "fillMode" | "keyPath" | "fromValue" | "toValue"
         | "byValue" | "values" | "keyTimes" | "timingFunctions" | "calculationMode"
-        | "rotationMode" | "animations" => {
+        | "rotationMode" | "animations" | "type" | "subtype" => {
             let selector = env.objc.lookup_selector(&key_str).unwrap();
             msg_send(env, (this, selector))
         }
@@ -805,12 +813,52 @@ pub const CLASSES: ClassExports = objc_classes! {
 @implementation CATransition : CAAnimation
 
 + (id)allocWithZone:(NSZonePtr)_zone {
-    let host_object = Box::<CABasicAnimationHostObject>::default();
+    let host_object = Box::<CATransitionHostObject>::default();
     env.objc.alloc_object(this, host_object, &mut env.mem)
 }
 
-- (())setType:(CATransitionType)transitionType {
-    todo_objc_setter!(this, to_rust_string(env, transitionType));
+- (id)init {
+    let this: id = msg_super![env; this init];
+    let fade = get_static_str(env, kCATransitionFade);
+    () = msg![env; this setType:fade];
+    this
+}
+
+- (())setType:(CATransitionType)transition_type {
+    let transition_type: id = msg![env; transition_type copy];
+    let host = env.objc.borrow_mut::<CATransitionHostObject>(this);
+    let old = std::mem::replace(&mut host.transition_type, transition_type);
+    release(env, old);
+}
+- (CATransitionType)type {
+    env.objc.borrow::<CATransitionHostObject>(this).transition_type
+}
+
+- (())setSubtype:(CATransitionSubtype)subtype {
+    let subtype: id = msg![env; subtype copy];
+    let host = env.objc.borrow_mut::<CATransitionHostObject>(this);
+    let old = std::mem::replace(&mut host.subtype, subtype);
+    release(env, old);
+}
+- (CATransitionSubtype)subtype {
+    env.objc.borrow::<CATransitionHostObject>(this).subtype
+}
+
+- (())_touchHLE_copyPropertiesFrom:(id)other { // CATransition*
+    () = msg_super![env; this _touchHLE_copyPropertiesFrom:other];
+    let &CATransitionHostObject { transition_type, subtype, .. } = env.objc.borrow(other);
+    retain(env, transition_type);
+    retain(env, subtype);
+    let host = env.objc.borrow_mut::<CATransitionHostObject>(this);
+    host.transition_type = transition_type;
+    host.subtype = subtype;
+}
+
+- (())dealloc {
+    let &CATransitionHostObject { transition_type, subtype, .. } = env.objc.borrow(this);
+    release(env, transition_type);
+    release(env, subtype);
+    msg_super![env; this dealloc]
 }
 
 @end
@@ -832,4 +880,40 @@ pub fn get_animation_stopped(env: &mut Environment, animation: id) -> &mut bool 
         .objc
         .borrow_mut::<CAAnimationHostObject>(animation)
         .stopped
+}
+
+#[cfg(test)]
+mod transition_tests {
+    use super::*;
+
+    #[test]
+    fn transition_type_and_subtype_have_state_and_copy_with_the_animation() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let transition: id = msg_class![env; CATransition new];
+        let fade = get_static_str(env, kCATransitionFade);
+        let push = get_static_str(env, kCATransitionPush);
+        let from_bottom = get_static_str(env, kCATransitionFromBottom);
+
+        let initial_type: id = msg![env; transition type];
+        let initial_subtype: id = msg![env; transition subtype];
+        let is_fade: bool = msg![env; initial_type isEqual:fade];
+        assert!(is_fade);
+        assert_eq!(initial_subtype, nil);
+
+        () = msg![env; transition setType:push];
+        () = msg![env; transition setSubtype:from_bottom];
+        let copy: id = msg![env; transition copy];
+        let copied_type: id = msg![env; copy type];
+        let copied_subtype: id = msg![env; copy subtype];
+        let copied_type_matches: bool = msg![env; copied_type isEqual:push];
+        let copied_subtype_matches: bool = msg![env; copied_subtype isEqual:from_bottom];
+        assert!(copied_type_matches);
+        assert!(copied_subtype_matches);
+
+        release(env, copy);
+        release(env, transition);
+        release(env, pool);
+    }
 }

@@ -89,6 +89,22 @@ fn copy_request(env: &mut Environment, source: id, mutable: bool) -> id {
     copy
 }
 
+fn mutable_header_fields(env: &mut Environment, request: id) -> id {
+    let fields = env
+        .objc
+        .borrow::<NSURLRequestHostObject>(request)
+        .http_header_fields;
+    if fields != nil {
+        return fields;
+    }
+
+    let fields: id = msg_class![env; NSMutableDictionary new];
+    env.objc
+        .borrow_mut::<NSURLRequestHostObject>(request)
+        .http_header_fields = fields;
+    fields
+}
+
 pub const CLASSES: ClassExports = objc_classes! {
 
 (env, this, _cmd);
@@ -189,6 +205,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (id)allHTTPHeaderFields {
     let fields = env.objc.borrow::<NSURLRequestHostObject>(this).http_header_fields;
+    if fields == nil {
+        return nil;
+    }
     let fields: id = msg![env; fields copy];
     autorelease(env, fields)
 }
@@ -268,7 +287,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())setValue:(id)value // NSString *
     forHTTPHeaderField:(id)field { // NSString *
     log_dbg!("[(NSURLRequest*){:?} setValue:{:?} forHTTPHeaderField:'{}']", this, value, to_rust_string(env, field));
-    let http_header_fields = env.objc.borrow_mut::<NSURLRequestHostObject>(this).http_header_fields;
+    let http_header_fields = mutable_header_fields(env, this);
     if value == nil {
         () = msg![env; http_header_fields removeObjectForKey:field];
     } else {
@@ -276,10 +295,25 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 }
 
+- (())setAllHTTPHeaderFields:(id)header_fields { // NSDictionary<NSString*, NSString*>*
+    log_dbg!("[(NSURLRequest*){:?} setAllHTTPHeaderFields:{:?}]", this, header_fields);
+    let header_fields: id = if header_fields == nil {
+        nil
+    } else {
+        // Keep a private mutable backing dictionary while honoring the public
+        // copy property: later mutations of the caller's dictionary must not
+        // affect the request.
+        msg![env; header_fields mutableCopy]
+    };
+    let host = env.objc.borrow_mut::<NSURLRequestHostObject>(this);
+    let old = std::mem::replace(&mut host.http_header_fields, header_fields);
+    release(env, old);
+}
+
 - (())addValue:(id)value // NSString *
     forHTTPHeaderField:(id)field { // NSString *
     log_dbg!("[(NSURLRequest*){:?} addValue:'{}' forHTTPHeaderField:'{}']", this, to_rust_string(env, value), to_rust_string(env, field));
-    let http_header_fields = env.objc.borrow_mut::<NSURLRequestHostObject>(this).http_header_fields;
+    let http_header_fields = mutable_header_fields(env, this);
     let existing: id = msg![env; http_header_fields objectForKey:field];
     assert_eq!(existing, nil); // TODO: append values with comma
     () = msg![env; http_header_fields setObject:value forKey:field];
@@ -288,3 +322,47 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_http_header_fields_replaces_with_an_independent_copy_and_nil_clears() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let request: id = msg_class![env; NSMutableURLRequest new];
+        let source: id = msg_class![env; NSMutableDictionary new];
+        let first_key = ns_string::get_static_str(env, "X-First");
+        let second_key = ns_string::get_static_str(env, "X-Second");
+        let first_value = ns_string::get_static_str(env, "one");
+        let second_value = ns_string::get_static_str(env, "two");
+
+        () = msg![env; source setObject:first_value forKey:first_key];
+        () = msg![env; request setAllHTTPHeaderFields:source];
+        () = msg![env; source setObject:second_value forKey:second_key];
+
+        let snapshot: id = msg![env; request allHTTPHeaderFields];
+        let count: NSUInteger = msg![env; snapshot count];
+        let actual: id = msg![env; snapshot objectForKey:first_key];
+        let absent: id = msg![env; snapshot objectForKey:second_key];
+        assert_eq!(count, 1);
+        assert_eq!(actual, first_value);
+        assert_eq!(absent, nil);
+
+        () = msg![env; request setAllHTTPHeaderFields:nil];
+        let cleared: id = msg![env; request allHTTPHeaderFields];
+        assert_eq!(cleared, nil);
+
+        // Per-field mutation remains usable after clearing the aggregate
+        // property and lazily creates a fresh backing dictionary.
+        () = msg![env; request setValue:second_value forHTTPHeaderField:second_key];
+        let restored: id = msg![env; request valueForHTTPHeaderField:second_key];
+        assert_eq!(restored, second_value);
+
+        release(env, source);
+        release(env, request);
+        release(env, pool);
+    }
+}

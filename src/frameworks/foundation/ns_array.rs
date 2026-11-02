@@ -38,6 +38,10 @@ impl HostObject for ObjectEnumeratorHostObject {}
 #[derive(Debug, Default)]
 pub(super) struct ArrayHostObject {
     pub(super) array: Vec<id>,
+    /// Core Foundation mutable collections use a positive capacity as a
+    /// fixed upper bound. Foundation's `initWithCapacity:` is only a storage
+    /// hint, so ordinary NSMutableArray instances leave this unset.
+    fixed_capacity: Option<usize>,
 }
 impl HostObject for ArrayHostObject {}
 
@@ -426,6 +430,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 + (id)allocWithZone:(NSZonePtr)_zone {
     let host_object = Box::new(ArrayHostObject {
         array: Vec::new(),
+        fixed_capacity: None,
     });
     env.objc.alloc_object(this, host_object, &mut env.mem)
 }
@@ -578,6 +583,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 + (id)allocWithZone:(NSZonePtr)_zone {
     let host_object = Box::new(ArrayHostObject {
         array: Vec::new(),
+        fixed_capacity: None,
     });
     env.objc.alloc_object(this, host_object, &mut env.mem)
 }
@@ -781,11 +787,13 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())insertObject:(id)object
            atIndex:(NSUInteger)index {
+    assert_can_grow(env, this);
     retain(env, object);
     env.objc.borrow_mut::<ArrayHostObject>(this).array.insert(index as usize, object);
 }
 
 - (())addObject:(id)object {
+    assert_can_grow(env, this);
     retain(env, object);
     env.objc.borrow_mut::<ArrayHostObject>(this).array.push(object);
 }
@@ -897,6 +905,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())addObject:(id)object {
+    assert_can_grow(env, this);
     env.objc.borrow_mut::<ArrayHostObject>(this).array.push(object);
 }
 
@@ -915,6 +924,29 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+fn assert_can_grow(env: &mut Environment, array: id) {
+    let host = env.objc.borrow::<ArrayHostObject>(array);
+    if let Some(capacity) = host.fixed_capacity {
+        assert!(
+            host.array.len() < capacity,
+            "fixed-capacity CFMutableArray cannot exceed capacity {capacity}"
+        );
+    }
+}
+
+/// Apply Core Foundation's fixed-capacity contract to an empty mutable array.
+/// A zero capacity means variable-size and therefore leaves the limit unset.
+pub(crate) fn set_fixed_capacity(env: &mut Environment, array: id, capacity: usize) {
+    let host = env.objc.borrow_mut::<ArrayHostObject>(array);
+    assert!(host.array.is_empty());
+    if capacity == 0 {
+        host.fixed_capacity = None;
+    } else {
+        host.array.reserve(capacity);
+        host.fixed_capacity = Some(capacity);
+    }
+}
 
 /// Shortcut for host code, roughly equivalent to
 /// `[[NSArray alloc] initWithObjects:count]` but without copying.

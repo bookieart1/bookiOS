@@ -145,6 +145,27 @@ int main(void) {
         assert(rejected);
     }
 
+    CFMutableArrayRef fixedArray = CFArrayCreateMutable(NULL, 2, NULL);
+    CFArrayAppendValue(fixedArray, (const void *)1);
+    CFArrayAppendValue(fixedArray, (const void *)2);
+    assert(CFArrayGetCount(fixedArray) == 2);
+    CFArrayRemoveValueAtIndex(fixedArray, 0);
+    CFArrayAppendValue(fixedArray, (const void *)3);
+    assert(CFArrayGetCount(fixedArray) == 2);
+    CFRelease(fixedArray);
+
+    NSMutableURLRequest *headerRequest =
+        [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://example.invalid/"]];
+    NSMutableDictionary *suppliedHeaders =
+        [NSMutableDictionary dictionaryWithObject:@"one" forKey:@"X-First"];
+    headerRequest.allHTTPHeaderFields = suppliedHeaders;
+    [suppliedHeaders setObject:@"two" forKey:@"X-Second"];
+    assert(headerRequest.allHTTPHeaderFields.count == 1);
+    assert([[headerRequest.allHTTPHeaderFields objectForKey:@"X-First"] isEqual:@"one"]);
+    assert([headerRequest.allHTTPHeaderFields objectForKey:@"X-Second"] == nil);
+    headerRequest.allHTTPHeaderFields = nil;
+    assert(headerRequest.allHTTPHeaderFields == nil);
+
     NSMutableDictionary *mutableDictionary =
         [NSMutableDictionary dictionaryWithObject:@"one" forKey:@"first"];
     NSDictionary *immutableDictionary =
