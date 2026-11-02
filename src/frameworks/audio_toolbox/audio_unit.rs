@@ -517,11 +517,16 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
         ..Default::default()
     });
     env.mem.write(action_flags, kAudioUnitRenderAction_PreRender);
-    for notify in &render_notifies {
-        let _: OSStatus = notify.input_proc.call_from_host(
+    for notify in render_notifies.iter().copied() {
+        // AURenderCallbackStruct has the guest's packed ABI. Copy its fields
+        // before invoking a method so Rust never creates an aligned reference
+        // into that packed representation.
+        let input_proc = notify.input_proc;
+        let input_proc_ref_con = notify.input_proc_ref_con;
+        let _: OSStatus = input_proc.call_from_host(
             env,
             (
-                notify.input_proc_ref_con,
+                input_proc_ref_con,
                 action_flags,
                 time_stamp.cast_const(),
                 0u32,
@@ -589,11 +594,13 @@ pub fn render_audio_unit(env: &mut Environment, audio_unit: AudioUnit) {
         post_flags |= kAudioUnitRenderAction_PostRenderError;
     }
     env.mem.write(action_flags, post_flags);
-    for notify in &render_notifies {
-        let _: OSStatus = notify.input_proc.call_from_host(
+    for notify in render_notifies.iter().copied() {
+        let input_proc = notify.input_proc;
+        let input_proc_ref_con = notify.input_proc_ref_con;
+        let _: OSStatus = input_proc.call_from_host(
             env,
             (
-                notify.input_proc_ref_con,
+                input_proc_ref_con,
                 action_flags,
                 time_stamp.cast_const(),
                 0u32,
