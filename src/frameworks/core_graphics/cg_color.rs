@@ -29,7 +29,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())dealloc {
     let components = env.objc.borrow::<CGColorHostObject>(this).components;
     if !components.is_null() {
-        env.mem.free(components.cast());
+        let heap = env.framework_state.core_graphics.color_components_heap
+            .as_mut()
+            .expect("CGColor component storage heap was not initialized");
+        env.mem.free_in_heap(Some(heap), components.cast());
     }
     env.objc.dealloc_object(this, &mut env.mem)
 }
@@ -171,7 +174,16 @@ pub const FUNCTIONS: FunctionExports = &[
 /// an rgba tuple of CGFloats.
 pub fn from_rgba(env: &mut Environment, rgba: (CGFloat, CGFloat, CGFloat, CGFloat)) -> CGColorRef {
     let (r, g, b, a) = rgba;
-    let components: MutPtr<CGFloat> = env.mem.alloc(4 * guest_size_of::<CGFloat>()).cast();
+    if env.framework_state.core_graphics.color_components_heap.is_none() {
+        let heap = env.mem.create_heap(0);
+        env.framework_state.core_graphics.color_components_heap = Some(heap);
+    }
+    let heap = env.framework_state.core_graphics.color_components_heap
+        .as_mut()
+        .unwrap();
+    let components: MutPtr<CGFloat> = env.mem
+        .alloc_in_heap(Some(heap), 4 * guest_size_of::<CGFloat>())
+        .cast();
     env.mem.write(components, r);
     env.mem.write(components + 1, g);
     env.mem.write(components + 2, b);
@@ -236,5 +248,20 @@ mod tests {
         assert_eq!(env.mem.read(first + 2), 0.5);
         assert_eq!(env.mem.read(first + 3), 0.75);
         CGColorRelease(&mut env, color);
+    }
+
+    #[test]
+    fn released_component_storage_cannot_alias_the_default_malloc_zone() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let color = from_rgba(&mut env, (0.125, 0.25, 0.5, 0.75));
+        let components = CGColorGetComponents(&mut env, color);
+        CGColorRelease(&mut env, color);
+
+        let ordinary: MutPtr<CGFloat> = env
+            .mem
+            .alloc(4 * guest_size_of::<CGFloat>())
+            .cast();
+        assert_ne!(components, ordinary.cast_const());
+        env.mem.free(ordinary.cast());
     }
 }

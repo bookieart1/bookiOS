@@ -24,6 +24,10 @@ pub mod cg_path;
 pub struct State {
     generic_rgb_color_space: Option<crate::objc::id>,
     generic_gray_color_space: Option<crate::objc::id>,
+    /// Framework-owned guest storage returned by Core Graphics "Get"
+    /// functions. Keeping it outside the application's malloc zone prevents
+    /// an internal buffer from later aliasing an Objective-C object address.
+    color_components_heap: Option<crate::mem::HeapAllocator>,
 }
 
 pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {

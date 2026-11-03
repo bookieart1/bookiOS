@@ -8,7 +8,7 @@
 //! References:
 //! - Apple's [Preferences and Settings Programming Guide](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/UserDefaults/AboutPreferenceDomains/AboutPreferenceDomains.html).
 
-use super::{ns_string, NSInteger};
+use super::{ns_string, NSInteger, NSUInteger};
 use crate::frameworks::foundation::ns_string::to_rust_string;
 use crate::objc::{
     autorelease, id, msg, msg_class, nil, objc_classes, release, Class, ClassExports, HostObject,
@@ -135,6 +135,29 @@ pub const CLASSES: ClassExports = objc_classes! {
     let app_domain_dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict;
     () = msg![env; dict addEntriesFromDictionary:app_domain_dict];
     autorelease(env, dict)
+}
+
+- (id)persistentDomainForName:(id)domain_name { // NSString *
+    if domain_name == nil {
+        return nil;
+    }
+    let name = to_rust_string(env, domain_name);
+    let dict = if name == env.bundle.bundle_identifier() {
+        env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict
+    } else if name == "NSGlobalDomain" {
+        env.objc.borrow::<NSUserDefaultsHostObject>(this).global_domain_dict
+    } else {
+        nil
+    };
+    if dict == nil {
+        return nil;
+    }
+    let count: NSUInteger = msg![env; dict count];
+    if count == 0 {
+        return nil;
+    }
+    let copy: id = msg![env; dict copy];
+    autorelease(env, copy)
 }
 
 - (id)valueForKey:(id)key { // NSString*
@@ -388,5 +411,34 @@ mod tests {
         assert!(failure.is_err());
         release(env, defaults);
         release(env, pool);
+    }
+
+    #[test]
+    fn persistent_domain_returns_an_immutable_snapshot_for_known_domains() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let defaults: id = msg_class![env; NSUserDefaults alloc];
+        let app: id = msg_class![env; NSMutableDictionary new];
+        let global: id = msg_class![env; NSMutableDictionary new];
+        let key = ns_string::get_static_str(env, "checkpoint");
+        let value = ns_string::get_static_str(env, "saved");
+        () = msg![env; app setObject:value forKey:key];
+        *env.objc.borrow_mut::<NSUserDefaultsHostObject>(defaults) = NSUserDefaultsHostObject {
+            app_domain_dict: app,
+            global_domain_dict: global,
+            registration_domain_dict: nil,
+        };
+        let bundle_identifier = env.bundle.bundle_identifier().to_owned();
+        let domain = ns_string::from_rust_string(env, bundle_identifier);
+        let snapshot: id = msg![env; defaults persistentDomainForName:domain];
+        assert_ne!(snapshot, nil);
+        assert_ne!(snapshot, app);
+        let actual: id = msg![env; snapshot objectForKey:key];
+        assert_eq!(actual, value);
+        let unknown = ns_string::get_static_str(env, "not.a.real.domain");
+        let missing: id = msg![env; defaults persistentDomainForName:unknown];
+        assert_eq!(missing, nil);
+        release(env, domain);
+        release(env, defaults);
     }
 }

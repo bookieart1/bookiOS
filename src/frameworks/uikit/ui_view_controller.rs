@@ -12,7 +12,7 @@ use crate::frameworks::core_graphics::cg_affine_transform::CGAffineTransform;
 use crate::frameworks::core_graphics::{CGPoint, CGRect};
 use crate::frameworks::foundation::ns_objc_runtime::NSStringFromClass;
 use crate::frameworks::foundation::ns_string::{from_rust_string, get_static_str, to_rust_string};
-use crate::frameworks::foundation::{NSInteger, NSUInteger};
+use crate::frameworks::foundation::{_nib_archive_decoder, NSInteger, NSUInteger};
 use crate::frameworks::uikit::ui_application::{
     UIInterfaceOrientation, UIInterfaceOrientationPortrait,
 };
@@ -85,6 +85,20 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (id)initWithCoder:(id)coder {
     let key_ns_string = get_static_str(env, "UIView");
     let view: id = msg![env; coder decodeObjectForKey:key_ns_string];
+
+    if view == nil {
+        let this_class: Class = msg![env; this class];
+        let coder_class: Class = msg![env; coder class];
+        if env.objc.get_class_name(this_class) == "UINavigationController"
+            && env.objc.get_class_name(coder_class) == "_touchHLE_NIBArchiveDecoder"
+        {
+            _nib_archive_decoder::log_current_object_keys(
+                env,
+                coder,
+                "UINavigationController decoded without UIView",
+            );
+        }
+    }
 
     () = msg![env; this setView:view];
 

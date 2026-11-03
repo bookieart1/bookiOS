@@ -59,11 +59,55 @@ pub struct NSBundleHostObject {
 }
 impl HostObject for NSBundleHostObject {}
 
+fn paths_in_directory(env: &mut Environment, extension: id, directory: id) -> id {
+    if directory == nil {
+        return msg_class![env; NSArray array];
+    }
+    let dir_path = ns_string::to_rust_string(env, directory).into_owned();
+    let target_ext = if extension == nil {
+        None
+    } else {
+        let ext = ns_string::to_rust_string(env, extension)
+            .trim_start_matches('.')
+            .to_lowercase();
+        (!ext.is_empty()).then_some(ext)
+    };
+    let mut found_paths = Vec::new();
+    match env.fs.enumerate_with_types(GuestPath::new(&dir_path)) {
+        Ok(entries) => {
+            for (name, node_type) in entries {
+                if !matches!(node_type, FsNodeType::File) {
+                    continue;
+                }
+                let keep = target_ext
+                    .as_ref()
+                    .is_none_or(|ext| name.to_lowercase().ends_with(&format!(".{ext}")));
+                if keep {
+                    found_paths.push(format!("{dir_path}/{name}").replace("//", "/"));
+                }
+            }
+        }
+        Err(_) => log!("Failed to read guest directory {:?}", dir_path),
+    }
+    let array: id = msg_class![env; NSMutableArray new];
+    for path in found_paths {
+        let path = ns_string::from_rust_string(env, path);
+        let path = autorelease(env, path);
+        let _: () = msg![env; array addObject:path];
+    }
+    autorelease(env, array)
+}
+
 pub const CLASSES: ClassExports = objc_classes! {
 
 (env, this, _cmd);
 
 @implementation NSBundle: NSObject
+
++ (id)pathsForResourcesOfType:(id)extension
+                  inDirectory:(id)directory {
+    paths_in_directory(env, extension, directory)
+}
 
 + (id)allocWithZone:(NSZonePtr)_zone {
     let host_object = NSBundleHostObject {
@@ -523,52 +567,10 @@ pub const CLASSES: ClassExports = objc_classes! {
         }
     }
 
-    let target_ext = if extension != nil {
-        let ext_str = ns_string::to_rust_string(env, extension);
-        let ext_trimmed = ext_str.trim_start_matches('.').to_lowercase();
-
-        if ext_trimmed.is_empty() {
-            None
-        } else {
-            Some(ext_trimmed)
-        }
-    } else {
-        None
-    };
-
-    let mut found_paths: Vec<String> = Vec::new();
-    let guest_path = GuestPath::new(&dir_path);
-
-    match env.fs.enumerate_with_types(guest_path) {
-        Ok(entries) => {
-            for (name, node_type) in entries {
-                if matches!(node_type, FsNodeType::File) {
-                    let keep = match &target_ext {
-                        Some(ext) => name.to_lowercase().ends_with(&format!(".{}", ext)),
-                        None => true,
-                    };
-                    if keep {
-                        let clean_path = format!("{}/{}", dir_path, name).replace("//", "/");
-                        found_paths.push(clean_path);
-                    }
-                }
-            }
-        }
-        Err(_) => {
-            log!("Failed to read guest directory {:?}", dir_path);
-        }
-    }
-
-    let array: id = msg_class![env; NSMutableArray new];
-    for path_str in &found_paths {
-        let path_ns: id = ns_string::from_rust_string(env, path_str.to_string());
-        let path_ns = autorelease(env, path_ns);
-        let _: () = msg![env; array addObject:path_ns];
-    }
-
-    log_dbg!("[(NSBundle*) {:?} pathsForResourcesOfType:{:?} inDirectory:{:?}] found {} files", this, extension, subpath, found_paths.len());
-
-    autorelease(env, array)
+    let directory = ns_string::from_rust_string(env, dir_path);
+    let result = paths_in_directory(env, extension, directory);
+    release(env, directory);
+    result
 }
 
 // TODO: constructors, more accessors

@@ -135,7 +135,17 @@ fn CGImageCreate(
     assert_eq!(alpha_info | byte_order, bitmap_info); // TODO
     match byte_order {
         kCGImageByteOrderDefault | kCGImageByteOrder32Big => {
-            assert_eq!(alpha_info, kCGImageAlphaPremultipliedLast); // TODO
+            match alpha_info {
+                kCGImageAlphaPremultipliedLast => {}
+                kCGImageAlphaNone => {
+                    // Four-byte opaque RGB data has an unused final byte.
+                    // Normalize that byte because Image stores RGBA.
+                    for chunk in pixels.as_chunks_mut::<4>().0 {
+                        chunk[3] = 0xFF;
+                    }
+                }
+                _ => unimplemented!("CGImageCreate alpha info {alpha_info}"),
+            }
         }
         kCGImageByteOrder32Little => {
             // TODO: fix CGImageGetAlphaInfo()

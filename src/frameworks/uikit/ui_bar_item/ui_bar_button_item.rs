@@ -109,6 +109,58 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.alloc_object(this, host_object, &mut env.mem)
 }
 
+- (id)initWithCoder:(id)coder {
+    let this: id = msg_super![env; this init];
+    let title_key = get_static_str(env, "UITitle");
+    let style_key = get_static_str(env, "UIStyle");
+    let custom_view_key = get_static_str(env, "UICustomView");
+    let width_key = get_static_str(env, "UIWidth");
+
+    let title: id = if msg![env; coder containsValueForKey:title_key] {
+        msg![env; coder decodeObjectForKey:title_key]
+    } else {
+        nil
+    };
+    let style: UIBarButtonItemStyle = if msg![env; coder containsValueForKey:style_key] {
+        msg![env; coder decodeIntegerForKey:style_key]
+    } else {
+        UIBarButtonItemStylePlain
+    };
+    let decoded_custom: id = if msg![env; coder containsValueForKey:custom_view_key] {
+        msg![env; coder decodeObjectForKey:custom_view_key]
+    } else {
+        nil
+    };
+    let width: CGFloat = if msg![env; coder containsValueForKey:width_key] {
+        msg![env; coder decodeFloatForKey:width_key]
+    } else {
+        0.0
+    };
+
+    let (label, custom_view) = if decoded_custom != nil {
+        (nil, decoded_custom)
+    } else if title != nil {
+        let label = make_label(env, title);
+        let action = env.objc.lookup_selector("undefinedSelector").unwrap();
+        (label, make_custom_view(env, label, nil, action))
+    } else {
+        (nil, nil)
+    };
+    if title != nil {
+        retain(env, title);
+    }
+    if custom_view != nil {
+        retain(env, custom_view);
+    }
+    let host = env.objc.borrow_mut::<UIBarButtonItemHostObject>(this);
+    host.superclass.title = title;
+    host.style = style;
+    host.custom_view = custom_view;
+    host.label = label;
+    host.width = width;
+    this
+}
+
 - (id)initWithCustomView:(id)customView {
     log_dbg!(
         "[(UIBarButtonItem*){:?} initWithCustomView:{:?}]",

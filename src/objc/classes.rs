@@ -525,6 +525,7 @@ fn substitute_classes(
     // don't support yet. This isn't "ad blocking" because ads no longer work
     // on real devices anyway :)
     if !(name.starts_with("AdMob")
+        || name.starts_with("GAD") // Google Mobile Ads
         || name.starts_with("AdWhirl")
         || name.starts_with("AltAds")
         || name.starts_with("FB") // Facebook

@@ -11,7 +11,7 @@
 use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
 use crate::frameworks::core_foundation::time::CFTimeInterval;
 use crate::frameworks::foundation::ns_run_loop::{
-    run_run_loop, run_run_loop_single_iteration, stop_run_loop,
+    contains_timer, run_run_loop, run_run_loop_single_iteration, stop_run_loop,
 };
 use crate::frameworks::foundation::ns_string;
 use crate::objc::{id, msg, msg_class};
@@ -40,6 +40,25 @@ fn CFRunLoopRun(env: &mut Environment) {
 
 fn CFRunLoopStop(env: &mut Environment, run_loop: CFRunLoopRef) {
     stop_run_loop(env, run_loop);
+}
+
+fn CFRunLoopContainsTimer(
+    env: &mut Environment,
+    run_loop: CFRunLoopRef,
+    timer: super::CFTypeRef,
+    mode: CFRunLoopMode,
+) -> bool {
+    let default_mode = ns_string::get_static_str(env, kCFRunLoopDefaultMode);
+    let common_modes = ns_string::get_static_str(env, kCFRunLoopCommonModes);
+    if msg![env; mode isEqualToString:default_mode]
+        || msg![env; mode isEqualToString:common_modes]
+    {
+        contains_timer(env, run_loop, timer)
+    } else {
+        // The scheduler currently models only the default/common modes. A
+        // timer cannot be a member of another, unmodelled mode.
+        false
+    }
 }
 
 fn CFRunLoopRunInMode(
@@ -84,5 +103,6 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFRunLoopGetMain()),
     export_c_func!(CFRunLoopRun()),
     export_c_func!(CFRunLoopStop(_)),
+    export_c_func!(CFRunLoopContainsTimer(_, _, _)),
     export_c_func!(CFRunLoopRunInMode(_, _, _)),
 ];

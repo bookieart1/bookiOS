@@ -49,6 +49,9 @@ pub(super) struct CALayerHostObject {
     pub(super) hidden: bool,
     pub(super) opaque: bool,
     pub(super) opacity: f32,
+    /// Scale between layer coordinates and backing pixels. On historical iOS
+    /// CALayer defaults to 1.0; UIKit may set a different value explicitly.
+    pub(super) contents_scale: CGFloat,
     pub(super) z_position: CGFloat,
     pub(super) background_color: Option<CGColorHostObject>,
     pub(super) corner_radius: CGFloat,
@@ -133,6 +136,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         hidden: false,
         opaque: false,
         opacity: 1.0,
+        contents_scale: 1.0,
         z_position: 0.0,
         background_color: None, // transparency
         corner_radius: 0.0,
@@ -382,6 +386,15 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (f32)opacity {
     env.objc.borrow::<CALayerHostObject>(this).opacity
+}
+
+- (CGFloat)contentsScale {
+    env.objc.borrow::<CALayerHostObject>(this).contents_scale
+}
+
+- (())setContentsScale:(CGFloat)scale {
+    assert!(scale.is_finite() && scale > 0.0);
+    env.objc.borrow_mut::<CALayerHostObject>(this).contents_scale = scale;
 }
 - (())setOpacity:(f32)opacity {
     let host_object = env.objc.borrow_mut::<CALayerHostObject>(this);
@@ -798,4 +811,22 @@ fn is_implicit_animation_enabled(env: &mut Environment, layer: id) -> bool {
     let delegate_is_uiview: bool = msg![env; delegate isKindOfClass:uiview_class];
     let ui_view = &env.framework_state.uikit.ui_view;
     !delegate_is_uiview || (ui_view.animation_block_count > 0 && !ui_view.animations_disabled)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contents_scale_defaults_to_one_and_round_trips() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let layer: id = msg_class![env; CALayer new];
+        let initial: CGFloat = msg![env; layer contentsScale];
+        assert_eq!(initial, 1.0);
+        () = msg![env; layer setContentsScale:2.0_f32];
+        let updated: CGFloat = msg![env; layer contentsScale];
+        assert_eq!(updated, 2.0);
+        release(env, layer);
+    }
 }

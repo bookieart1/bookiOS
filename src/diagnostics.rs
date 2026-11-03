@@ -936,7 +936,7 @@ impl Recorder {
                 event.key_retain, event.key_release, event.value_retain, event.value_release);
         }
         echo_no_panic!(
-            "flight watched-object lifetime events: newest {OBJECT_LIFETIME_EVENTS}; total={} (only values observed in non-retaining dictionaries)",
+            "flight watched-object lifetime events: newest {OBJECT_LIFETIME_EVENTS}; total={} (bounded values observed in non-retaining dictionaries or recent array transfers)",
             self.object_lifetime_events.written
         );
         for event in self.object_lifetime_events.iter() {
@@ -1305,6 +1305,18 @@ impl Environment {
         after: u32,
     ) {
         let regs = self.cpu.regs();
+        let should_watch = object != 0 && matches!(action, "insert" | "add" | "replace");
+        let refcount = should_watch
+            .then(|| self.objc.refcount_for_diagnostics(id::from_bits(object)))
+            .flatten();
+        let class = if should_watch {
+            ObjC::try_read_isa(id::from_bits(object), &self.mem)
+                .and_then(|class| self.objc.try_get_class_name(class))
+                .map(|name| Text::from_bytes(name.as_bytes()))
+                .unwrap_or_else(|| Text::from_bytes(b"<invalid-at-array-transfer>"))
+        } else {
+            Text::default()
+        };
         let mut caller_code = [0; 16];
         let caller_address = (regs[14] & !1).saturating_sub(8);
         let caller_code_len = self
@@ -1330,6 +1342,23 @@ impl Environment {
                 caller_code,
                 caller_code_len,
             });
+            // Preserve retain/release/deallocation provenance for only the
+            // most recently transferred array values. The recorder does not
+            // retain these guest objects or change collection behavior.
+            if should_watch {
+                recorder.watch_object(object);
+                recorder.object_lifetime_events.push(ObjectLifetimeEvent {
+                    sequence: recorder.object_lifetime_events.written.saturating_add(1),
+                    thread: self.current_thread,
+                    action: "observed-at-array-transfer",
+                    object,
+                    class,
+                    before: refcount.unwrap_or(0),
+                    after: refcount.unwrap_or(0),
+                    pc: regs[15],
+                    lr: regs[14],
+                });
+            }
         }
     }
     /// Record only dictionary ownership-relevant transitions. This is a
@@ -1462,7 +1491,7 @@ impl Environment {
         if let Some(recorder) = &mut self.diagnostics {
             if !recorder.dumped {
                 if let Some(history) = &self.mem.object_history {
-                    echo_no_panic!("object history enabled: 2048 address slots, 8 recent events/address, evictions={}; heap/ObjC boundaries only, no guest-store tracing", history.evictions);
+                    echo_no_panic!("object history enabled: 8192 address slots, 8 recent events/address, evictions={}; heap/ObjC boundaries only, no guest-store tracing", history.evictions);
                     if matches!(reason, "panic" | "scheduler-panic") {
                         // Prefer the final boundary's consumed values over
                         // arbitrary registers. At most eight retained records.

@@ -6,7 +6,10 @@
 //! Bounded observations, never an authority for object or allocator validity.
 //! Keep tombstones without quarantining storage or retaining guest objects.
 
-const SETS: usize = 512;
+// Four times the original address coverage while retaining the same fixed
+// four-way lookup cost. This is still bounded and does not add new event
+// classes; it reduces loss of the exact stale address in long game sessions.
+const SETS: usize = 2048;
 const WAYS: usize = 4;
 const EVENTS: usize = 8;
 
@@ -83,7 +86,7 @@ impl ObjectHistory {
     fn set(address: u32) -> usize {
         // Mix aligned allocator addresses; do not use their low bits alone.
         let word = address >> 4;
-        (word.wrapping_mul(0x9e3779b9) >> 23) as usize * WAYS
+        (word.wrapping_mul(0x9e3779b9) as usize & (SETS - 1)) * WAYS
     }
 
     fn index(&self, address: u32) -> Option<usize> {
@@ -236,7 +239,7 @@ mod tests {
     #[test]
     fn object_history_is_bounded_and_reports_eviction_and_vm_overlap() {
         let mut history = ObjectHistory::new();
-        assert!(std::mem::size_of::<Record>() * SETS * WAYS < 2 * 1024 * 1024);
+        assert!(std::mem::size_of::<Record>() * SETS * WAYS < 8 * 1024 * 1024);
         for i in 1..20_000 {
             history.allocated(i * 16, 0x800000, 32);
         }

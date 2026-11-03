@@ -386,8 +386,32 @@ pub const CLASSES: ClassExports = objc_classes! {
         let texture_2d = unsafe { get_int(gles.as_mut(), gles11::TEXTURE_BINDING_2D) };
         let matrix_mode = unsafe { get_int(gles.as_mut(), gles11::MATRIX_MODE) };
         let scissor_enabled = unsafe { gles.IsEnabled(gles11::SCISSOR_TEST) } != gles11::FALSE;
+        let blend_enabled = unsafe { gles.IsEnabled(gles11::BLEND) } != gles11::FALSE;
+        let blend_src = unsafe { get_int(gles.as_mut(), gles11::BLEND_SRC) };
+        let blend_dst = unsafe { get_int(gles.as_mut(), gles11::BLEND_DST) };
+        let active_texture = unsafe { get_int(gles.as_mut(), gles11::ACTIVE_TEXTURE) };
+        let client_active_texture = unsafe {
+            get_int(gles.as_mut(), gles11::CLIENT_ACTIVE_TEXTURE)
+        };
+        let texture_env = unsafe {
+            get_tex_env_int(gles.as_mut(), gles11::TEXTURE_ENV, gles11::TEXTURE_ENV_MODE)
+        };
+        let vertex_buffer = unsafe {
+            get_int(gles.as_mut(), gles11::VERTEX_ARRAY_BUFFER_BINDING)
+        };
+        let vertex_size = unsafe { get_int(gles.as_mut(), gles11::VERTEX_ARRAY_SIZE) };
+        let vertex_type = unsafe { get_int(gles.as_mut(), gles11::VERTEX_ARRAY_TYPE) };
+        let vertex_stride = unsafe { get_int(gles.as_mut(), gles11::VERTEX_ARRAY_STRIDE) };
+        let texcoord_buffer = unsafe {
+            get_int(gles.as_mut(), gles11::TEXTURE_COORD_ARRAY_BUFFER_BINDING)
+        };
+        let texcoord_size = unsafe { get_int(gles.as_mut(), gles11::TEXTURE_COORD_ARRAY_SIZE) };
+        let texcoord_type = unsafe { get_int(gles.as_mut(), gles11::TEXTURE_COORD_ARRAY_TYPE) };
+        let texcoord_stride = unsafe {
+            get_int(gles.as_mut(), gles11::TEXTURE_COORD_ARRAY_STRIDE)
+        };
         log!(
-            "EAGL present milestone frame={}: context={:?} renderbuffer={} size={}x{} framebuffer={} status={:#x} viewport={:?} scissor-enabled={} scissor={:?} texture2d={} matrix-mode={:#x}",
+            "EAGL present milestone frame={}: context={:?} renderbuffer={} size={}x{} framebuffer={} status={:#x} viewport={:?} scissor-enabled={} scissor={:?} texture2d={} matrix-mode={:#x} blend-enabled={} blend={:#x}/{:#x} active-texture={:#x} client-active-texture={:#x} texenv={:#x} vertex=[buffer={},size={},type={:#x},stride={}] texcoord=[buffer={},size={},type={:#x},stride={}]",
             snapshot,
             this,
             renderbuffer,
@@ -399,7 +423,21 @@ pub const CLASSES: ClassExports = objc_classes! {
             scissor_enabled,
             scissor,
             texture_2d,
-            matrix_mode
+            matrix_mode,
+            blend_enabled,
+            blend_src,
+            blend_dst,
+            active_texture,
+            client_active_texture,
+            texture_env,
+            vertex_buffer,
+            vertex_size,
+            vertex_type,
+            vertex_stride,
+            texcoord_buffer,
+            texcoord_size,
+            texcoord_type,
+            texcoord_stride
         );
     }
 

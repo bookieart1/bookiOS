@@ -228,6 +228,57 @@ fn get_value_to_decode_for_key(env: &mut Environment, unarchiver: id, key: id) -
         .map(|v| v as _)
 }
 
+/// Emit a bounded description of the object currently being decoded.
+///
+/// This is used only at a decisive UIKit archive boundary (for example, a
+/// navigation controller whose encoded view is absent). It deliberately logs
+/// keys and value kinds rather than recursively decoding objects, so gathering
+/// evidence cannot change archive behavior or retain additional guest objects.
+pub fn log_current_object_keys(env: &mut Environment, unarchiver: id, reason: &str) {
+    const MAX_KEYS: usize = 32;
+
+    let host_obj = borrow_host_obj(env, unarchiver);
+    let Some(current_idx) = host_obj.current_object_idx else {
+        log!("bounded nib diagnostic reason={reason:?}: no current object");
+        return;
+    };
+    let object = host_obj
+        .archive
+        .objects()
+        .get(current_idx as usize)
+        .unwrap();
+    let class_name = object.class_name(host_obj.archive.class_names()).name();
+    let values = object.values(host_obj.archive.values());
+    let summaries: Vec<String> = values
+        .iter()
+        .take(MAX_KEYS)
+        .map(|value| {
+            let key = value.key(host_obj.archive.keys());
+            let kind = match value.value() {
+                ValueVariant::Bool(_) => "bool",
+                ValueVariant::Float(_) => "float",
+                ValueVariant::Double(_) => "double",
+                ValueVariant::Int8(_) => "int8",
+                ValueVariant::Int16(_) => "int16",
+                ValueVariant::Int32(_) => "int32",
+                ValueVariant::Int64(_) => "int64",
+                ValueVariant::Data(_) => "data",
+                ValueVariant::Nil => "nil",
+                ValueVariant::ObjectRef(_) => "object-ref",
+            };
+            format!("{key}:{kind}")
+        })
+        .collect();
+    log!(
+        "bounded nib diagnostic reason={reason:?} object-index={current_idx} class={class_name:?} keys={summaries:?}{}",
+        if values.len() > MAX_KEYS {
+            " (truncated)"
+        } else {
+            ""
+        }
+    );
+}
+
 fn unarchive_obj(env: &mut Environment, unarchiver: id, idx: u32) -> id {
     let host_obj = borrow_host_obj(env, unarchiver);
     if let Some(existing) = host_obj.already_unarchived[idx as usize] {

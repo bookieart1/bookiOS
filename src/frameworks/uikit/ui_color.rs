@@ -261,6 +261,18 @@ pub const CLASSES: ClassExports = objc_classes! {
     msg_class![env; UIColor colorWithRed:r green:g blue:b alpha:a]
 }
 
+// Historical UIKit builds exposed this mutating selector privately. A small
+// number of old applications use it directly instead of the public
+// colorWithAlphaComponent: copy operation.
+- (())setAlpha:(CGFloat)a {
+    let a = a.clamp(0.0, 1.0);
+    let old = env.objc.borrow::<UIColorHostObject>(this).cg_color;
+    let (r, g, b, _) = cg_color::to_rgba(&env.objc, old);
+    let new = cg_color::from_rgba(env, (r, g, b, a));
+    env.objc.borrow_mut::<UIColorHostObject>(this).cg_color = new;
+    CGColorRelease(env, old);
+}
+
 @end
 
 // Undocumented classes used in NIBs

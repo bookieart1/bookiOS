@@ -296,6 +296,16 @@ pub(super) fn remove_timer(env: &mut Environment, run_loop: id, timer: id) {
     }
 }
 
+/// Shared by the toll-free-emulation Core Foundation run-loop facade. The
+/// current scheduler deliberately collapses the default and common modes, so
+/// membership in either supported mode is represented by this one list.
+pub fn contains_timer(env: &Environment, run_loop: id, timer: id) -> bool {
+    env.objc
+        .borrow::<NSRunLoopHostObject>(run_loop)
+        .timers
+        .contains(&timer)
+}
+
 /// Adds a selector to perform on the target run loop from
 /// performSelector:withObject:onThread:(afterDelay:/waitUntilDone:). The delay
 /// arg corrseponds to the afterDelay: arg and should_sync corresponds to
@@ -695,5 +705,26 @@ mod tests {
             .selector_objects;
         assert_eq!(queued.len(), 1);
         assert_eq!(queued[0].target, second);
+    }
+
+    #[test]
+    fn timer_membership_tracks_add_and_invalidate() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let run_loop: id = msg_class![env; NSRunLoop currentRunLoop];
+        let target: id = msg_class![env; NSObject new];
+        let selector = env
+            .objc
+            .register_host_selector("description".to_owned(), &mut env.mem);
+        let timer: id = msg_class![env; NSTimer timerWithTimeInterval:10.0_f64
+                                               target:target
+                                             selector:selector
+                                             userInfo:nil
+                                              repeats:false];
+        let mode = ns_string::get_static_str(env, NSDefaultRunLoopMode);
+        () = msg![env; run_loop addTimer:timer forMode:mode];
+        assert!(contains_timer(env, run_loop, timer));
+        () = msg![env; timer invalidate];
+        assert!(!contains_timer(env, run_loop, timer));
     }
 }

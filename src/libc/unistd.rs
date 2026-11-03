@@ -8,7 +8,7 @@
 use crate::dyld::{export_c_func, FunctionExports};
 use crate::fs::{FsError, GuestPath};
 use crate::libc::errno::{
-    set_errno, EACCES, EFAULT, EIO, EINVAL, ENOENT, ENOTDIR, ENOTEMPTY, EROFS,
+    set_errno, EACCES, EFAULT, EIO, EINVAL, ENOENT, ENOTDIR, ENOTEMPTY, EROFS, ESRCH,
 };
 use crate::libc::posix_io::{FileDescriptor, STDERR_FILENO, STDIN_FILENO, STDOUT_FILENO};
 use crate::mem::{ConstPtr, GuestISize, GuestUSize, MutPtr, PAGE_SIZE};
@@ -55,6 +55,19 @@ pub fn getpid(_env: &mut Environment) -> pid_t {
     // Not a real value, since touchHLE only simulates a single process.
     // PID 0 would be init, which is a bit unrealistic, so let's go with 1.
     1
+}
+
+fn kill(env: &mut Environment, pid: pid_t, signal: i32) -> i32 {
+    // POSIX signal 0 is a process-existence/permission probe and sends no
+    // signal. touchHLE simulates one process, whose synthetic PID is getpid().
+    if signal == 0 {
+        if pid == getpid(env) {
+            return 0;
+        }
+        set_errno(env, ESRCH);
+        return -1;
+    }
+    unimplemented!("kill({pid}, {signal})")
 }
 fn getppid(_env: &mut Environment) -> pid_t {
     // Included just for completeness. Surely no app ever calls this.
@@ -224,6 +237,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(sleep(_)),
     export_c_func!(usleep(_)),
     export_c_func!(getpid()),
+    export_c_func!(kill(_, _)),
     export_c_func!(getppid()),
     export_c_func!(isatty(_)),
     export_c_func!(access(_, _)),
@@ -236,3 +250,19 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(getdtablesize()),
     export_c_func!(sysconf(_)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::libc::errno::get_errno;
+
+    #[test]
+    fn signal_zero_checks_the_synthetic_process_without_signalling() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        set_errno(&mut env, EINVAL);
+        assert_eq!(kill(&mut env, 1, 0), 0);
+        assert_eq!(get_errno(&mut env), EINVAL);
+        assert_eq!(kill(&mut env, 99, 0), -1);
+        assert_eq!(get_errno(&mut env), ESRCH);
+    }
+}
