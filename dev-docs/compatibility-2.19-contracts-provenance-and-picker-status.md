@@ -60,4 +60,6 @@ their Dev 2.18 boundaries; no offline service or missing resource is faked.
 Focused host tests cover XML serialization, AVPlayerItem state, the cache-size
 sysctl, the historical alert argument, and bounded diagnostic storage. Hosted
 tests, iOS compilation, unsigned-package verification, and physical-device
-results remain separate evidence. The universal recorder remains enabled.
+results remain separate evidence. The universal recorder remains enabled. Its
+compile-time test ceiling is now 384 KiB after adding the fixed-size histories;
+the device-tested recorder remains bounded and showed no measurable slowdown.

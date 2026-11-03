@@ -376,7 +376,9 @@ mod tests {
     fn xml_serialization_emits_xml_and_reports_no_error() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
-        let pool: id = msg_class![env; NSAutoreleasePool new];
+        // This test exercises serialization, not autorelease-pool or allocator
+        // teardown. The fake environment owns guest allocations until drop.
+        let _pool: id = msg_class![env; NSAutoreleasePool new];
         let value = ns_string::get_static_str(env, "value");
         let array: id = msg_class![env; NSMutableArray new];
         () = msg![env; array addObject:value];
@@ -389,8 +391,5 @@ mod tests {
         assert_ne!(data, nil);
         assert_eq!(env.mem.read(error_string), nil);
         assert!(ns_data::to_rust_slice(env, data).starts_with(b"<?xml"));
-        release(env, array);
-        release(env, pool);
-        env.mem.free(error_string.cast());
     }
 }
