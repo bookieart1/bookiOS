@@ -170,6 +170,9 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
                 if !env.return_to_app_picker {
                     log!("Handling HomeButton event: returning to app picker.");
                     if !env.is_app_picker {
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            ui_view::log_bounded_view_hierarchy(env, "HomeButton")
+                        }));
                         // iOS kills apps that take more than a few seconds.
                         env.quit_deadline = Some(Instant::now() + Duration::from_secs(5));
                         // Some apps crash if they're quit while loading, as

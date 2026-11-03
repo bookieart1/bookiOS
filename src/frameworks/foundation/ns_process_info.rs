@@ -82,6 +82,32 @@ pub const CLASSES: ClassExports = objc_classes! {
     msg![env; main_bundle objectForInfoDictionaryKey:name_key]
 }
 
+- (id)environment {
+    assert_process_info_singleton(env, this);
+    // Expose the emulated process environment, never the host process's
+    // environment. HOME and TMPDIR are established by Environment startup and
+    // setenv()/unsetenv() updates are reflected on later calls.
+    let entries: Vec<(String, String)> = env
+        .env_vars
+        .iter()
+        .map(|(name, &value)| {
+            (
+                String::from_utf8_lossy(name).into_owned(),
+                env.mem.cstr_at_utf8(value).unwrap_or("").to_owned(),
+            )
+        })
+        .collect();
+    let mutable: id = msg_class![env; NSMutableDictionary dictionary];
+    for (name, value) in entries {
+        let name = ns_string::from_rust_string(env, name);
+        let value = ns_string::from_rust_string(env, value);
+        () = msg![env; mutable setObject:value forKey:name];
+        crate::objc::release(env, value);
+        crate::objc::release(env, name);
+    }
+    msg_class![env; NSDictionary dictionaryWithDictionary:mutable]
+}
+
 - (id)globallyUniqueString {
     assert_process_info_singleton(env, this);
     // NSProcessInfo promises a different, globally unique value for each
@@ -95,3 +121,22 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objc::{msg, msg_class, release};
+
+    #[test]
+    fn environment_reports_emulated_variables_without_host_leakage() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let home = env.mem.alloc_and_write_cstr(b"/guest/home");
+        env.env_vars.insert(b"HOME".to_vec(), home);
+        let process: id = msg_class![&mut env; NSProcessInfo processInfo];
+        let dictionary: id = msg![&mut env; process environment];
+        let key = ns_string::from_rust_string(&mut env, "HOME".to_owned());
+        let value: id = msg![&mut env; dictionary objectForKey:key];
+        assert_eq!(ns_string::to_rust_string(&mut env, value), "/guest/home");
+        release(&mut env, key);
+    }
+}

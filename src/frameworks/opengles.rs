@@ -34,6 +34,11 @@ pub struct State {
     /// turning normal rendering into per-frame tracing.
     input_diagnostic_remaining: u8,
     input_diagnostic_emitted: u8,
+    /// A second, independently bounded budget samples guest draw-call state.
+    /// It is intentionally separate from frame-presentation snapshots so a
+    /// corrupted frame can be correlated with the draws that produced it.
+    input_draw_diagnostic_remaining: u8,
+    input_draw_diagnostic_emitted: u8,
 }
 impl State {
     fn current_ctx_for_thread(&mut self, thread: crate::ThreadId) -> &mut Option<crate::objc::id> {
@@ -48,6 +53,14 @@ impl State {
         self.input_diagnostic_remaining = self
             .input_diagnostic_remaining
             .max(FRAMES_PER_INPUT.min(available));
+
+        const DRAW_TOTAL_BUDGET: u8 = 32;
+        const DRAWS_PER_INPUT: u8 = 8;
+        let draw_available =
+            DRAW_TOTAL_BUDGET.saturating_sub(self.input_draw_diagnostic_emitted);
+        self.input_draw_diagnostic_remaining = self
+            .input_draw_diagnostic_remaining
+            .max(DRAWS_PER_INPUT.min(draw_available));
     }
 
     fn take_input_diagnostic_snapshot(&mut self) -> Option<u8> {
@@ -57,6 +70,17 @@ impl State {
         self.input_diagnostic_remaining -= 1;
         self.input_diagnostic_emitted += 1;
         Some(self.input_diagnostic_emitted)
+    }
+
+    fn take_input_draw_diagnostic(&mut self) -> Option<u8> {
+        if self.input_draw_diagnostic_remaining == 0
+            || self.input_draw_diagnostic_emitted >= 32
+        {
+            return None;
+        }
+        self.input_draw_diagnostic_remaining -= 1;
+        self.input_draw_diagnostic_emitted += 1;
+        Some(self.input_draw_diagnostic_emitted)
     }
 }
 

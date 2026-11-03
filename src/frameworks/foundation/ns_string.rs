@@ -12,6 +12,9 @@ mod path_algorithms;
 
 use super::ns_error::{NSCocoaErrorDomain, NSFilePathErrorKey, NSFileReadNoSuchFileError};
 use super::ns_keyed_archiver::set_value_to_encode_for_current_key;
+use super::ns_url_connection::{
+    make_url_error_for_url, NSErrorFailingURLStringKey, NSURLErrorNotConnectedToInternet,
+};
 use super::{ns_array, ns_dictionary, ns_keyed_unarchiver};
 use super::{
     unichar, NSComparisonResult, NSInteger, NSNotFound, NSOrderedAscending, NSOrderedDescending,
@@ -1942,7 +1945,11 @@ pub const CLASSES: ClassExports = objc_classes! {
                        error:(MutPtr<id>)error { // NSError**
     let data: id = msg_class![env; NSData dataWithContentsOfURL:url];
     if data == nil {
-        assert!(error.is_null()); // TODO: error handling
+        if !error.is_null() {
+            let url_error =
+                make_url_error_for_url(env, url, NSURLErrorNotConnectedToInternet);
+            env.mem.write(error, url_error);
+        }
         release(env, this);
         return nil;
     }
@@ -2830,6 +2837,38 @@ mod ns_string_tests {
 
         env.mem.free(out_error.cast());
         release(env, path);
+        release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
+
+    #[test]
+    fn unavailable_url_initializer_populates_requested_error() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let url_string = from_rust_string(env, "https://offline.invalid/ad.txt".to_owned());
+        let url: id = msg_class![env; NSURL URLWithString:url_string];
+        let out_error = env.mem.alloc_and_write(nil);
+        let string: id = msg_class![env; NSString alloc];
+        let result: id = msg![env; string initWithContentsOfURL:url
+                                                  encoding:NSUTF8StringEncoding
+                                                     error:out_error];
+        assert_eq!(result, nil);
+
+        let error = env.mem.read(out_error);
+        assert_ne!(error, nil);
+        let code: NSInteger = msg![env; error code];
+        assert_eq!(code, NSURLErrorNotConnectedToInternet);
+        let user_info: id = msg![env; error userInfo];
+        let key = get_static_str(env, NSErrorFailingURLStringKey);
+        let failed_url: id = msg![env; user_info objectForKey:key];
+        assert_eq!(to_rust_string(env, failed_url), "https://offline.invalid/ad.txt");
+
+        env.mem.free(out_error.cast());
+        release(env, url_string);
         release(env, pool);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);

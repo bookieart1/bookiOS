@@ -322,7 +322,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())setTarget:(id)target {
+    let old_target = env.objc.borrow::<UIBarButtonItemHostObject>(this).target;
+    retain(env, target);
     env.objc.borrow_mut::<UIBarButtonItemHostObject>(this).target = target;
+    release(env, old_target);
 }
 
 - (CGFloat)width {
@@ -368,6 +371,24 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.borrow_mut::<UIBarButtonItemHostObject>(this).action = Some(action);
 }
 
+- (())addTarget:(id)target
+         action:(SEL)action
+forControlEvents:(crate::frameworks::foundation::NSUInteger)events {
+    // Some iPhone OS nib archives reconnect a decoded UIBarButtonItem through
+    // this UIControl-shaped selector. The item still has the ordinary single
+    // target/action contract; its internal control receives the event mask.
+    () = msg![env; this setTarget:target];
+    () = msg![env; this setAction:action];
+    let custom_view = env.objc.borrow::<UIBarButtonItemHostObject>(this).custom_view;
+    if custom_view != nil {
+        let control_class = env.objc.get_known_class("UIControl", &mut env.mem);
+        let is_control: bool = msg![env; custom_view isKindOfClass:control_class];
+        if is_control {
+            () = msg![env; custom_view addTarget:target action:action forControlEvents:events];
+        }
+    }
+}
+
 - (())dealloc {
     let UIBarButtonItemHostObject {
         superclass,
@@ -394,3 +415,28 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decoded_style_target_action_connection_round_trips() {
+        let mut env = crate::Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let item: id = msg_class![env; UIBarButtonItem new];
+        let target: id = msg_class![env; NSObject new];
+        let action = env
+            .objc
+            .register_host_selector("performAction:".to_owned(), &mut env.mem);
+        () = msg![env; item addTarget:target
+                              action:action
+                    forControlEvents:UIControlEventTouchUpInside];
+        let stored_target: id = msg![env; item target];
+        let stored_action: SEL = msg![env; item action];
+        assert_eq!(stored_target, target);
+        assert_eq!(stored_action, action);
+        release(env, target);
+        release(env, item);
+    }
+}

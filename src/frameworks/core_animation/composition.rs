@@ -83,10 +83,13 @@ unsafe fn load_matrix(gles: &mut dyn GLES, matrix: Matrix<4>) {
 
 unsafe fn assert_compositor_gl_clean(gles: &mut dyn GLES, stage: &str, layer: id) {
     let error = gles.GetError();
-    assert_eq!(
-        error,
-        gles11::NO_ERROR,
-        "Core Animation compositor GL error at stage {stage:?}, layer {layer:?}"
+    let framebuffer_status = gles.CheckFramebufferStatusOES(gles11::FRAMEBUFFER_OES);
+    let status_error = gles.GetError();
+    assert!(
+        error == gles11::NO_ERROR
+            && status_error == gles11::NO_ERROR
+            && framebuffer_status == gles11::FRAMEBUFFER_COMPLETE_OES,
+        "Core Animation compositor failure at stage {stage:?}, layer {layer:?}: prior GL error {error:#x}, framebuffer status {framebuffer_status:#x}, status-query GL error {status_error:#x}"
     );
 }
 
@@ -511,6 +514,10 @@ unsafe fn composite_layer_recursive(
     let window = env.window.as_mut().unwrap();
     let mut gles = window.make_internal_gl_ctx_current();
 
+    if diagnostic_layer_checks {
+        assert_compositor_gl_clean(gles.as_mut(), "layer-entry", layer);
+    }
+
     let opacity = opacity * host_obj.opacity;
     let cumulative_transform = {
         let CALayerHostObject { bounds, .. } = host_obj;
@@ -532,6 +539,9 @@ unsafe fn composite_layer_recursive(
 
         cumulative_transform
     };
+    if diagnostic_layer_checks {
+        assert_compositor_gl_clean(gles.as_mut(), "layer-transform", layer);
+    }
 
     // Draw background color, if any
     let have_background = if let Some(background_color) = host_obj.background_color {
@@ -610,6 +620,9 @@ unsafe fn composite_layer_recursive(
     } else {
         false
     };
+    if diagnostic_layer_checks {
+        assert_compositor_gl_clean(gles.as_mut(), "layer-background", layer);
+    }
 
     let need_texture = host_obj.presented_pixels.is_some()
         || host_obj.contents != nil
@@ -629,6 +642,9 @@ unsafe fn composite_layer_recursive(
             // Update original layer texture
             env.objc.borrow_mut::<CALayerHostObject>(layer).gles_texture = Some(texture);
         }
+    }
+    if diagnostic_layer_checks {
+        assert_compositor_gl_clean(gles.as_mut(), "layer-texture-bind", layer);
     }
 
     // Update original layer texture with CAEAGLLayer pixels (slow path), if any
@@ -673,6 +689,9 @@ unsafe fn composite_layer_recursive(
         let original_host_obj = env.objc.borrow_mut::<CALayerHostObject>(layer);
         original_host_obj.gles_texture_is_up_to_date = true;
         original_host_obj.gles_texture_contents = host_obj.contents;
+    }
+    if diagnostic_layer_checks {
+        assert_compositor_gl_clean(gles.as_mut(), "layer-texture-upload", layer);
     }
 
     // Draw texture, if any
@@ -736,12 +755,18 @@ unsafe fn composite_layer_recursive(
 
         gles.TexCoordPointer(2, gles11::FLOAT, 0, tex_coords.as_ptr() as *const GLvoid);
         gles.Enable(gles11::TEXTURE_2D);
+        if diagnostic_layer_checks {
+            assert_compositor_gl_clean(gles.as_mut(), "layer-pre-texture-draw", layer);
+        }
         gles.DrawElements(
             gles11::TRIANGLES,
             SQUARE_INDICES.len() as _,
             gles11::UNSIGNED_BYTE,
             0 as *const GLvoid,
         );
+        if diagnostic_layer_checks {
+            assert_compositor_gl_clean(gles.as_mut(), "layer-post-texture-draw", layer);
+        }
     }
     if diagnostic_layer_checks {
         assert_compositor_gl_clean(gles.as_mut(), "post-input-layer-draw", layer);

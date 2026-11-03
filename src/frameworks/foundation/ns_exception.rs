@@ -30,6 +30,20 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 @implementation NSException: NSObject
 
++ (())raise:(id)name format:(id)format, ...args {
+    let _ = this;
+    let reason_text = ns_string::with_format(env, format, args.start());
+    let name_text = if name == nil {
+        "(unnamed)".to_owned()
+    } else {
+        ns_string::to_rust_string(env, name).into_owned()
+    };
+    // Objective-C exception unwinding is not implemented. Preserve strict
+    // failure here while exposing the actual formatted guest exception rather
+    // than failing earlier on a missing selector or silently continuing.
+    panic!("Guest raised NSException {name_text:?}: {reason_text:?}");
+}
+
 + (id)allocWithZone:(NSZonePtr)_zone {
     let host_object = Box::new(NSExceptionHostObject {
         name: nil,
@@ -396,6 +410,7 @@ pub const FUNCTIONS: FunctionExports = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::objc::msg_class;
 
     #[test]
     fn uncaught_exception_handler_round_trips() {
@@ -405,5 +420,14 @@ mod tests {
         assert_eq!(NSGetUncaughtExceptionHandler(&mut env), handler);
         NSSetUncaughtExceptionHandler(&mut env, MutVoidPtr::null());
         assert!(NSGetUncaughtExceptionHandler(&mut env).is_null());
+    }
+
+    #[test]
+    #[should_panic(expected = "Guest raised NSException \"FixtureException\": \"fixture reason\"")]
+    fn class_raise_format_constructs_the_exception_reason() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let name = ns_string::from_rust_string(&mut env, "FixtureException".to_owned());
+        let format = ns_string::from_rust_string(&mut env, "fixture reason".to_owned());
+        () = msg_class![&mut env; NSException raise:name format:format];
     }
 }

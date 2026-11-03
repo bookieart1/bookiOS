@@ -55,6 +55,8 @@ pub(super) struct CALayerHostObject {
     pub(super) z_position: CGFloat,
     pub(super) background_color: Option<CGColorHostObject>,
     pub(super) corner_radius: CGFloat,
+    pub(super) border_color: Option<CGColorHostObject>,
+    pub(super) border_width: CGFloat,
     pub(super) needs_display: bool,
     pub(super) needs_display_on_bounds_change: bool,
     /// `CGImageRef*`
@@ -140,6 +142,8 @@ pub const CLASSES: ClassExports = objc_classes! {
         z_position: 0.0,
         background_color: None, // transparency
         corner_radius: 0.0,
+        border_color: None,
+        border_width: 0.0,
         needs_display: false,
         needs_display_on_bounds_change: false,
         contents: nil,
@@ -440,6 +444,33 @@ pub const CLASSES: ClassExports = objc_classes! {
         let corner_radius: id = msg_class![env; NSNumber numberWithFloat:corner_radius];
         add_default_implied_basic_animation(env, this, "cornerRadius", old_corner_radius, corner_radius);
     }
+}
+
+- (CGColorRef)borderColor {
+    if let Some(color) = env.objc.borrow::<CALayerHostObject>(this).border_color {
+        let class = env.objc.get_known_class("_touchHLE_CGColor", &mut env.mem);
+        let obj = env.objc.alloc_object(class, Box::new(color), &mut env.mem);
+        autorelease(env, obj)
+    } else {
+        nil
+    }
+}
+- (())setBorderColor:(CGColorRef)new_color_ref {
+    let color = if new_color_ref == nil {
+        None
+    } else {
+        Some(*env.objc.borrow::<CGColorHostObject>(new_color_ref))
+    };
+    env.objc.borrow_mut::<CALayerHostObject>(this).border_color = color;
+    // Storage and query semantics are implemented. Border compositing remains
+    // a separate rendering limitation until a game demonstrates it matters.
+}
+
+- (CGFloat)borderWidth {
+    env.objc.borrow::<CALayerHostObject>(this).border_width
+}
+- (())setBorderWidth:(CGFloat)width {
+    env.objc.borrow_mut::<CALayerHostObject>(this).border_width = width;
 }
 
 - (bool)needsDisplay {
@@ -827,6 +858,30 @@ mod tests {
         () = msg![env; layer setContentsScale:2.0_f32];
         let updated: CGFloat = msg![env; layer contentsScale];
         assert_eq!(updated, 2.0);
+        release(env, layer);
+    }
+
+    #[test]
+    fn border_properties_default_and_round_trip() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let layer: id = msg_class![env; CALayer new];
+        let initial_width: CGFloat = msg![env; layer borderWidth];
+        let initial_color: id = msg![env; layer borderColor];
+        assert_eq!(initial_width, 0.0);
+        assert_eq!(initial_color, nil);
+
+        let color: id = msg_class![env; UIColor redColor];
+        let cg_color: id = msg![env; color CGColor];
+        () = msg![env; layer setBorderWidth:2.5_f32];
+        () = msg![env; layer setBorderColor:cg_color];
+        let width: CGFloat = msg![env; layer borderWidth];
+        let stored_color: id = msg![env; layer borderColor];
+        assert_eq!(width, 2.5);
+        assert_ne!(stored_color, nil);
+        () = msg![env; layer setBorderColor:nil];
+        let cleared: id = msg![env; layer borderColor];
+        assert_eq!(cleared, nil);
         release(env, layer);
     }
 }

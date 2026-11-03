@@ -35,7 +35,7 @@ pub const CONSTANTS: ConstantExports = &[
 
 /// Our helper type, Foundation just uses ints.
 type NSURLErrorCode = NSInteger;
-const NSURLErrorNotConnectedToInternet: NSURLErrorCode = -1009;
+pub(crate) const NSURLErrorNotConnectedToInternet: NSURLErrorCode = -1009;
 const NSURLErrorFileDoesNotExist: NSURLErrorCode = -1100;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -309,11 +309,26 @@ fn local_file_url_from_request(env: &mut Environment, request: id) -> Option<id>
 }
 
 fn make_url_error(env: &mut Environment, request: id, code: NSURLErrorCode) -> id {
-    let domain = ns_string::get_static_str(env, NSURLErrorDomain);
-    let user_info = if request == nil {
+    let url = if request == nil {
         nil
     } else {
-        let url: id = msg![env; request URL];
+        msg![env; request URL]
+    };
+    make_url_error_for_url(env, url, code)
+}
+
+/// Build the standard URL-loading error used by Foundation APIs which accept
+/// an NSURL directly rather than an NSURLRequest. Keeping this in one place
+/// ensures the domain, code and failing-URL metadata agree across both paths.
+pub(crate) fn make_url_error_for_url(
+    env: &mut Environment,
+    url: id,
+    code: NSURLErrorCode,
+) -> id {
+    let domain = ns_string::get_static_str(env, NSURLErrorDomain);
+    let user_info = if url == nil {
+        nil
+    } else {
         let url_string: id = msg![env; url absoluteString];
         if url_string == nil {
             nil

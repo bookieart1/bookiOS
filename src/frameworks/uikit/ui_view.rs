@@ -141,6 +141,70 @@ pub fn set_view_controller(env: &mut Environment, view: id, controller: id) {
     host_obj.view_controller = controller;
 }
 
+/// Emit a compact snapshot of the visible UIKit tree when the user leaves an
+/// unresponsive title. This is deliberately bounded so it can distinguish a
+/// missing/hidden/off-screen interface from a stalled run loop without turning
+/// ordinary UIKit activity into continuous tracing.
+pub(crate) fn log_bounded_view_hierarchy(env: &mut Environment, reason: &str) {
+    const MAX_VIEWS: usize = 24;
+    const MAX_DEPTH: usize = 8;
+
+    fn visit(
+        env: &mut Environment,
+        view: id,
+        depth: usize,
+        emitted: &mut usize,
+        reason: &str,
+    ) {
+        if view == nil || depth > MAX_DEPTH || *emitted >= MAX_VIEWS {
+            return;
+        }
+        let (layer, subviews, controller, tag, interactive) = {
+            let host = env.objc.borrow::<UIViewHostObject>(view);
+            (
+                host.layer,
+                host.subviews.clone(),
+                host.view_controller,
+                host.tag,
+                host.user_interaction_enabled,
+            )
+        };
+        let class: Class = msg![env; view class];
+        let class_name = env.objc.get_class_name(class).to_owned();
+        let frame: CGRect = msg![env; view frame];
+        let hidden: bool = msg![env; view isHidden];
+        let alpha: CGFloat = msg![env; view alpha];
+        log!(
+            "UIKit bounded hierarchy ({reason}) #{}, depth {depth}: view {:?} class {class_name}, frame {}, hidden {hidden}, alpha {alpha}, interactive {interactive}, tag {tag}, controller {:?}, layer {:?}, subviews {}",
+            *emitted + 1,
+            view,
+            frame,
+            controller,
+            layer,
+            subviews.len()
+        );
+        *emitted += 1;
+        for subview in subviews {
+            visit(env, subview, depth + 1, emitted, reason);
+            if *emitted >= MAX_VIEWS {
+                break;
+            }
+        }
+    }
+
+    let windows = env.framework_state.uikit.ui_view.ui_window.windows.clone();
+    let mut emitted = 0;
+    for window in windows {
+        visit(env, window, 0, &mut emitted, reason);
+        if emitted >= MAX_VIEWS {
+            break;
+        }
+    }
+    log!(
+        "UIKit bounded hierarchy ({reason}) complete: emitted {emitted} view(s), cap {MAX_VIEWS}"
+    );
+}
+
 /// Lay out the views in the windows that need it, as UIKit does before
 /// drawing each frame.
 pub fn layout_if_needed(env: &mut Environment) {

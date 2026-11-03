@@ -780,8 +780,45 @@ fn glWeightPointerOES(
 }
 
 // Drawing
+unsafe fn log_input_draw_state(
+    gles: &mut dyn GLES,
+    sample: u8,
+    call: &str,
+    mode: GLenum,
+    count: GLsizei,
+    detail: u32,
+) {
+    let mut viewport = [0; 4];
+    let mut active_texture = 0;
+    let mut client_active_texture = 0;
+    let mut texture_binding = 0;
+    let mut array_buffer = 0;
+    let mut element_buffer = 0;
+    let mut matrix_mode = 0;
+    gles.GetIntegerv(gles11::VIEWPORT, viewport.as_mut_ptr());
+    gles.GetIntegerv(gles11::ACTIVE_TEXTURE, &mut active_texture);
+    gles.GetIntegerv(gles11::CLIENT_ACTIVE_TEXTURE, &mut client_active_texture);
+    gles.GetIntegerv(gles11::TEXTURE_BINDING_2D, &mut texture_binding);
+    gles.GetIntegerv(gles11::ARRAY_BUFFER_BINDING, &mut array_buffer);
+    gles.GetIntegerv(gles11::ELEMENT_ARRAY_BUFFER_BINDING, &mut element_buffer);
+    gles.GetIntegerv(gles11::MATRIX_MODE, &mut matrix_mode);
+    let blend = gles.IsEnabled(gles11::BLEND);
+    let texture_2d = gles.IsEnabled(gles11::TEXTURE_2D);
+    log!(
+        "OpenGL ES bounded draw snapshot #{sample}: {call}, mode {mode:#x}, count {count}, detail {detail:#x}, viewport {:?}, active/client texture {active_texture:#x}/{client_active_texture:#x}, texture {texture_binding}, array/element buffers {array_buffer}/{element_buffer}, matrix {matrix_mode:#x}, blend {blend}, texture2D {texture_2d}",
+        viewport
+    );
+}
+
 fn glDrawArrays(env: &mut Environment, mode: GLenum, first: GLint, count: GLsizei) {
+    let diagnostic_sample = env
+        .framework_state
+        .opengles
+        .take_input_draw_diagnostic();
     with_ctx_and_mem(env, |gles, _mem| unsafe {
+        if let Some(sample) = diagnostic_sample {
+            log_input_draw_state(gles, sample, "glDrawArrays", mode, count, first as u32);
+        }
         let fog_state_backup = clamp_fog_state_values(gles);
         gles.DrawArrays(mode, first, count);
         restore_fog_state_values(gles, fog_state_backup);
@@ -794,7 +831,22 @@ fn glDrawElements(
     type_: GLenum,
     indices: ConstVoidPtr,
 ) {
+    let diagnostic_sample = env
+        .framework_state
+        .opengles
+        .take_input_draw_diagnostic();
+    let guest_indices = indices.to_bits();
     with_ctx_and_mem(env, |gles, mem| unsafe {
+        if let Some(sample) = diagnostic_sample {
+            log_input_draw_state(
+                gles,
+                sample,
+                "glDrawElements",
+                mode,
+                count,
+                guest_indices,
+            );
+        }
         let fog_state_backup = clamp_fog_state_values(gles);
         let indices = translate_pointer_or_offset_to_host(
             gles,
