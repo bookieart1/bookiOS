@@ -144,7 +144,9 @@ pub const CLASSES: ClassExports = objc_classes! {
     let name = to_rust_string(env, domain_name);
     let dict = if name == "NSGlobalDomain" {
         env.objc.borrow::<NSUserDefaultsHostObject>(this).global_domain_dict
-    } else if name == env.bundle.bundle_identifier() {
+    } else if !env.bundle.bundle_path().as_str().is_empty()
+        && name == env.bundle.bundle_identifier()
+    {
         env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict
     } else {
         nil
