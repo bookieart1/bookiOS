@@ -26,7 +26,7 @@ pub const UITouchPhaseEnded: UITouchPhase = 3;
 
 #[derive(Default)]
 pub struct State {
-    current_touches: HashMap<FingerId, id>,
+    pub(super) current_touches: HashMap<FingerId, id>,
 }
 
 pub(super) struct UITouchHostObject {
@@ -36,11 +36,11 @@ pub(super) struct UITouchHostObject {
     /// space conversion
     pub(super) window: id,
     /// Relative to the screen
-    location: CGPoint,
+    pub(super) location: CGPoint,
     /// Relative to the screen
     previous_location: CGPoint,
-    timestamp: NSTimeInterval,
-    phase: UITouchPhase,
+    pub(super) timestamp: NSTimeInterval,
+    pub(super) phase: UITouchPhase,
 }
 impl HostObject for UITouchHostObject {}
 
@@ -266,7 +266,9 @@ fn handle_touches_down(env: &mut Environment, map: HashMap<FingerId, Coords>) {
         }
 
         let is_multi_touch_enabled: bool = msg![env; view isMultipleTouchEnabled];
-        if !is_multi_touch_enabled {
+        let gesture_requires_multi =
+            super::ui_gesture_recognizer::view_requires_multiple_touches(env, view);
+        if !is_multi_touch_enabled && !gesture_requires_multi {
             // When a view has multi-touch disabled, it can only have one active
             // touch at once. So, we can only report a new touch to the view if
             // there are no other touches currently associated with it, and if
@@ -311,6 +313,7 @@ fn handle_touches_down(env: &mut Environment, map: HashMap<FingerId, Coords>) {
     }
 
     for (view, touches) in view_touches {
+        super::ui_gesture_recognizer::process_touches(env, view, event, UITouchPhaseBegan);
         log_dbg!(
             "Sending [{:?} touchesBegan:{:?} withEvent:{:?}]",
             view,
@@ -397,6 +400,7 @@ fn handle_touches_move(env: &mut Environment, map: HashMap<FingerId, Coords>) {
     autorelease(env, event);
 
     for (view, touches) in view_touches {
+        super::ui_gesture_recognizer::process_touches(env, view, event, UITouchPhaseMoved);
         log_dbg!(
             "Sending [{:?} touchesMoved:{:?} withEvent:{:?}]",
             view,
@@ -488,6 +492,7 @@ fn handle_touches_up(env: &mut Environment, map: HashMap<FingerId, Coords>) {
     autorelease(env, event);
 
     for (view, touches) in view_touches {
+        super::ui_gesture_recognizer::process_touches(env, view, event, UITouchPhaseEnded);
         log_dbg!(
             "Sending [{:?} touchesEnded:{:?} withEvent:{:?}]",
             view,

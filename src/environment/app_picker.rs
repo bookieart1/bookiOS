@@ -47,6 +47,7 @@ use std::path::{Path, PathBuf};
 
 struct AppInfo {
     path: PathBuf,
+    bundle_identifier: String,
     display_name: String,
     icon: Option<Image>,
     /// `NSString*`
@@ -200,6 +201,7 @@ fn enumerate_apps(
 
         apps.push(AppInfo {
             path: app_path,
+            bundle_identifier: bundle.bundle_identifier().to_string(),
             display_name,
             icon,
             display_name_ns_string: None,
@@ -207,7 +209,31 @@ fn enumerate_apps(
         });
     }
 
-    apps.sort_by_key(|app| app.display_name.to_uppercase());
+    // Put the current focused device-test batch first, in the exact order in
+    // which it should be exercised. Everything else remains alphabetical.
+    // Bundle identifiers avoid depending on localized or truncated names.
+    const FOCUSED_TEST_BATCH: &[&str] = &[
+        "com.gamevil.advena",
+        "com.krome.BoomerangBlast",
+        "com.munkadoogames.bouncymouse",
+        "com.digitalprunes.BungeeBall2Pro",
+        "com.gameresort.DownhillBowling",
+        "com.shauninman.flipsescape",
+        "com.whaleislandgames.junny",
+        "com.sandlotgames.locv",
+        "com.popcap.Peggle",
+        "com.FFE.Roboto",
+        "com.teotlstudios.unmechanical",
+        "com.gamevil.zenonia2",
+        "com.chillingo.spoing",
+    ];
+    apps.sort_by_key(|app| {
+        let batch_index = FOCUSED_TEST_BATCH
+            .iter()
+            .position(|identifier| *identifier == app.bundle_identifier.as_str())
+            .unwrap_or(FOCUSED_TEST_BATCH.len());
+        (batch_index, app.display_name.to_uppercase())
+    });
 
     Ok(apps)
 }

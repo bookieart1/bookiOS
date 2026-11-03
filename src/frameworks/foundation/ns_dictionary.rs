@@ -608,25 +608,31 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (id)descriptionInStringsFileFormat {
     let string_class: Class = msg_class![env; NSString class];
+    let number_class: Class = msg_class![env; NSNumber class];
     let keys: id = msg![env; this allKeys];
     let count: NSUInteger = msg![env; keys count];
     let mut output = String::new();
     for index in 0..count {
         let key: id = msg![env; keys objectAtIndex:index];
         let value: id = msg![env; this objectForKey:key];
-        assert!(
-            key != nil && value != nil
-                && msg![env; key isKindOfClass:string_class]
-                && msg![env; value isKindOfClass:string_class],
-            "descriptionInStringsFileFormat requires NSString keys and values"
-        );
+        assert!(key != nil && value != nil && msg![env; key isKindOfClass:string_class],
+            "descriptionInStringsFileFormat requires NSString keys and property-list values");
         let key = escape_strings_file_component(&to_rust_string(env, key));
-        let value = escape_strings_file_component(&to_rust_string(env, value));
         output.push('"');
         output.push_str(&key);
-        output.push_str("\" = \"");
-        output.push_str(&value);
-        output.push_str("\";\n");
+        output.push_str("\" = ");
+        if msg![env; value isKindOfClass:string_class] {
+            let value = escape_strings_file_component(&to_rust_string(env, value));
+            output.push('"');
+            output.push_str(&value);
+            output.push('"');
+        } else if msg![env; value isKindOfClass:number_class] {
+            let description: id = msg![env; value description];
+            output.push_str(&to_rust_string(env, description));
+        } else {
+            panic!("descriptionInStringsFileFormat received unsupported property-list value");
+        }
+        output.push_str(";\n");
     }
     let description = from_rust_string(env, output);
     autorelease(env, description)
@@ -1539,5 +1545,19 @@ mod tests {
         release(&mut env, dictionary);
         release(&mut env, key);
         release(&mut env, value);
+    }
+
+    #[test]
+    fn strings_file_description_serializes_number_values_without_quotes() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let key = get_static_str(&mut env, "lives");
+        let value: id = msg_class![&mut env; NSNumber numberWithInt:3i32];
+        let dictionary = dict_from_keys_and_objects(&mut env, &[(key, value)]);
+        let description: id = msg![&mut env; dictionary descriptionInStringsFileFormat];
+        assert_eq!(
+            to_rust_string(&mut env, description),
+            "\"lives\" = 3;\n"
+        );
+        release(&mut env, dictionary);
     }
 }

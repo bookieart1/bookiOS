@@ -297,6 +297,7 @@ impl Dyld {
         bins: &[MachO],
         mem: &mut Mem,
         objc: &mut ObjC,
+        mut diagnostics: Option<&mut crate::diagnostics::Recorder>,
     ) -> Result<(), String> {
         assert!(self.return_to_host_routine.is_none());
         assert!(self.thread_exit_routine.is_none());
@@ -313,7 +314,7 @@ impl Dyld {
             self.setup_lazy_linking(bin, mem);
             // Must happen before `register_bin_classes`, else superclass
             // pointers will be wrong.
-            self.do_non_lazy_linking(bin, bins, mem, objc);
+            self.do_non_lazy_linking(bin, bins, mem, objc, diagnostics.as_deref_mut());
         }
 
         objc.register_bin_classes(&bins[0], mem);
@@ -494,7 +495,14 @@ impl Dyld {
     ///
     /// `bin` is the binary to link non-lazy symbols for, `bins` is the set of
     /// binaries symbols may be looked up in.
-    fn do_non_lazy_linking(&mut self, bin: &MachO, bins: &[MachO], mem: &mut Mem, objc: &mut ObjC) {
+    fn do_non_lazy_linking(
+        &mut self,
+        bin: &MachO,
+        bins: &[MachO],
+        mem: &mut Mem,
+        objc: &mut ObjC,
+        mut diagnostics: Option<&mut crate::diagnostics::Recorder>,
+    ) {
         let mut unhandled_relocations: HashMap<&str, Vec<u32>> = HashMap::new();
         for &(ptr_ptr, ref name) in &bin.external_relocations {
             let ptr_ptr: MutPtr<ConstVoidPtr> = Ptr::from_bits(ptr_ptr);
@@ -556,6 +564,9 @@ impl Dyld {
         // Collecting unhandled relocations for the same symbol onto one line
         // makes the log output much less spammy.
         for (name, addrs) in unhandled_relocations {
+            if let Some(recorder) = diagnostics.as_deref_mut() {
+                recorder.note_unresolved_relocation(&bin.name, name, &addrs);
+            }
             log!(
                 "Warning: unhandled external relocation {:?} in {:?} at {}",
                 name,

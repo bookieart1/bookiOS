@@ -48,6 +48,7 @@ pub mod time;
 pub mod unistd;
 pub mod unicode_regex;
 pub mod wchar;
+pub mod zlib;
 
 pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
     path: "/usr/lib/libSystem.B.dylib",
@@ -123,6 +124,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
         unistd::FUNCTIONS,
         unicode_regex::FUNCTIONS,
         wchar::FUNCTIONS,
+        zlib::FUNCTIONS,
     ],
 };
 
@@ -150,4 +152,5 @@ pub struct State {
     malloc: malloc::State,
     mach_o: mach_o::State,
     mman: sys::mman::State,
+    pub zlib: zlib::State,
 }

@@ -136,9 +136,13 @@ impl CGAffineTransform {
         Matrix::<3>::translate_2d(x, y).try_into().unwrap()
     }
     pub fn concat(self, other: Self) -> Self {
-        Matrix::<3>::multiply(&self.into(), &other.into())
-            .try_into()
-            .unwrap()
+        // Multiplying two affine transforms is mathematically guaranteed to
+        // remain affine. Avoid rejecting harmless floating-point drift in the
+        // homogeneous row after a chain of guest transformations.
+        affine_transform_from_matrix_unchecked(Matrix::<3>::multiply(
+            &self.into(),
+            &other.into(),
+        ))
     }
     pub fn rotate(self, angle: CGFloat) -> Self {
         Self::make_rotation(angle).concat(self)

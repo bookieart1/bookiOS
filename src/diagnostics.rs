@@ -30,6 +30,7 @@ const ARRAY_EVENTS: usize = 256;
 const WATCHED_OBJECTS: usize = 16;
 const OBJECT_LIFETIME_EVENTS: usize = 64;
 const DICTIONARY_ORIGINS: usize = 1024;
+const UNRESOLVED_RELOCATIONS: usize = 32;
 const HEALTHY_PRESENT_INTERVAL: Duration = Duration::from_millis(100);
 const SLOW_PRESENT_INTERVAL: Duration = Duration::from_millis(180);
 const HEALTHY_PRESENT_STREAK: u16 = 30;
@@ -357,6 +358,14 @@ struct PendingSlowCapture {
     streak: u8,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct UnresolvedRelocation {
+    image: Text,
+    symbol: Text,
+    first_address: u32,
+    count: usize,
+}
+
 pub struct Recorder {
     recent: Ring<Event, RECENT>,
     signals: Ring<Event, SIGNALS>,
@@ -379,6 +388,10 @@ pub struct Recorder {
     defaults_lookup: DefaultsLookup,
     slow_capture: Option<SlowCapture>,
     pending_slow_capture: Option<PendingSlowCapture>,
+    /// Largest individual present gap. Unlike the sustained-slow capture,
+    /// this preserves evidence for a one-off jank transition.
+    worst_present_gap: Option<SlowCapture>,
+    unresolved_relocations: Ring<UnresolvedRelocation, UNRESOLVED_RELOCATIONS>,
     sequence: u64,
     api: u64,
     objc: u64,
@@ -416,6 +429,8 @@ impl Recorder {
             defaults_lookup: DefaultsLookup::default(),
             slow_capture: None,
             pending_slow_capture: None,
+            worst_present_gap: None,
+            unresolved_relocations: Ring::default(),
             sequence: 0,
             api: 0,
             objc: 0,
@@ -632,6 +647,26 @@ impl Recorder {
         let boundaries = self.api.saturating_add(self.objc);
         if let Some(previous) = self.last_present {
             let gap = now.saturating_duration_since(previous);
+            if gap >= SLOW_PRESENT_INTERVAL
+                && self
+                    .worst_present_gap
+                    .as_ref()
+                    .is_none_or(|capture| gap.as_millis() > capture.gap_ms)
+            {
+                let mut recent = Ring::default();
+                let skip = self.recent.iter().count().saturating_sub(SLOW_RECENT);
+                for event in self.recent.iter().skip(skip) {
+                    recent.push(*event);
+                }
+                self.worst_present_gap = Some(SlowCapture {
+                    ms: now.duration_since(self.started).as_millis(),
+                    gap_ms: gap.as_millis(),
+                    boundary_delta: boundaries.saturating_sub(self.last_present_boundaries),
+                    presents: self.presents,
+                    had_healthy_baseline: self.healthy_present_streak >= HEALTHY_PRESENT_STREAK,
+                    recent,
+                });
+            }
             if gap <= HEALTHY_PRESENT_INTERVAL {
                 self.pending_slow_capture = None;
                 self.healthy_present_streak = self.healthy_present_streak.saturating_add(1);
@@ -675,6 +710,17 @@ impl Recorder {
         }
         self.last_present = Some(now);
         self.last_present_boundaries = boundaries;
+    }
+
+    /// Preserve a bounded summary of unresolved dyld relocations so a later
+    /// crash report does not depend on the launch log still being available.
+    pub fn note_unresolved_relocation(&mut self, image: &str, symbol: &str, addresses: &[u32]) {
+        self.unresolved_relocations.push(UnresolvedRelocation {
+            image: Text::from_bytes(image.as_bytes()),
+            symbol: Text::from_bytes(symbol.as_bytes()),
+            first_address: addresses.first().copied().unwrap_or(0),
+            count: addresses.len(),
+        });
     }
     pub fn checkpoint(&mut self, thread: usize, regs: &[u32], threads: usize, runnable: usize) {
         self.yields += 1;
@@ -767,6 +813,27 @@ impl Recorder {
             }
         } else {
             echo_no_panic!("flight first sustained slow-present capture: not observed");
+        }
+        if let Some(capture) = &self.worst_present_gap {
+            echo_no_panic!("flight worst single present gap: elapsed-ms={} gap-ms={} boundaries-during-gap={} present={} healthy-baseline={} (bounded transition evidence; may be an intentional load)",
+                capture.ms, capture.gap_ms, capture.boundary_delta, capture.presents, capture.had_healthy_baseline);
+            echo_no_panic!(
+                "flight worst-gap boundaries: newest {SLOW_RECENT}; total={}",
+                capture.recent.written
+            );
+            for event in capture.recent.iter() {
+                self.print_event(event);
+            }
+        } else {
+            echo_no_panic!("flight worst single present gap: not observed");
+        }
+        echo_no_panic!(
+            "flight unresolved relocation summaries: newest {UNRESOLVED_RELOCATIONS}; total={}",
+            self.unresolved_relocations.written
+        );
+        for relocation in self.unresolved_relocations.iter() {
+            echo_no_panic!("flight unresolved relocation image=\"{}\" symbol=\"{}\" first-address={:#x} count={}",
+                relocation.image, relocation.symbol, relocation.first_address, relocation.count);
         }
         echo_no_panic!(
             "flight candidate signals: newest {SIGNALS}; total={} (not diagnoses)",

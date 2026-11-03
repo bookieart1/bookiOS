@@ -139,11 +139,25 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())makeKeyWindow {
-    // TODO: post UIWindowDidResignKeyNotification for previous key window
+    if let Some(previous) = env.framework_state.uikit.ui_view.ui_window.key_window {
+        if previous != this {
+            () = msg![env; previous resignKeyWindow];
+        }
+    }
     env.framework_state.uikit.ui_view.ui_window.key_window = Some(this);
 
     let center: id = msg_class![env; NSNotificationCenter defaultCenter];
     let notif_name = ns_string::get_static_str(env, UIWindowDidBecomeKeyNotification);
+    () = msg![env; center postNotificationName:notif_name object:this userInfo:nil];
+}
+
+- (())resignKeyWindow {
+    if env.framework_state.uikit.ui_view.ui_window.key_window != Some(this) {
+        return;
+    }
+    env.framework_state.uikit.ui_view.ui_window.key_window = None;
+    let center: id = msg_class![env; NSNotificationCenter defaultCenter];
+    let notif_name = ns_string::get_static_str(env, UIWindowDidResignKeyNotification);
     () = msg![env; center postNotificationName:notif_name object:this userInfo:nil];
 }
 
@@ -363,6 +377,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 /// Window life-cycle notifications
 /// TODO: more notifications
 const UIWindowDidBecomeKeyNotification: &str = "UIWindowDidBecomeKeyNotification";
+const UIWindowDidResignKeyNotification: &str = "UIWindowDidResignKeyNotification";
 /// Keyboard notifications
 /// TODO: more keyboard notifications
 pub const UIKeyboardWillShowNotification: &str = "UIKeyboardWillShowNotification";
@@ -378,6 +393,10 @@ pub const CONSTANTS: ConstantExports = &[
     (
         "_UIWindowDidBecomeKeyNotification",
         HostConstant::NSString(UIWindowDidBecomeKeyNotification),
+    ),
+    (
+        "_UIWindowDidResignKeyNotification",
+        HostConstant::NSString(UIWindowDidResignKeyNotification),
     ),
     (
         "_UIKeyboardWillShowNotification",

@@ -10,7 +10,7 @@
 
 use super::cf_allocator::{kCFAllocatorDefault, CFAllocatorRef};
 use super::CFIndex;
-use crate::dyld::{export_c_func, FunctionExports};
+use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
 use crate::frameworks::core_foundation::cf_string::{
     kCFStringEncodingASCII, CFStringConvertEncodingToNSStringEncoding, CFStringEncoding,
     CFStringRef,
@@ -25,6 +25,13 @@ use crate::objc::{id, msg, msg_class, release};
 use crate::Environment;
 
 pub type CFURLRef = super::CFTypeRef;
+
+// Historical CFURL access-property key, available from iPhone OS 2.0. Its
+// value is the key's public name (see CFURLAccess.c's CONST_STRING_DECL).
+pub const CONSTANTS: ConstantExports = &[(
+    "_kCFURLFileLength",
+    HostConstant::NSString("kCFURLFileLength"),
+)];
 
 type CFURLPathStyle = CFIndex;
 const kCFURLPOSIXPathStyle: CFURLPathStyle = 0;

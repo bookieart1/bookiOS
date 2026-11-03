@@ -9,6 +9,7 @@ use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant}
 use crate::frameworks::core_foundation::cf_string::CFStringRef;
 use crate::frameworks::core_foundation::{CFRelease, CFRetain, CFTypeRef};
 use crate::frameworks::foundation::ns_string;
+use crate::mem::GuestUSize;
 use crate::objc::{id, msg, objc_classes, ClassExports, HostObject};
 use crate::Environment;
 
@@ -162,6 +163,14 @@ pub fn CGColorSpaceGetModel(env: &mut Environment, cs: CGColorSpaceRef) -> CGCol
     }
 }
 
+fn CGColorSpaceGetNumberOfComponents(env: &mut Environment, cs: CGColorSpaceRef) -> GuestUSize {
+    match CGColorSpaceGetModel(env, cs) {
+        kCGColorSpaceModelMonochrome => 1,
+        kCGColorSpaceModelRGB => 3,
+        model => unimplemented!("component count for CGColorSpaceModel {model}"),
+    }
+}
+
 pub const kCGColorSpaceGenericRGB: &str = "kCGColorSpaceGenericRGB";
 pub const kCGColorSpaceGenericGray: &str = "kCGColorSpaceGenericGray";
 
@@ -183,4 +192,21 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGColorSpaceRetain(_)),
     export_c_func!(CGColorSpaceRelease(_)),
     export_c_func!(CGColorSpaceGetModel(_)),
+    export_c_func!(CGColorSpaceGetNumberOfComponents(_)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn component_count_matches_the_color_space_model() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let rgb = CGColorSpaceCreateDeviceRGB(&mut env);
+        let gray = CGColorSpaceCreateDeviceGray(&mut env);
+        assert_eq!(CGColorSpaceGetNumberOfComponents(&mut env, rgb), 3);
+        assert_eq!(CGColorSpaceGetNumberOfComponents(&mut env, gray), 1);
+        CGColorSpaceRelease(&mut env, rgb);
+        CGColorSpaceRelease(&mut env, gray);
+    }
+}

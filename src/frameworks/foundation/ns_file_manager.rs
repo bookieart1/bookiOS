@@ -503,17 +503,32 @@ includingPropertiesForKeys:(id)_keys // NSArray*, only prefetching
 
 - (id)attributesOfItemAtPath:(id)path // NSString *
                        error:(MutPtr<id>)error { // NSError **
-    assert!(error.is_null()); // TODO
+    if !error.is_null() {
+        // NSError ** out parameters are initialized to nil on success paths.
+        env.mem.write(error, nil);
+    }
 
     // TODO: other attributes
     log_once!("Warning: NSFileManager attributesOfItemAtPath:error: returns only NSFileType, NSFileCreationDate, NSFileModificationDate and NSFileSize attributes!");
 
-    let path = ns_string::to_rust_string(env, path); // TODO: avoid copy
+    let path_object = path;
+    let path = ns_string::to_rust_string(env, path_object); // TODO: avoid copy
     // TODO: traverse link
     log_dbg!("[(NSFileManager *){:?} attributesOfItemAtPath:{} error:{:?}]", this, path, error);
     let guest_path = GuestPath::new(&path);
 
-    file_attributes_common(env, guest_path)
+    let attributes = file_attributes_common(env, guest_path);
+    if attributes == nil && !error.is_null() {
+        let domain = get_static_str(env, NSCocoaErrorDomain);
+        let path_key = get_static_str(env, super::ns_error::NSFilePathErrorKey);
+        let user_info: id =
+            msg_class![env; NSDictionary dictionaryWithObject:path_object forKey:path_key];
+        let file_error: id = msg_class![env; NSError errorWithDomain:domain
+                                                         code:NSFileReadNoSuchFileError
+                                                     userInfo:user_info];
+        env.mem.write(error, file_error);
+    }
+    attributes
 }
 
 // Deprecated in iPhone OS 2.0.

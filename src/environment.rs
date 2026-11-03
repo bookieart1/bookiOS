@@ -583,8 +583,14 @@ impl Environment {
 
         let mut objc = objc::ObjC::new();
 
+        let mut diagnostics = options.diagnostics.then(crate::diagnostics::Recorder::new);
         let mut dyld = dyld::Dyld::new();
-        dyld.do_initial_linking(&bins, &mut mem, &mut objc)?;
+        dyld.do_initial_linking(
+            &bins,
+            &mut mem,
+            &mut objc,
+            diagnostics.as_deref_mut(),
+        )?;
 
         let cpu = cpu::Cpu::new(match options.direct_memory_access {
             true => Some(&mut mem),
@@ -739,7 +745,7 @@ impl Environment {
 
         let mut env = Environment {
             startup_time,
-            diagnostics: options.diagnostics.then(crate::diagnostics::Recorder::new),
+            diagnostics,
             bundle: NullableBox::new(bundle),
             fs: NullableBox::new(fs),
             window,
@@ -2801,7 +2807,7 @@ mod dylib_sorting_tests {
             let mut objc = ObjC::new();
             let mut dyld = crate::dyld::Dyld::new();
             let bins = [libgcc, libstdcxx];
-            dyld.do_initial_linking(&bins, &mut mem, &mut objc).unwrap();
+            dyld.do_initial_linking(&bins, &mut mem, &mut objc, None).unwrap();
 
             let mut cpu = Cpu::new(None);
             cpu.regs_mut()[Cpu::SP] = 0xFFFFF000;

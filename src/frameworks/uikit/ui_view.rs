@@ -95,6 +95,9 @@ pub struct UIViewHostObject {
     clears_context_before_drawing: bool,
     user_interaction_enabled: bool,
     multiple_touch_enabled: bool,
+    /// Gesture recognizers attached to the view. These are strong references;
+    /// each recognizer's view property is weak.
+    pub(super) gesture_recognizers: Vec<id>,
     /// Whether `layoutSubviews` should be called before the next frame.
     needs_layout: bool,
 }
@@ -113,6 +116,7 @@ impl Default for UIViewHostObject {
             clears_context_before_drawing: true,
             user_interaction_enabled: true,
             multiple_touch_enabled: false,
+            gesture_recognizers: Vec::new(),
             needs_layout: true,
         }
     }
@@ -524,6 +528,45 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.borrow_mut::<UIViewHostObject>(this).multiple_touch_enabled = enabled;
 }
 
+- (())addGestureRecognizer:(id)recognizer {
+    if recognizer == nil {
+        return;
+    }
+    let old_view: id = msg![env; recognizer view];
+    if old_view == this {
+        return;
+    }
+    if old_view != nil {
+        () = msg![env; old_view removeGestureRecognizer:recognizer];
+    }
+    retain(env, recognizer);
+    env.objc.borrow_mut::<UIViewHostObject>(this).gesture_recognizers.push(recognizer);
+    super::ui_gesture_recognizer::set_view(env, recognizer, this);
+}
+
+- (())removeGestureRecognizer:(id)recognizer {
+    let host = env.objc.borrow_mut::<UIViewHostObject>(this);
+    let Some(index) = host
+        .gesture_recognizers
+        .iter()
+        .position(|&candidate| candidate == recognizer)
+    else {
+        return;
+    };
+    host.gesture_recognizers.remove(index);
+    super::ui_gesture_recognizer::set_view(env, recognizer, nil);
+    release(env, recognizer);
+}
+
+- (id)gestureRecognizers {
+    let recognizers = env.objc.borrow::<UIViewHostObject>(this).gesture_recognizers.clone();
+    for &recognizer in &recognizers {
+        retain(env, recognizer);
+    }
+    let array = crate::frameworks::foundation::ns_array::from_vec(env, recognizers);
+    autorelease(env, array)
+}
+
 - (())setExclusiveTouch:(bool)exclusive {
     log!("TODO: ignoring setExclusiveTouch:{} for view {:?}", exclusive, this);
 }
@@ -779,6 +822,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         clears_context_before_drawing: _,
         user_interaction_enabled: _,
         multiple_touch_enabled: _,
+        gesture_recognizers,
         needs_layout: _,
     } = std::mem::take(env.objc.borrow_mut(this));
 
@@ -788,6 +832,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     for subview in subviews {
         env.objc.borrow_mut::<UIViewHostObject>(subview).superview = nil;
         release(env, subview);
+    }
+    for recognizer in gesture_recognizers {
+        super::ui_gesture_recognizer::set_view(env, recognizer, nil);
+        release(env, recognizer);
     }
 
     let state = &mut env.framework_state.uikit.ui_view.views;

@@ -15,7 +15,7 @@ use crate::Environment;
 
 pub(super) struct UIEventHostObject {
     /// `NSSet<UITouch*>*`
-    touches: id,
+    pub(super) touches: id,
     timestamp: NSTimeInterval,
 }
 impl HostObject for UIEventHostObject {}
