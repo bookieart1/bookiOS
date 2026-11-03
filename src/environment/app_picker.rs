@@ -98,6 +98,7 @@ fn picker_compatibility(app: &AppInfo) -> &'static str {
         "HAMLET",
         "INFINIGHT",
         "JACK LUMBER",
+        "LOCV",
         "MOS SPEEDRUN",
         "ODDY SMOG",
         "OSCURA",
@@ -290,7 +291,7 @@ fn enumerate_apps(
     // so a full round can be exercised without repeatedly paging through the
     // library. Everything else remains alphabetical.
     // Bundle identifiers avoid depending on localized or truncated names.
-    const DEV_214_TEST_BATCH: &[&str] = &[
+    const DEV_215_TEST_BATCH: &[&str] = &[
         "com.gamevil.advena",
         "com.krome.BoomerangBlast",
         "com.digitalprunes.BungeeBall2Pro",
@@ -314,7 +315,7 @@ fn enumerate_apps(
         "com.chillingo.spoing",
     ];
     apps.sort_by_key(|app| {
-        let focus_index = DEV_214_TEST_BATCH
+        let focus_index = DEV_215_TEST_BATCH
             .iter()
             .position(|identifier| *identifier == app.bundle_identifier.as_str())
             .map(|idx| (0, idx));

@@ -597,6 +597,18 @@ impl ObjC {
         self.link_class_inner(name, /* is_metaclass: */ false, mem, false)
     }
 
+    /// Look up a class by name without inventing a placeholder or panicking
+    /// when the runtime does not know it. Host-backed classes are linked
+    /// lazily so this has the same observable behavior before and after their
+    /// first use.
+    pub fn lookup_class(&mut self, name: &str, mem: &mut Mem) -> Option<Class> {
+        if let Some(class) = self.get_class(name, /* is_metaclass: */ false, mem) {
+            return Some(class);
+        }
+        Self::find_template(name)
+            .map(|_| self.link_class_inner(name, /* is_metaclass: */ false, mem, false))
+    }
+
     fn link_class_inner(
         &mut self,
         name: &str,

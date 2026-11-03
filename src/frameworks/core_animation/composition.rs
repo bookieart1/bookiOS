@@ -34,6 +34,28 @@ pub(super) struct State {
     recomposite_next: Option<Instant>,
     fps_counter: Option<FpsCounter>,
     misc_gl_objects: Option<MiscGlObjects>,
+    input_diagnostic_remaining: u8,
+    input_diagnostic_emitted: u8,
+}
+
+impl State {
+    pub(super) fn request_input_diagnostic_capture(&mut self) {
+        const TOTAL_BUDGET: u8 = 24;
+        const FRAMES_PER_INPUT: u8 = 8;
+        let available = TOTAL_BUDGET.saturating_sub(self.input_diagnostic_emitted);
+        self.input_diagnostic_remaining = self
+            .input_diagnostic_remaining
+            .max(FRAMES_PER_INPUT.min(available));
+    }
+
+    fn begin_input_diagnostic_frame(&mut self) -> bool {
+        if self.input_diagnostic_remaining == 0 || self.input_diagnostic_emitted >= 24 {
+            return false;
+        }
+        self.input_diagnostic_remaining -= 1;
+        self.input_diagnostic_emitted += 1;
+        true
+    }
 }
 
 struct MiscGlObjects {
@@ -57,6 +79,15 @@ struct MiscGlObjects {
 
 unsafe fn load_matrix(gles: &mut dyn GLES, matrix: Matrix<4>) {
     gles.LoadMatrixf(matrix.columns().as_ptr() as *const _);
+}
+
+unsafe fn assert_compositor_gl_clean(gles: &mut dyn GLES, stage: &str, layer: id) {
+    let error = gles.GetError();
+    assert_eq!(
+        error,
+        gles11::NO_ERROR,
+        "Core Animation compositor GL error at stage {stage:?}, layer {layer:?}"
+    );
 }
 
 /// For use by `NSRunLoop`: call this 60 times per second. Composites the app's
@@ -122,6 +153,12 @@ pub fn recomposite_if_necessary(env: &mut Environment, force: bool) -> Option<In
         .core_animation
         .composition
         .recomposite_next = new_recomposite_next;
+
+    let diagnostic_layer_checks = env
+        .framework_state
+        .core_animation
+        .composition
+        .begin_input_diagnostic_frame();
 
     let window_layers: Vec<id> = windows
         .into_iter()
@@ -242,7 +279,7 @@ pub fn recomposite_if_necessary(env: &mut Environment, force: bool) -> Option<In
                 texture,
                 0,
             );
-            assert_eq!(gles.GetError(), 0);
+            assert_compositor_gl_clean(gles.as_mut(), "framebuffer-create", nil);
             assert_eq!(
                 gles.CheckFramebufferStatusOES(gles11::FRAMEBUFFER_OES),
                 gles11::FRAMEBUFFER_COMPLETE_OES
@@ -375,6 +412,7 @@ pub fn recomposite_if_necessary(env: &mut Environment, force: bool) -> Option<In
                 root_layer,
                 cumulative_transform,
                 opacity,
+                diagnostic_layer_checks,
             );
         }
     }
@@ -394,7 +432,7 @@ pub fn recomposite_if_necessary(env: &mut Environment, force: bool) -> Option<In
         gles.LoadIdentity();
         gles.BindBuffer(gles11::ARRAY_BUFFER, 0);
         gles.BindBuffer(gles11::ELEMENT_ARRAY_BUFFER, 0);
-        assert_eq!(gles.GetError(), 0);
+        assert_compositor_gl_clean(gles.as_mut(), "frame-cleanup", nil);
     }
 
     // Present our rendered frame (bound to TEXTURE_2D). This copies it to the
@@ -458,6 +496,7 @@ unsafe fn composite_layer_recursive(
     layer: id,
     cumulative_transform: Matrix<4>,
     opacity: CGFloat,
+    diagnostic_layer_checks: bool,
 ) {
     // TODO: back-to-front drawing is not efficient, could we use front-to-back?
 
@@ -704,6 +743,9 @@ unsafe fn composite_layer_recursive(
             0 as *const GLvoid,
         );
     }
+    if diagnostic_layer_checks {
+        assert_compositor_gl_clean(gles.as_mut(), "post-input-layer-draw", layer);
+    }
     std::mem::drop(gles);
 
     // avoid holding mutable borrow while recursing
@@ -727,6 +769,7 @@ unsafe fn composite_layer_recursive(
             child_layer,
             cumulative_transform,
             opacity,
+            diagnostic_layer_checks,
         )
     }
 }

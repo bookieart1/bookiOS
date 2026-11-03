@@ -355,12 +355,19 @@ pub const CLASSES: ClassExports = objc_classes! {
             .count_frame(format_args!("EAGLContext {this:?}"));
     }
 
-    let diagnostic_snapshot = {
+    let milestone_snapshot = {
         let host = env.objc.borrow_mut::<EAGLContextHostObject>(this);
         host.diagnostic_present_snapshots = host.diagnostic_present_snapshots.saturating_add(1);
         let frame = host.diagnostic_present_snapshots;
         matches!(frame, 1 | 2 | 3 | 8 | 16 | 32 | 64 | 128).then_some(frame)
     };
+    let input_snapshot = env
+        .framework_state
+        .opengles
+        .take_input_diagnostic_snapshot();
+    let diagnostic_snapshot = input_snapshot
+        .map(|sample| ("post-input", sample as u16))
+        .or_else(|| milestone_snapshot.map(|frame| ("milestone", frame)));
 
     let fullscreen_layer = find_fullscreen_eagl_layer(env);
 
@@ -375,7 +382,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         renderbuffer as _
     };
 
-    if let Some(snapshot) = diagnostic_snapshot {
+    if let Some((reason, snapshot)) = diagnostic_snapshot {
         let (render_width, render_height) = unsafe { get_renderbuffer_size(gles.as_mut()) };
         let viewport: [GLint; 4] = unsafe { get_ints(gles.as_mut(), gles11::VIEWPORT) };
         let scissor: [GLint; 4] = unsafe { get_ints(gles.as_mut(), gles11::SCISSOR_BOX) };
@@ -402,6 +409,8 @@ pub const CLASSES: ClassExports = objc_classes! {
         let vertex_size = unsafe { get_int(gles.as_mut(), gles11::VERTEX_ARRAY_SIZE) };
         let vertex_type = unsafe { get_int(gles.as_mut(), gles11::VERTEX_ARRAY_TYPE) };
         let vertex_stride = unsafe { get_int(gles.as_mut(), gles11::VERTEX_ARRAY_STRIDE) };
+        let vertex_pointer = unsafe { get_ptr(gles.as_mut(), gles11::VERTEX_ARRAY_POINTER) };
+        let vertex_enabled = unsafe { get_bool(gles.as_mut(), gles11::VERTEX_ARRAY) };
         let texcoord_buffer = unsafe {
             get_int(gles.as_mut(), gles11::TEXTURE_COORD_ARRAY_BUFFER_BINDING)
         };
@@ -410,8 +419,18 @@ pub const CLASSES: ClassExports = objc_classes! {
         let texcoord_stride = unsafe {
             get_int(gles.as_mut(), gles11::TEXTURE_COORD_ARRAY_STRIDE)
         };
+        let texcoord_pointer = unsafe { get_ptr(gles.as_mut(), gles11::TEXTURE_COORD_ARRAY_POINTER) };
+        let texcoord_enabled = unsafe { get_bool(gles.as_mut(), gles11::TEXTURE_COORD_ARRAY) };
+        let array_buffer = unsafe { get_int(gles.as_mut(), gles11::ARRAY_BUFFER_BINDING) };
+        let element_buffer = unsafe {
+            get_int(gles.as_mut(), gles11::ELEMENT_ARRAY_BUFFER_BINDING)
+        };
+        let modelview: [GLfloat; 16] = unsafe { get_floats(gles.as_mut(), gles11::MODELVIEW_MATRIX) };
+        let projection: [GLfloat; 16] = unsafe { get_floats(gles.as_mut(), gles11::PROJECTION_MATRIX) };
+        let texture_matrix: [GLfloat; 16] = unsafe { get_floats(gles.as_mut(), gles11::TEXTURE_MATRIX) };
         log!(
-            "EAGL present milestone frame={}: context={:?} renderbuffer={} size={}x{} framebuffer={} status={:#x} viewport={:?} scissor-enabled={} scissor={:?} texture2d={} matrix-mode={:#x} blend-enabled={} blend={:#x}/{:#x} active-texture={:#x} client-active-texture={:#x} texenv={:#x} vertex=[buffer={},size={},type={:#x},stride={}] texcoord=[buffer={},size={},type={:#x},stride={}]",
+            "EAGL present diagnostic reason={} sequence={}: context={:?} renderbuffer={} size={}x{} framebuffer={} status={:#x} viewport={:?} scissor-enabled={} scissor={:?} texture2d={} matrix-mode={:#x} blend-enabled={} blend={:#x}/{:#x} active-texture={:#x} client-active-texture={:#x} texenv={:#x} buffers=[array={},element={}] vertex=[enabled={},buffer={},size={},type={:#x},stride={},pointer={:?}] texcoord=[enabled={},buffer={},size={},type={:#x},stride={},pointer={:?}] modelview={:?} projection={:?} texture-matrix={:?}",
+            reason,
             snapshot,
             this,
             renderbuffer,
@@ -430,14 +449,23 @@ pub const CLASSES: ClassExports = objc_classes! {
             active_texture,
             client_active_texture,
             texture_env,
+            array_buffer,
+            element_buffer,
+            vertex_enabled,
             vertex_buffer,
             vertex_size,
             vertex_type,
             vertex_stride,
+            vertex_pointer,
+            texcoord_enabled,
             texcoord_buffer,
             texcoord_size,
             texcoord_type,
-            texcoord_stride
+            texcoord_stride,
+            texcoord_pointer,
+            modelview,
+            projection,
+            texture_matrix
         );
     }
 
@@ -581,6 +609,11 @@ unsafe fn get_ptr(gles: &mut dyn GLES, pname: GLenum) -> *const GLvoid {
     let mut ptr = std::ptr::null();
     gles.GetPointerv(pname, &mut ptr);
     ptr
+}
+unsafe fn get_bool(gles: &mut dyn GLES, pname: GLenum) -> bool {
+    let mut value = gles11::FALSE;
+    gles.GetBooleanv(pname, &mut value);
+    value != gles11::FALSE
 }
 // Safety: caller's responsibility to use appropriate N.
 unsafe fn get_ints<const N: usize>(gles: &mut dyn GLES, pname: GLenum) -> [GLint; N] {

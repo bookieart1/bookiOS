@@ -21,6 +21,7 @@ const NSApplicationDirectory: NSSearchPathDirectory = 1;
 const NSLibraryDirectory: NSSearchPathDirectory = 5;
 const NSDocumentDirectory: NSSearchPathDirectory = 9;
 const NSCachesDirectory: NSSearchPathDirectory = 13;
+const NSAllApplicationsDirectory: NSSearchPathDirectory = 100;
 
 type NSSearchPathDomainMask = NSUInteger;
 const NSUserDomainMask: NSSearchPathDomainMask = 1;
@@ -74,11 +75,14 @@ fn NSSearchPathForDirectoriesInDomains(
     assert!(expand_tilde);
 
     let dir = match directory {
-        NSApplicationDirectory => {
+        NSApplicationDirectory | NSAllApplicationsDirectory => {
             // This might not actually be correct. I haven't bothered to
             // test it because I can't think of a good reason an iPhone OS app
             // would have to request this;
             // Wolfenstein 3D requests it but never uses it.
+            // NSAllApplicationsDirectory is the union of all locations where
+            // applications may be installed. iDared models one user-domain
+            // applications root, so both directory values resolve to it.
             GuestPath::new(crate::fs::APPLICATIONS).to_owned()
         }
         NSDocumentDirectory => env.fs.home_directory().join("Documents"),

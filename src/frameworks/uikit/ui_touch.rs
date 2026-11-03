@@ -124,6 +124,16 @@ pub fn handle_event(env: &mut Environment, event: Event) {
 }
 
 fn handle_touches_down(env: &mut Environment, map: HashMap<FingerId, Coords>) {
+    // Capture a few frames after user interaction. This is a bounded,
+    // subsystem-wide diagnostic used to correlate visible GL corruption with
+    // the exact state transition that triggered it.
+    env.framework_state
+        .opengles
+        .request_input_diagnostic_capture();
+    env.framework_state
+        .core_animation
+        .request_input_diagnostic_capture();
+
     // UIKit creates and drains autorelease pools when handling events.
     let pool: id = msg_class![env; NSAutoreleasePool new];
 
@@ -376,6 +386,12 @@ fn handle_touches_move(env: &mut Environment, map: HashMap<FingerId, Coords>) {
 
         let _: () = msg![env; touches addObject:touch];
 
+        // A touch that hit no view remains tracked until it ends, but UIKit
+        // has no responder or gesture recognizer to deliver it to.
+        if view == nil {
+            continue;
+        }
+
         if let Entry::Vacant(e) = view_touches.entry(view) {
             let touches: id = msg_class![env; NSMutableSet allocWithZone:(MutVoidPtr::null())];
             e.insert(touches);
@@ -472,12 +488,14 @@ fn handle_touches_up(env: &mut Environment, map: HashMap<FingerId, Coords>) {
 
         let _: () = msg![env; touches addObject:touch];
 
-        if let Entry::Vacant(e) = view_touches.entry(view) {
-            let touches: id = msg_class![env; NSMutableSet allocWithZone:(MutVoidPtr::null())];
-            e.insert(touches);
+        if view != nil {
+            if let Entry::Vacant(e) = view_touches.entry(view) {
+                let touches: id = msg_class![env; NSMutableSet allocWithZone:(MutVoidPtr::null())];
+                e.insert(touches);
+            }
+            let touches: id = *view_touches.get(&view).unwrap();
+            let _: () = msg![env; touches addObject:touch];
         }
-        let touches: id = *view_touches.get(&view).unwrap();
-        let _: () = msg![env; touches addObject:touch];
 
         let _ = &env
             .framework_state

@@ -6,6 +6,7 @@
 //! `UINavigationController`.
 
 use crate::frameworks::core_graphics::CGRect;
+use crate::frameworks::foundation::ns_string::get_static_str;
 use crate::frameworks::foundation::{ns_array, NSUInteger};
 use crate::objc::{
     autorelease, id, impl_HostObject_with_superclass, msg, msg_class, msg_super, nil,
@@ -88,6 +89,42 @@ pub const CLASSES: ClassExports = objc_classes! {
 + (id)allocWithZone:(NSZonePtr)_zone {
     let host_object = Box::<UINavigationControllerHostObject>::default();
     env.objc.alloc_object(this, host_object, &mut env.mem)
+}
+
+- (id)initWithCoder:(id)coder {
+    let this: id = msg_super![env; this initWithCoder:coder];
+
+    // Older UIKit nib archives store the navigation bar and controller stack
+    // beside the UIViewController's optional UIView. Reconstruct that public
+    // state instead of treating a missing UIView as an empty controller.
+    let navigation_bar_key = get_static_str(env, "UINavigationBar");
+    let navigation_bar: id = msg![env; coder decodeObjectForKey:navigation_bar_key];
+    if navigation_bar != nil {
+        retain(env, navigation_bar);
+        let old = env
+            .objc
+            .borrow::<UINavigationControllerHostObject>(this)
+            .navigation_bar;
+        release(env, old);
+        env.objc
+            .borrow_mut::<UINavigationControllerHostObject>(this)
+            .navigation_bar = navigation_bar;
+    }
+
+    let view_controllers_key = get_static_str(env, "UIViewControllers");
+    let child_view_controllers_key = get_static_str(env, "UIChildViewControllers");
+    let mut controllers: id = msg![env; coder decodeObjectForKey:view_controllers_key];
+    if controllers == nil {
+        controllers = msg![env; coder decodeObjectForKey:child_view_controllers_key];
+    }
+    if controllers != nil {
+        let count: NSUInteger = msg![env; controllers count];
+        if count > 0 {
+            () = msg![env; this setViewControllers:controllers animated:false];
+        }
+    }
+
+    this
 }
 
 - (id)initWithRootViewController:(id)root_vc { // UIViewController *

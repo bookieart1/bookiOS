@@ -29,11 +29,34 @@ pub struct State {
     /// Current EAGLContext for each thread
     current_ctxs: std::collections::HashMap<crate::ThreadId, Option<crate::objc::id>>,
     strings_cache: std::collections::HashMap<GLenum, ConstPtr<u8>>,
+    /// At most 24 detailed GL snapshots are emitted after user input during
+    /// one app run. This is enough to capture a few state transitions without
+    /// turning normal rendering into per-frame tracing.
+    input_diagnostic_remaining: u8,
+    input_diagnostic_emitted: u8,
 }
 impl State {
     fn current_ctx_for_thread(&mut self, thread: crate::ThreadId) -> &mut Option<crate::objc::id> {
         self.current_ctxs.entry(thread).or_insert(None);
         self.current_ctxs.get_mut(&thread).unwrap()
+    }
+
+    pub(crate) fn request_input_diagnostic_capture(&mut self) {
+        const TOTAL_BUDGET: u8 = 24;
+        const FRAMES_PER_INPUT: u8 = 8;
+        let available = TOTAL_BUDGET.saturating_sub(self.input_diagnostic_emitted);
+        self.input_diagnostic_remaining = self
+            .input_diagnostic_remaining
+            .max(FRAMES_PER_INPUT.min(available));
+    }
+
+    fn take_input_diagnostic_snapshot(&mut self) -> Option<u8> {
+        if self.input_diagnostic_remaining == 0 || self.input_diagnostic_emitted >= 24 {
+            return None;
+        }
+        self.input_diagnostic_remaining -= 1;
+        self.input_diagnostic_emitted += 1;
+        Some(self.input_diagnostic_emitted)
     }
 }
 

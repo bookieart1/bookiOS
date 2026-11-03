@@ -56,12 +56,26 @@ fn NSClassFromString(env: &mut Environment, string: id) -> Class {
     // TODO: avoid copy?
     let string = ns_string::to_rust_string(env, string);
 
-    // While this method is supposed to return nil if the class is not found,
-    // touchHLE is missing many classes that apps might expect to be present,
-    // so this could be troublesome. So, let's use get_known_class, which panics
-    // when it can't find the class. We could except certain classes or apps if
-    // we need to.
-    env.objc.get_known_class(&string, &mut env.mem)
+    env.objc.lookup_class(&string, &mut env.mem).unwrap_or(nil)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frameworks::foundation::ns_string;
+
+    #[test]
+    fn class_from_string_returns_known_class_or_nil() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let known = ns_string::from_rust_string(&mut env, "NSObject".to_owned());
+        let missing = ns_string::from_rust_string(
+            &mut env,
+            "DefinitelyNotAnIPhoneOSClass".to_owned(),
+        );
+        assert!(!NSClassFromString(&mut env, known).is_null());
+        assert!(NSClassFromString(&mut env, missing).is_null());
+        assert!(NSClassFromString(&mut env, nil).is_null());
+    }
 }
 
 pub const FUNCTIONS: FunctionExports = &[

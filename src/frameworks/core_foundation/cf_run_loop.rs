@@ -11,7 +11,7 @@
 use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
 use crate::frameworks::core_foundation::time::CFTimeInterval;
 use crate::frameworks::foundation::ns_run_loop::{
-    contains_timer, run_run_loop, run_run_loop_single_iteration, stop_run_loop,
+    contains_timer, remove_timer, run_run_loop, run_run_loop_single_iteration, stop_run_loop,
 };
 use crate::frameworks::foundation::ns_string;
 use crate::objc::{id, msg, msg_class};
@@ -61,6 +61,25 @@ fn CFRunLoopContainsTimer(
     }
 }
 
+fn CFRunLoopRemoveTimer(
+    env: &mut Environment,
+    run_loop: CFRunLoopRef,
+    timer: super::CFTypeRef,
+    mode: CFRunLoopMode,
+) {
+    let default_mode = ns_string::get_static_str(env, kCFRunLoopDefaultMode);
+    let common_modes = ns_string::get_static_str(env, kCFRunLoopCommonModes);
+    if (msg![env; mode isEqualToString:default_mode]
+        || msg![env; mode isEqualToString:common_modes])
+        && contains_timer(env, run_loop, timer)
+    {
+        // The scheduler currently collapses the default and common modes into
+        // one membership list. Removing a timer that is not registered is a
+        // no-op, matching Core Foundation's observable contract.
+        remove_timer(env, run_loop, timer);
+    }
+}
+
 fn CFRunLoopRunInMode(
     env: &mut Environment,
     mode: CFRunLoopMode,
@@ -104,5 +123,6 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFRunLoopRun()),
     export_c_func!(CFRunLoopStop(_)),
     export_c_func!(CFRunLoopContainsTimer(_, _, _)),
+    export_c_func!(CFRunLoopRemoveTimer(_, _, _)),
     export_c_func!(CFRunLoopRunInMode(_, _, _)),
 ];

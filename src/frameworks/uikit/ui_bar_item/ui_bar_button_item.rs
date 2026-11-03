@@ -79,7 +79,12 @@ fn make_label(env: &mut crate::Environment, title: id) -> id {
     label
 }
 
-fn make_custom_view(env: &mut crate::Environment, label: id, target: id, action: SEL) -> id {
+fn make_custom_view(
+    env: &mut crate::Environment,
+    label: id,
+    target: id,
+    action: Option<SEL>,
+) -> id {
     let init_frame = CGRect {
         origin: CGPoint { x: 0.0, y: 0.0 },
         size: CGSize {
@@ -93,7 +98,9 @@ fn make_custom_view(env: &mut crate::Environment, label: id, target: id, action:
         () = msg![env; control addSubview:label];
     }
     if target != nil {
-        () = msg![env; control addTarget:target action:action forControlEvents:UIControlEventTouchUpInside];
+        if let Some(action) = action {
+            () = msg![env; control addTarget:target action:action forControlEvents:UIControlEventTouchUpInside];
+        }
     }
     control
 }
@@ -141,8 +148,9 @@ pub const CLASSES: ClassExports = objc_classes! {
         (nil, decoded_custom)
     } else if title != nil {
         let label = make_label(env, title);
-        let action = env.objc.lookup_selector("undefinedSelector").unwrap();
-        (label, make_custom_view(env, label, nil, action))
+        // A decoded item may have a title but no target/action connection.
+        // UIKit still creates the item; it does not require a fabricated SEL.
+        (label, make_custom_view(env, label, nil, None))
     } else {
         (nil, nil)
     };
@@ -195,7 +203,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     );
 
     let label = make_label(env, title);
-    let custom_view = make_custom_view(env, label, target, action);
+    let custom_view = make_custom_view(env, label, target, Some(action));
 
     {
         let host = env.objc.borrow_mut::<UIBarButtonItemHostObject>(this);
@@ -248,7 +256,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         ),
     };
 
-    let custom_view = make_custom_view(env, label, target, action);
+    let custom_view = make_custom_view(env, label, target, Some(action));
 
     {
         let host = env.objc.borrow_mut::<UIBarButtonItemHostObject>(this);
@@ -348,7 +356,10 @@ pub const CLASSES: ClassExports = objc_classes! {
         Some(sel) => sel,
         None => {
             log!("Warning: UIBarButtonItem has no action set!");
-            env.objc.lookup_selector("undefinedSelector").unwrap()
+            env.objc.register_host_selector(
+                "undefinedSelector".to_owned(),
+                &mut env.mem,
+            )
         }
     }
 }

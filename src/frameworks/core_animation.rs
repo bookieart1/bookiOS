@@ -58,6 +58,12 @@ pub struct State {
     composition: composition::State,
 }
 
+impl State {
+    pub(crate) fn request_input_diagnostic_capture(&mut self) {
+        self.composition.request_input_diagnostic_capture();
+    }
+}
+
 #[derive(Default)]
 pub struct ThreadLocalState {
     ca_transaction: ca_transaction::ThreadLocalState,
