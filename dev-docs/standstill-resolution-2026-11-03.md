@@ -55,6 +55,16 @@ and limited to 16 addresses. It does not explain arbitrary object origins. The
 ordinary history may filter allocator/retain traffic; the final API is therefore
 not necessarily the producer of a bad value.
 
+There is already a frozen slow-presentation history, including slow-from-start,
+and current HEAD also retains the worst single present gap. Do not add another
+generic slow-frame recorder. ZA's 2.07 capture freezes at 3.740 seconds (a
+1.247-second early gap), before its later intermittent presentation collapse.
+Between 35.043 and 70.076 seconds it advances 2,055 main loops but only 30 presents
+(about 0.86 presents/s). The frozen early window mostly contains TLS operations
+and host UIKit calls around present; it does not explain that later period.
+The useful next change would be a scene marker/rearm of existing bounded capture
+and timing attribution, not another log buffer or an unqualified FPS average.
+
 Upstream HEAD was verified remotely as
 `ca1de89c578e79746f33c1332e28efd106c334ba`. Relevant upstream object, array and
 NSThread files were compared with the fork. Upstream also has the thread-start
@@ -66,7 +76,7 @@ historical correctness. No unverified wholesale upstream merge is proposed.
 | Finding | Evidence and implication | What is not established |
 |---|---|---|
 | Crash Drive, Jack Lumber, Slingshot, Stick Skater, Wind-up Knight form a real instruction-level cluster | Their 96-byte fault windows match after masking ARM BL displacements only. `objectAtIndex:0` returns a valid NSNumber; the later PC-relative indirect load produces zero. | The five imported/global symbols have not yet been identified. Same instructions need not mean the same missing symbol. |
-| Peggle is an allocator/object-table disagreement | Dev 2.10: 414 loops, 137 presentations, then an allocation returns an address still registered as an Objective-C object during CALayer display. | Direct free, missing object-table removal, allocator overlap and corruption remain competing causes. It is not just another null crash. |
+| Peggle is an allocator/object-table disagreement | Dev 2.10: 414 loops, 137 presentations, then an allocation returns an address still registered as an Objective-C object during CALayer display. | Zone/VM free, missing object-table removal, allocator overlap and corruption remain competing causes. Ordinary free() already removes registered objects through an existing accommodation; zone-free does not. The actual path is unproved. |
 | Topple 2 has a concrete reuse clue | Dev 1.90: NSThread helper receives an address whose isa is `0x4d555458`, exactly this fork's pthread mutex `MUTX` marker. | Premature thread-object destruction is plausible, but a wrong pointer or raw overwrite could produce the same marker. `NSThread.start` lacks an explicit self-retain; this is a candidate, not a patch authorization by itself. |
 | Anomaly HD, SUPERFALL and Tiki Totems 2 justify lifetime investigation | Search-path string teardown/extra release, a stale address after prolonged play, and an invalid retain respectively. | They are not proven to share an owner, producer or defective retain contract. |
 | Fragger's chronology contradicts a simple 1.90 regression claim | Gameplay followed by later launch/host-exit trouble was already reported on 1.89. Latest identifiable archived launch is 1.91, with later user reports of continuing host closure. | A code regression remains possible, but saved-state/launch-order effects must be separated. Log truncation does not identify the native fault. |
@@ -90,6 +100,11 @@ everything indefinitely. Apple's CFPreferences source documents immutable
 returned property-list values; the exact old NSUserDefaults behavior/caller copy
 expectation still needs a period-correct comparison. The existing modern macOS
 copy/defaults fixture is useful but cannot settle iPhone OS 2–6 behavior.
+Earlier preserved research already found immutable deep copies in Apple's
+contemporary CF-550 preferences implementation. The outstanding issue is the
+games' direct mutation expectation, not whether current documentation promises
+mutable defaults. The fork's separate retain-instead-of-snapshot storage gap
+could expose these invalid mutations earlier if corrected; it is not their fix.
 
 NSArray selector enumeration forbids mutating the receiving array. Trenches
 therefore requires identifying why that array is aliased/mutated and whether the
@@ -176,6 +191,9 @@ possibly nested or inherited, not a reconstructed allocation stack. A register's
 coincidental address match is only a candidate, not a proven fault operand.
 Native termination can occur before the in-memory history is dumped. The import
 decoder is not Thumb, arbitrary control-flow analysis or Pudding Panic coverage.
+Preserving Xcode dSYMs does not enable missing Rust release DWARF line information;
+the existing Cargo release profile is unchanged. UUID identity and available native
+symbols remain useful, but complete Rust source-level symbolization is not claimed.
 
 No save reset, compatibility accommodation, networking success, error suppression,
 global mutability change or diagnostic redesign is included. Existing provisional
@@ -185,10 +203,14 @@ fork accommodations remain separate; this review does not certify them.
 
 Focused tests exercise bounded eviction/generations/free/removal/VM overlap, the
 exact A32 literal/import chain plus rejection of intervening writes/branches, and
-a real guest-call ABI boundary: `_free` through the SVC dispatcher followed by
+a real guest-call ABI boundary: `_malloc_zone_free` through the SVC dispatcher followed by
 an ObjC allocation collision. The latter must fail with diagnostics both off/on,
-preserve the conflicting isa, and expose `_free` with caller LR when on. It is a
+preserve the conflicting isa, and expose `_malloc_zone_free` with caller LR when on. It is a
 synthetic invariant reproducer, not a claim to reproduce Peggle's actual cause.
+The initial fixture incorrectly assumed ordinary `_free` left registration
+behind; hosted testing disproved that assumption. Source inspection confirms
+ordinary free already removes the host object, while the default-zone free path
+does not. No allocator or free semantics were changed to make the test pass.
 
 Only source inspection, lightweight Python evidence extraction and `git diff
 --check` run locally. No local Rust, Cargo, CMake or preflight helper is allowed.
@@ -240,9 +262,12 @@ drain glGetError or routinely read back pixels. Correlate a screenshot's timesta
 and marker with the nearest presented frame. A screenshot alone cannot identify
 the first corrupted frame; to claim that precision, an explicit user mark/freeze
 or a defined machine-detectable invariant must capture that exact presentation.
-ZA additionally needs elapsed-time deltas at the *transition* into sustained low
-presentation, with thread wait/callback/draw work counts, not another terminal
-average. This experiment is designed, not implemented in Dev 2.11.
+ZA should reuse and rearm the existing slow/worst-gap capture at an explicit scene
+marker or after a new healthy baseline, retaining the startup sample separately.
+Add only bounded thread-wait/callback/draw duration attribution that distinguishes
+where the later frame gap is spent. The old 3.740-second capture must not be
+mistaken for the subsequent gameplay transition. This experiment is designed,
+not implemented in Dev 2.11.
 
 Encrypted-package cases remain external: aqua baller, Burrito Bison, FallingBalls,
 Geared, iStunt 2, Potty 2, Santa Engineer, Solomon's Keep, Spell Sword, Subrats HD,

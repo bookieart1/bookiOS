@@ -80,7 +80,7 @@ jobs:
       - name: Record diagnostic reproducer evidence
         if: github.ref == 'refs/heads/ci/unsigned-ipa-baseline'
         run: |
-          cargo test --lib --target x86_64-apple-darwin object_history_preserves_collision_after_guest_free_svc -- --nocapture
+          cargo test --lib --target x86_64-apple-darwin object_history_preserves_collision_after_guest_zone_free_svc -- --nocapture
           cargo test --lib --target x86_64-apple-darwin flight_recorder_preserves_real_sysctl_failure_through_svc -- --nocapture
           cargo test --lib --target x86_64-apple-darwin diagnostic_missing_selector_preserves_failure_and_captures_caller -- --nocapture
         env:

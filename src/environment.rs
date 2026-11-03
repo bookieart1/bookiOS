@@ -2619,7 +2619,7 @@ mod memory_fault_diagnostic_tests {
     }
 
     #[test]
-    fn object_history_preserves_collision_after_guest_free_svc() {
+    fn object_history_preserves_collision_after_guest_zone_free_svc() {
         use super::*;
         use crate::objc::{id, msg_class, TrivialHostObject};
         for enabled in [false, true] {
@@ -2628,22 +2628,36 @@ mod memory_fault_diagnostic_tests {
             env.diagnostics = enabled.then(crate::diagnostics::Recorder::new);
             env.mem.object_history =
                 enabled.then(|| Box::new(crate::mem::object_history::ObjectHistory::new()));
-            let f = env
+            let zone_function = env
                 .dyld
-                .create_proc_address(&mut env.mem, &mut env.cpu, "_free")
+                .create_proc_address(&mut env.mem, &mut env.cpu, "_malloc_default_zone")
                 .unwrap();
             let stack = env.mem.alloc(16);
+            env.cpu.regs_mut()[cpu::Cpu::SP] = stack.to_bits();
+            env.cpu.regs_mut()[cpu::Cpu::PC] = zone_function.addr_without_thumb_bit() + 4;
+            let zone_svc: u32 = env
+                .mem
+                .read(mem::ConstPtr::from_bits(zone_function.addr_without_thumb_bit()));
+            env.handle_cpu_state(cpu::CpuState::Svc(zone_svc & 0x00ff_ffff));
+            let zone = env.cpu.regs()[0];
+            assert_ne!(zone, 0);
+            let f = env
+                .dyld
+                .create_proc_address(&mut env.mem, &mut env.cpu, "_malloc_zone_free")
+                .unwrap();
             let object: id = msg_class![env; NSObject new];
             let isa = objc::ObjC::read_isa(object, &env.mem);
             let svc: u32 = env
                 .mem
                 .read(mem::ConstPtr::from_bits(f.addr_without_thumb_bit()));
-            env.cpu.regs_mut()[0] = object.to_bits();
+            env.cpu.regs_mut()[0] = zone;
+            env.cpu.regs_mut()[1] = object.to_bits();
             env.cpu.regs_mut()[cpu::Cpu::SP] = stack.to_bits();
             env.cpu.regs_mut()[cpu::Cpu::LR] = 0x1235;
             env.cpu.regs_mut()[cpu::Cpu::PC] = f.addr_without_thumb_bit() + 4;
-            // Deliberately reproduce the invariant violation, not game code:
-            // free guest storage without removing its Objective-C registration.
+            // Unlike free(), the existing zone-free path does not remove the
+            // Objective-C registration. Reproduce that invariant violation
+            // through its real guest ABI, without claiming this is Peggle's path.
             env.handle_cpu_state(cpu::CpuState::Svc(svc & 0x00ff_ffff));
             assert!(env.objc.get_host_object(object).is_some());
             let error = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -2658,7 +2672,7 @@ mod memory_fault_diagnostic_tests {
                 assert_eq!(record.origin.class, isa.to_bits());
                 assert_eq!(record.removed.sequence, 0);
                 assert_eq!(record.freed.action, "heap-free-completed");
-                assert_eq!(record.freed.context.api, "_free");
+                assert_eq!(record.freed.context.api, "_malloc_zone_free");
                 assert_eq!(record.freed.context.lr, 0x1235);
                 assert!(record.events().any(|e| e.action == "object-table-collision"));
                 history.dump(object.to_bits());
