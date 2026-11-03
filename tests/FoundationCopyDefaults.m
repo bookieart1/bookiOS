@@ -189,9 +189,12 @@ int main(void) {
             [probe addValue:nil forHTTPHeaderField:@"If-None-Match"];
             NSLog(@"nil-header-add populated=%d result=%@ fields=%@", populated,
                   [probe valueForHTTPHeaderField:@"If-None-Match"], probe.allHTTPHeaderFields);
+            assert([probe valueForHTTPHeaderField:@"If-None-Match"] == nil);
+            assert(probe.allHTTPHeaderFields.count == 0);
         } @catch (NSException *exception) {
             NSLog(@"nil-header-add populated=%d exception=%@ reason=%@", populated,
                   exception.name, exception.reason);
+            assert(!"native nil header addition unexpectedly threw");
         }
     }
     assert([headerRequest.allHTTPHeaderFields objectForKey:@"X-Second"] == nil);

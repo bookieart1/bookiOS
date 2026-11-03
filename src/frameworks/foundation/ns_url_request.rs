@@ -312,8 +312,15 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())addValue:(id)value // NSString *
     forHTTPHeaderField:(id)field { // NSString *
-    log_dbg!("[(NSURLRequest*){:?} addValue:'{}' forHTTPHeaderField:'{}']", this, to_rust_string(env, value), to_rust_string(env, field));
+    log_dbg!("[(NSURLRequest*){:?} addValue:{:?} forHTTPHeaderField:'{}']", this, value, to_rust_string(env, field));
     let http_header_fields = mutable_header_fields(env, this);
+    // Native Foundation removes the field for nil, even through addValue:.
+    // This is a request-header operation, not permission for nil dictionary
+    // elements. A current macOS reference covers absent and existing fields.
+    if value == nil {
+        () = msg![env; http_header_fields removeObjectForKey:field];
+        return;
+    }
     let existing: id = msg![env; http_header_fields objectForKey:field];
     assert_eq!(existing, nil); // TODO: append values with comma
     () = msg![env; http_header_fields setObject:value forKey:field];
@@ -326,6 +333,33 @@ pub const CLASSES: ClassExports = objc_classes! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nil_header_add_removes_only_the_named_header() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let request: id = msg_class![env; NSMutableURLRequest new];
+        let etag = ns_string::get_static_str(env, "If-None-Match");
+        let other = ns_string::get_static_str(env, "X-Control");
+        let value = ns_string::get_static_str(env, "saved-value");
+        () = msg![env; request addValue:value forHTTPHeaderField:other];
+        for populated in [false, true] {
+            if populated {
+                () = msg![env; request addValue:value forHTTPHeaderField:etag];
+            }
+            () = msg![env; request addValue:nil forHTTPHeaderField:etag];
+            let absent: id = msg![env; request valueForHTTPHeaderField:etag];
+            let control: id = msg![env; request valueForHTTPHeaderField:other];
+            let fields: id = msg![env; request allHTTPHeaderFields];
+            let count: NSUInteger = msg![env; fields count];
+            assert_eq!(absent, nil);
+            assert_eq!(control, value);
+            assert_eq!(count, 1);
+        }
+        release(env, request);
+        release(env, pool);
+    }
 
     #[test]
     fn all_http_header_fields_copies_and_nil_preserves_existing_fields() {

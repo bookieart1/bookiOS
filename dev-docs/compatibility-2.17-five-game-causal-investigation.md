@@ -132,7 +132,7 @@ theory wins, inspect the caller's class/category linkage and dictionary setup
 against the game binary before changing collection semantics. Ordinary
 NSMutableDictionary must still retain real objects and reject invalid ones.
 
-### Topple 2 — native-reference comparison
+### Topple 2 — general correction following native-reference comparison
 
 History: earlier logs were classified too broadly as an offline/dead-service
 problem. Latest evidence is more precise: thread 1 reads an absent
@@ -140,19 +140,27 @@ problem. Latest evidence is more precise: thread 1 reads an absent
 The emulator inserts nil into its backing dictionary and faults, caller
 `0x6614c`. This is request construction, before the service response.
 
-**Action:** run a native Foundation comparison for nil header addition both with
-and without an existing header. Record return state or exception without
-asserting the desired outcome. Existing `setValue:nil` removal semantics do not
-prove `addValue:nil` semantics. Historical documentation specifies comma
-addition and case-insensitive field names but does not settle nil addition.
+The native comparison ran successfully on macOS in workflow `41661457614`.
+`addValue:nil` removed the header in both cases: absent before the call and
+previously set to `old`. Neither call threw. This is removal, not preserving
+an existing value. The experiment observed before asserting this result;
+the reference now asserts it as a regression check.
 
-Until that observation is available, no runtime change is made. If native
-behavior is an exception, do not swallow it. If it ignores nil, evaluate a
-narrow request contract correction, noting modern macOS is not definitive proof
-of iPhone OS behavior. Do not manufacture an ETag, response, cache entry, or
-successful connection. Obsolete services may become a later blocker, but are
-not established as the only current blocker. An unchanged device retest adds
-no value unless a resulting contract correction is included.
+**Action:** remove the named header when `addValue:nil` is called, using the
+existing request dictionary's removal operation. Do not insert a nil element
+or convert nil to a string. A focused emulator test verifies absent/present
+cases while preserving another header and normal non-nil addition. Existing
+general dictionary checks and network failure behavior remain unchanged.
+
+Prediction: the recorded nil insertion no longer crashes request construction.
+A later offline failure is a different blocker, not proof of successful
+networking. The same insertion on this verified build would refute the call-path
+diagnosis. No ETag, response, cache entry, or successful connection is invented.
+This is a partial request contract, verified for these cases against current
+native Foundation; equivalence with historical iPhone OS remains an inference.
+Historical documentation specifies comma addition and case-insensitive field
+names but does not settle nil addition. The pre-existing non-nil comma-append
+and general case-normalization limitations are not claimed fixed here.
 
 ## Diagnostic bounds, risk, and validation
 
@@ -189,14 +197,20 @@ capacity annotation. A retry is also queued. An optional `native_reference_only`
 workflow-dispatch input now runs the native comparison alone on `macos-15-intel`;
 normal push validation is unchanged. This avoids making a small disputed API
 contract wait for another full emulator compilation. No local compiler is used.
+After that Intel-only reference completed in seconds, the full macOS test job
+was also moved to `macos-15-intel`, matching its existing x86_64 target. This
+only changes hosted runner selection; all full test steps remain. The arm64
+iOS IPA workflow is unchanged. The final source batch includes Topple's narrow
+correction and must pass a fresh hosted test/build before delivery.
 
 ## Priority and device predictions
 
 1. JellyCar3 epoch contract: strongest sourced correction, narrow risk, reusable
    by every importer of the constants. Test launch and first level; a later
    different error proves only that this blocker was removed.
-2. Topple request-header reference: cheap hosted experiment avoids another
-   speculative physical test. Other request constructors are secondary users.
+2. Topple request-header correction: the cheap hosted comparison resolved the
+   nil-add/removal question before implementation. Other request constructors
+   are secondary users; service availability remains independent.
 3. Tiki raw-value producer: strong local caller evidence; distinguish container
    misuse/dispatch from deallocation before any ownership correction.
 4. B'Blast search inputs: distinguishes resource/path hypothesis from an unrelated

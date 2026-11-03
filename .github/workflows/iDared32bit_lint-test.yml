@@ -34,7 +34,9 @@ jobs:
   lint-and-test-macos:
     if: ${{ !inputs.native_reference_only }}
 
-    runs-on: macos-15
+    # Tests already target x86_64; use its native pool after repeated ARM64
+    # capacity cancellations. The arm64 iOS IPA workflow remains unchanged.
+    runs-on: macos-15-intel
 
     steps:
       - uses: actions/checkout@v4
