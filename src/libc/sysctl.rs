@@ -452,8 +452,8 @@ fn sysctlbyname(
     // name: callers must receive the normal "name not found" result rather
     // than an invented cache size or an emulator panic.
     if name_str == "hw.l2cachesize" {
-        set_errno(env, ENOENT);
         log_dbg!("sysctlbyname({name_str:?}) is unavailable on iPhone1,1");
+        set_errno(env, ENOENT);
         return -1;
     }
     sysctl_generic(
