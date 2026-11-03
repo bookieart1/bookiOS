@@ -242,7 +242,7 @@ mod tests {
             };
             let address = export(&mut env);
             assert_ne!(address.to_bits(), 0);
-            assert_eq!(env.mem.read::<f64>(address.cast()), expected);
+            assert_eq!(env.mem.read(address.cast::<f64>()), expected);
             assert_eq!(
                 env.mem.get_bytes_fallible(address, 8).unwrap(),
                 expected.to_le_bytes()
