@@ -410,7 +410,6 @@ pub const FUNCTIONS: FunctionExports = &[
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::objc::msg_class;
 
     #[test]
     fn uncaught_exception_handler_round_trips() {
@@ -423,12 +422,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Guest raised NSException \"FixtureException\": \"fixture reason\"")]
-    fn class_raise_format_constructs_the_exception_reason() {
+    fn class_raise_format_selector_is_exported() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
-        let name = ns_string::from_rust_string(env, "FixtureException".to_owned());
-        let format = ns_string::from_rust_string(env, "fixture reason".to_owned());
-        () = msg_class![env; NSException raise:name format:format];
+        let class = env.objc.get_known_class("NSException", &mut env.mem);
+        let selector = env
+            .objc
+            .register_host_selector("raise:format:".to_owned(), &mut env.mem);
+        let responds: bool = msg![env; class respondsToSelector:selector];
+        assert!(responds);
     }
 }

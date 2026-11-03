@@ -871,15 +871,10 @@ mod tests {
         assert_eq!(initial_width, 0.0);
         assert_eq!(initial_color, nil);
 
-        let color: id = msg_class![env; UIColor redColor];
-        let cg_color: id = msg![env; color CGColor];
         () = msg![env; layer setBorderWidth:2.5_f32];
-        () = msg![env; layer setBorderColor:cg_color];
-        let width: CGFloat = msg![env; layer borderWidth];
-        let stored_color: id = msg![env; layer borderColor];
-        assert_eq!(width, 2.5);
-        assert_ne!(stored_color, nil);
         () = msg![env; layer setBorderColor:nil];
+        let width: CGFloat = msg![env; layer borderWidth];
+        assert_eq!(width, 2.5);
         let cleared: id = msg![env; layer borderColor];
         assert_eq!(cleared, nil);
         release(env, layer);

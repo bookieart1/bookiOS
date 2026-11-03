@@ -424,6 +424,8 @@ mod tests {
     fn decoded_style_target_action_connection_round_trips() {
         let mut env = crate::Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let item: id = msg_class![env; UIBarButtonItem new];
         let target: id = msg_class![env; NSObject new];
         let action = env
@@ -438,5 +440,7 @@ mod tests {
         assert_eq!(stored_action, action);
         release(env, target);
         release(env, item);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }
