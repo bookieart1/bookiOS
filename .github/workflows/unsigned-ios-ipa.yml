@@ -29,9 +29,11 @@ jobs:
   build-unsigned-ipa:
     name: Build unsigned IPA on macOS
     # The app uses SwiftUI APIs from the iOS 26 SDK. Pin Xcode 26.3 above while
-    # using the broader macOS 15 pool; the macOS 26 pool cancelled Dev 2.14
-    # after waiting 15 minutes without ever assigning a runner.
-    runs-on: macos-15
+    # using the Intel macOS 15 pool: the generic macOS 15 pool cancelled both
+    # Dev 2.17 attempts after 15 minutes without assigning a runner, while the
+    # Intel pool completed the matching hosted library tests and carries the
+    # same pinned Xcode/SDK according to GitHub's runner-image inventory.
+    runs-on: macos-15-intel
     timeout-minutes: 60
 
     steps:
