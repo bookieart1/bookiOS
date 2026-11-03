@@ -8,7 +8,7 @@
 //! The alert is shown with the host's own alert (an SDL messagebox) rather
 //! than drawn as a view.
 
-use crate::frameworks::foundation::{ns_string, NSInteger};
+use crate::frameworks::foundation::{ns_string, NSInteger, NSUInteger};
 use crate::objc::{
     id, impl_HostObject_with_superclass, msg, msg_class, msg_super, nil, objc_classes, release,
     retain, Class, ClassExports, NSZonePtr, SEL,
@@ -271,8 +271,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         env.objc.borrow_mut::<UIAlertViewHostObject>(this).cancel_button_index = index;
     }
     if other_buttons != nil {
-        let count: NSInteger = msg![env; other_buttons count];
-        assert!(count >= 0, "UIAlertView otherButtons returned a negative count");
+        let count: NSUInteger = msg![env; other_buttons count];
         for index in 0..count {
             let title: id = msg![env; other_buttons objectAtIndex:index];
             assert_ne!(title, nil, "UIAlertView otherButtons contains nil");
