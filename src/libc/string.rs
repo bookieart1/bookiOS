@@ -67,6 +67,11 @@ fn strtok(env: &mut Environment, s: MutPtr<u8>, sep: ConstPtr<u8>) -> MutPtr<u8>
 fn bzero(env: &mut Environment, dest: MutVoidPtr, count: GuestUSize) {
     memset(env, dest, 0, count);
 }
+fn bcopy(env: &mut Environment, src: ConstVoidPtr, dest: MutVoidPtr, count: GuestUSize) {
+    // Darwin's legacy bcopy has the opposite argument order from memcpy and,
+    // like memmove, explicitly permits overlapping ranges.
+    GenericChar::<u8>::memmove(env, dest.cast(), src.cast(), count, GuestUSize::MAX);
+}
 fn memset(env: &mut Environment, dest: MutVoidPtr, ch: i32, count: GuestUSize) -> MutVoidPtr {
     GenericChar::<u8>::memset(env, dest.cast(), ch as u8, count, GuestUSize::MAX).cast()
 }
@@ -346,6 +351,7 @@ fn strlcpy(
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(strtok(_, _)),
     export_c_func!(bzero(_, _)),
+    export_c_func!(bcopy(_, _, _)),
     // Functions shared with wchar.rs
     export_c_func!(memset(_, _, _)),
     export_c_func!(__memset_chk(_, _, _, _)),
@@ -386,6 +392,22 @@ pub const FUNCTIONS: FunctionExports = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bcopy_uses_source_first_and_permits_overlap() {
+        let mut env = Environment::new_fake_for_test();
+        let bytes = env.mem.alloc(6).cast::<u8>();
+        env.mem
+            .bytes_at_mut(bytes, 6)
+            .copy_from_slice(b"abcdef");
+        bcopy(
+            &mut env,
+            bytes.cast_const().cast(),
+            (bytes + 1).cast(),
+            5,
+        );
+        assert_eq!(env.mem.bytes_at(bytes, 6), b"aabcde");
+    }
 
     #[test]
     fn strstr_diagnostic_preserves_found_empty_missing_and_fault_behavior() {

@@ -4001,3 +4001,59 @@ or CF ownership rule is relaxed. Full record and predictions:
 - The app-picker header now shows `Dev 2.17`, and this meaningful test batch is
   placed before the alphabetized remainder. Physical-device status is pending
   a verified hosted artifact.
+
+## Dev 2.17 physical-device result — 2026-11-03
+
+Device logs verify implementation `eb27d7f` and workflow `41694954194`.
+All 22 requested titles were exercised. No title became newly playable and the
+user observed every failure at effectively the same visible point. Spoing was a
+clean regression. That zero-visible-gain result must remain distinct from the
+following internal boundary advances:
+
+- ADVENA / ZENONIA 2: numeric host parsing passed; next blocker `_bcopy`.
+- EPOCH / Unmechanical: AVURLAsset creation passed; next blocker
+  `+[AVPlayerItem playerItemWithAsset:]`.
+- Bungee Ball: data-source cell construction passed; next blocker one-argument
+  UITableView reuse lookup.
+- Junny: edge-insets parsing and ABI passed; next blocker `drawTextInRect:`.
+- Ragdoll 3: `hw.activecpu` passed; next blocker `hw.cachelinesize`.
+- Rolando: current-point lookup passed; next blocker `_CGPathAddCurveToPoint`.
+- Topple 2: nil-header semantics passed; next blocker the historical UIAlertView
+  initializer.
+- Wind-up Knight: `CFMakeCollectable` passed; next boundary is
+  `setShouldProcessNamespaces:YES`, not external-entity resolution.
+
+The new causal evidence is stronger than the visible result. SUPERFALL's
+resource-name NSString is proven created/autoreleased, released to zero,
+deallocated, then consumed. Tiki Totems 2's invalid dictionary value is proven
+to be a fresh 12-byte raw allocation with nil isa, not a stale Objective-C
+object. Peggle recorded `GL_INVALID_FRAMEBUFFER_OPERATION` before Core Animation
+composition even though the later status query reports a complete framebuffer.
+Toy Bot 2 repeatedly rejects taps as additional touches on a non-multitouch
+ComicView, indicating a likely stuck touch lifecycle. Decoloro's live landscape
+controls sit outside a portrait-width container/hit region. B'Blast's final
+`strstr` miss links character XML selection to preceding synthesized missing
+environment XML paths.
+
+The complete review and evidence hashes are in
+`../../outputs/iDared-Dev-2.17-device-review-2026-11-03.md`. No new compatibility
+build or push was performed for this review.
+
+## Dev 2.18 later-contract implementation — 2026-11-03
+
+- Dev 2.17 (`eb27d7f5`, workflow `41694954194`) produced no visible success
+  across the 22-title batch, while exposing eight exact later boundaries.
+- Dev 2.18 implements general `bcopy`, AVPlayerItem asset construction,
+  UITableView reuse dequeue, `hw.cachelinesize`, cubic CGPath flattening,
+  UILabel `drawTextInRect:`, the historical six-argument UIAlertView
+  initializer, and partial NSXMLParser namespace-option behavior.
+- Primary tests are ADVENA, Bungee Ball, EPOCH, Junny, Ragdoll 3, Rolando,
+  Topple 2, Unmechanical, Wind-up Knight, and ZENONIA 2. Spoing is the sole
+  regression control. Each requested title has changed code; unchanged
+  standstill titles are omitted rather than replayed without a new experiment.
+- Contract status: `bcopy` and the cache-line sysctl are verified narrow
+  contracts; AVPlayerItem, table reuse, CGPath curve rendering, historical
+  UIAlertView, and namespace processing are partial contracts with the limits
+  recorded in `compatibility-2.18-later-contracts.md`.
+- Physical-device status remains pending. Passing one boundary is not yet a
+  menu, gameplay, save/relaunch, or functional-compatibility result.

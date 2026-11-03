@@ -114,6 +114,52 @@ pub fn CGPathAddLineToPoint(
     add_element(env, path, kCGPathElementAddLineToPoint, point);
 }
 
+/// Add a cubic Bézier curve. The current renderer consumes flattened moves and
+/// lines, so retain the curve's shape as a bounded 16-segment polyline rather
+/// than introducing an element type that existing consumers cannot render.
+pub fn CGPathAddCurveToPoint(
+    env: &mut Environment,
+    path: CGMutablePathRef,
+    m: ConstPtr<CGAffineTransform>,
+    cp1x: f32,
+    cp1y: f32,
+    cp2x: f32,
+    cp2y: f32,
+    x: f32,
+    y: f32,
+) {
+    let control1 = transformed(env, m, CGPoint { x: cp1x, y: cp1y });
+    let control2 = transformed(env, m, CGPoint { x: cp2x, y: cp2y });
+    let end = transformed(env, m, CGPoint { x, y });
+    let current = current_and_subpath_start(
+        &env.objc
+            .borrow::<CGMutablePathHostObject>(path)
+            .path_elements,
+    )
+    .0;
+    let Some(start) = current else {
+        CGPathMoveToPoint(env, path, ConstPtr::null(), end.x, end.y);
+        return;
+    };
+
+    const SEGMENTS: usize = 16;
+    for segment in 1..=SEGMENTS {
+        let t = segment as f32 / SEGMENTS as f32;
+        let one_minus_t = 1.0 - t;
+        let point = CGPoint {
+            x: one_minus_t.powi(3) * start.x
+                + 3.0 * one_minus_t.powi(2) * t * control1.x
+                + 3.0 * one_minus_t * t.powi(2) * control2.x
+                + t.powi(3) * end.x,
+            y: one_minus_t.powi(3) * start.y
+                + 3.0 * one_minus_t.powi(2) * t * control1.y
+                + 3.0 * one_minus_t * t.powi(2) * control2.y
+                + t.powi(3) * end.y,
+        };
+        add_element(env, path, kCGPathElementAddLineToPoint, point);
+    }
+}
+
 fn current_and_subpath_start(
     path_elements: &[CGPathElement],
 ) -> (Option<CGPoint>, Option<CGPoint>) {
@@ -354,6 +400,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGPathRelease(_)),
     export_c_func!(CGPathMoveToPoint(_, _, _, _)),
     export_c_func!(CGPathAddLineToPoint(_, _, _, _)),
+    export_c_func!(CGPathAddCurveToPoint(_, _, _, _, _, _, _, _)),
     export_c_func!(CGPathCloseSubpath(_)),
     export_c_func!(CGPathGetCurrentPoint(_)),
     export_c_func!(CGPathAddArcToPoint(_, _, _, _, _, _, _)),
@@ -440,6 +487,30 @@ mod tests {
             CGPathGetCurrentPoint(&mut env, path),
             CGPoint { x: 2.0, y: 3.0 }
         );
+        CGPathRelease(&mut env, path);
+    }
+
+    #[test]
+    fn cubic_curve_is_bounded_and_reaches_its_endpoint() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let path = CGPathCreateMutable(&mut env);
+        CGPathMoveToPoint(&mut env, path, ConstPtr::null(), 0.0, 0.0);
+        CGPathAddCurveToPoint(
+            &mut env,
+            path,
+            ConstPtr::null(),
+            0.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            0.0,
+        );
+        let points = path_points(&env, path);
+        assert_eq!(points.len(), 17);
+        assert_eq!(points.last(), Some(&CGPoint { x: 1.0, y: 0.0 }));
+        assert!((points[8].x - 0.5).abs() < 1.0e-5);
+        assert!((points[8].y - 0.75).abs() < 1.0e-5);
         CGPathRelease(&mut env, path);
     }
 }

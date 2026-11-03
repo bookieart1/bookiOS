@@ -18,8 +18,8 @@ use super::NSUInteger;
 use crate::environment::Environment;
 use crate::mem::ConstVoidPtr;
 use crate::objc::{
-    autorelease, id, msg, msg_class, nil, objc_classes, release, retain, todo_objc_setter,
-    ClassExports, HostObject, NSZonePtr, SEL,
+    autorelease, id, msg, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject,
+    NSZonePtr, SEL,
 };
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
@@ -30,6 +30,9 @@ struct NSXMLParserHostObject {
     /// An object conforming to NSXMLParserDelegateEventAdditions category
     /// or NSXMLParserDelegate protocol (which is equivalent)
     delegate: id,
+    should_process_namespaces: bool,
+    should_report_namespace_prefixes: bool,
+    should_resolve_external_entities: bool,
 }
 impl HostObject for NSXMLParserHostObject {}
 
@@ -43,6 +46,9 @@ pub const CLASSES: ClassExports = objc_classes! {
     let host_object = Box::new(NSXMLParserHostObject {
         data: nil,
         delegate: nil,
+        should_process_namespaces: false,
+        should_report_namespace_prefixes: false,
+        should_resolve_external_entities: false,
     });
     env.objc.alloc_object(this, host_object, &mut env.mem)
 }
@@ -74,15 +80,22 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())setShouldResolveExternalEntities:(bool)should {
-    todo_objc_setter!(this, should);
+    env.objc.borrow_mut::<NSXMLParserHostObject>(this).should_resolve_external_entities = should;
 }
 - (())setShouldProcessNamespaces:(bool)should {
-    todo_objc_setter!(this, should);
-    assert!(!should);
+    env.objc.borrow_mut::<NSXMLParserHostObject>(this).should_process_namespaces = should;
 }
 - (())setShouldReportNamespacePrefixes:(bool)should {
-    todo_objc_setter!(this, should);
-    assert!(!should);
+    env.objc.borrow_mut::<NSXMLParserHostObject>(this).should_report_namespace_prefixes = should;
+}
+- (bool)shouldResolveExternalEntities {
+    env.objc.borrow::<NSXMLParserHostObject>(this).should_resolve_external_entities
+}
+- (bool)shouldProcessNamespaces {
+    env.objc.borrow::<NSXMLParserHostObject>(this).should_process_namespaces
+}
+- (bool)shouldReportNamespacePrefixes {
+    env.objc.borrow::<NSXMLParserHostObject>(this).should_report_namespace_prefixes
 }
 
 - (bool)parse {
@@ -109,7 +122,10 @@ pub const CLASSES: ClassExports = objc_classes! {
         }
     }
 
-    let delegate = env.objc.borrow::<NSXMLParserHostObject>(this).delegate;
+    let (delegate, should_process_namespaces) = {
+        let host = env.objc.borrow::<NSXMLParserHostObject>(this);
+        (host.delegate, host.should_process_namespaces)
+    };
     let sel: SEL = env
         .objc
         .register_host_selector("parserDidStartDocument:".to_string(), &mut env.mem);
@@ -120,7 +136,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     for event in events {
         match event {
             Event::Empty(e) => {
-                let name = String::from_utf8(e.local_name().as_ref().to_vec()).unwrap();
+                let name_bytes = if should_process_namespaces {
+                    e.local_name().as_ref().to_vec()
+                } else {
+                    e.name().as_ref().to_vec()
+                };
+                let name = String::from_utf8(name_bytes).unwrap();
                 let name: id = from_rust_string(env, name);
                 let name = autorelease(env, name);
                 let sel: SEL = env
@@ -168,7 +189,12 @@ pub const CLASSES: ClassExports = objc_classes! {
                 }
             }
             Event::Start(e) => {
-                let name = String::from_utf8(e.local_name().as_ref().to_vec()).unwrap();
+                let name_bytes = if should_process_namespaces {
+                    e.local_name().as_ref().to_vec()
+                } else {
+                    e.name().as_ref().to_vec()
+                };
+                let name = String::from_utf8(name_bytes).unwrap();
                 let sel: SEL = env
                     .objc
                     .register_host_selector(
@@ -188,7 +214,12 @@ pub const CLASSES: ClassExports = objc_classes! {
                 }
             }
             Event::End(e) => {
-                let name = String::from_utf8(e.local_name().as_ref().to_vec()).unwrap();
+                let name_bytes = if should_process_namespaces {
+                    e.local_name().as_ref().to_vec()
+                } else {
+                    e.name().as_ref().to_vec()
+                };
+                let name = String::from_utf8(name_bytes).unwrap();
                 let sel: SEL = env
                     .objc
                     .register_host_selector(
@@ -290,4 +321,24 @@ fn build_attributes_dict(env: &mut Environment, e: BytesStart) -> id {
     });
     // TODO: return an immutable copy
     autorelease(env, dict)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn namespace_configuration_is_stable_per_parser() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let parser: id = msg_class![env; NSXMLParser new];
+        () = msg![env; parser setShouldProcessNamespaces:true];
+        () = msg![env; parser setShouldReportNamespacePrefixes:true];
+        () = msg![env; parser setShouldResolveExternalEntities:true];
+        let process: bool = msg![env; parser shouldProcessNamespaces];
+        let report: bool = msg![env; parser shouldReportNamespacePrefixes];
+        let resolve: bool = msg![env; parser shouldResolveExternalEntities];
+        assert!(process && report && resolve);
+        release(env, parser);
+    }
 }

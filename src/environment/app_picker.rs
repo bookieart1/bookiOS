@@ -291,32 +291,21 @@ fn enumerate_apps(
     // so a full round can be exercised without repeatedly paging through the
     // library. Everything else remains alphabetical.
     // Bundle identifiers avoid depending on localized or truncated names.
-    const DEV_217_TEST_BATCH: &[&str] = &[
+    const DEV_218_TEST_BATCH: &[&str] = &[
         "com.gamevil.advena",
-        "com.krome.BoomerangBlast",
         "com.digitalprunes.BungeeBall2Pro",
-        "eu.ukando.decoloroiphone",
         "com.uppercut-games.epoch",
-        "com.shauninman.flipsescape",
-        "com.disney.JellyCar3",
         "com.whaleislandgames.junny",
-        "com.freeverse.ninja",
-        "com.popcap.Peggle",
         "com.backflipstudios.ragdollblaster3",
         "com.ngmoco.rolando",
-        "com.EscalationStudios.Platinum",
         "com.chillingo.spoing",
-        "com.craneballs.stuntman",
-        "com.spokko.TikiTotems2",
         "com.ngmoco.Topple2",
-        "com.iugo.ToyBotDiaries2",
-        "com.ThunderGameWorks.Trenches",
         "com.teotlstudios.unmechanical",
         "com.robotinvader.knightmare",
         "com.gamevil.zenonia2",
     ];
     apps.sort_by_key(|app| {
-        let focus_index = DEV_217_TEST_BATCH
+        let focus_index = DEV_218_TEST_BATCH
             .iter()
             .position(|identifier| *identifier == app.bundle_identifier.as_str())
             .map(|idx| (0, idx));
@@ -829,7 +818,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.17",
+            "iDared 32bit {}{}{} · Dev 2.18",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""

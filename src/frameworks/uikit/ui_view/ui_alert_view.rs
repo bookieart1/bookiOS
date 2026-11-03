@@ -16,6 +16,43 @@ use crate::objc::{
 use std::ffi::{c_char, CStr, CString};
 use std::sync::OnceLock;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Environment;
+
+    #[test]
+    fn historical_initializer_preserves_button_roles_and_order() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let title = ns_string::get_static_str(env, "Title");
+        let message = ns_string::get_static_str(env, "Message");
+        let default_button = ns_string::get_static_str(env, "Play");
+        let cancel_button = ns_string::get_static_str(env, "Cancel");
+        let extra = ns_string::get_static_str(env, "Help");
+        let extras: id = msg_class![env; NSMutableArray new];
+        () = msg![env; extras addObject:extra];
+        let alert: id = msg_class![env; UIAlertView alloc];
+        let alert: id = msg![env; alert initWithTitle:title
+                                             message:message
+                                            delegate:nil
+                                       defaultButton:default_button
+                                        cancelButton:cancel_button
+                                        otherButtons:extras];
+        let count: NSInteger = msg![env; alert numberOfButtons];
+        let default_index: NSInteger = msg![env; alert defaultButtonIndex];
+        let cancel_index: NSInteger = msg![env; alert cancelButtonIndex];
+        assert_eq!(count, 3);
+        assert_eq!(default_index, 0);
+        assert_eq!(cancel_index, 1);
+        let returned_extra: id = msg![env; alert buttonTitleAtIndex:2i32];
+        let equal: bool = msg![env; returned_extra isEqual:extra];
+        assert!(equal);
+        release(env, alert);
+        release(env, extras);
+    }
+}
+
 type NativeTextAlertFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
 static NATIVE_TEXT_ALERT: OnceLock<NativeTextAlertFn> = OnceLock::new();
 
@@ -150,6 +187,7 @@ pub struct UIAlertViewHostObject {
     delegate: id,
     /// `NSString*`s, in index order.
     button_titles: Vec<id>,
+    default_button_index: NSInteger,
     cancel_button_index: NSInteger,
 }
 impl_HostObject_with_superclass!(UIAlertViewHostObject);
@@ -169,6 +207,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 + (id)allocWithZone:(NSZonePtr)_zone {
     let host_object = Box::new(UIAlertViewHostObject {
+        default_button_index: -1,
         cancel_button_index: -1,
         ..Default::default()
     });
@@ -196,6 +235,40 @@ pub const CLASSES: ClassExports = objc_classes! {
             if title == nil {
                 break;
             }
+            add_button(env, this, title);
+        }
+    }
+    this
+}
+
+// Historical private UIKit initializer used by early Apple/ngmoco code. The
+// first two button arguments are title strings and otherButtons is an NSArray
+// of title strings. Keep the public alert model and ownership rules rather
+// than inventing a second presentation path.
+- (id)initWithTitle:(id)title
+                      message:(id)message
+                     delegate:(id)delegate
+                defaultButton:(id)default_button
+                 cancelButton:(id)cancel_button
+                 otherButtons:(id)other_buttons {
+    let this: id = msg_super![env; this init];
+    () = msg![env; this setTitle:title];
+    () = msg![env; this setMessage:message];
+    () = msg![env; this setDelegate:delegate];
+    if default_button != nil {
+        let index = add_button(env, this, default_button);
+        env.objc.borrow_mut::<UIAlertViewHostObject>(this).default_button_index = index;
+    }
+    if cancel_button != nil {
+        let index = add_button(env, this, cancel_button);
+        env.objc.borrow_mut::<UIAlertViewHostObject>(this).cancel_button_index = index;
+    }
+    if other_buttons != nil {
+        let count: NSInteger = msg![env; other_buttons count];
+        assert!(count >= 0, "UIAlertView otherButtons returned a negative count");
+        for index in 0..count {
+            let title: id = msg![env; other_buttons objectAtIndex:index];
+            assert_ne!(title, nil, "UIAlertView otherButtons contains nil");
             add_button(env, this, title);
         }
     }
@@ -259,6 +332,13 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (NSInteger)cancelButtonIndex {
     env.objc.borrow::<UIAlertViewHostObject>(this).cancel_button_index
+}
+
+- (NSInteger)defaultButtonIndex {
+    env.objc.borrow::<UIAlertViewHostObject>(this).default_button_index
+}
+- (())setDefaultButtonIndex:(NSInteger)index {
+    env.objc.borrow_mut::<UIAlertViewHostObject>(this).default_button_index = index;
 }
 - (())setCancelButtonIndex:(NSInteger)index {
     env.objc.borrow_mut::<UIAlertViewHostObject>(this).cancel_button_index = index;

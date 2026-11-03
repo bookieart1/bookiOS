@@ -380,6 +380,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())drawRect:(CGRect)_rect {
     let bounds: CGRect = msg![env; this bounds];
+    () = msg![env; this drawTextInRect:bounds];
+}
+
+- (())drawTextInRect:(CGRect)bounds {
     let context = UIGraphicsGetCurrentContext(env);
 
     let &mut UILabelHostObject {

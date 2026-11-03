@@ -11,8 +11,8 @@
 use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect, CGSize};
 use crate::frameworks::foundation::NSInteger;
 use crate::objc::{
-    id, impl_HostObject_with_superclass, msg, msg_class, nil, objc_classes, todo_objc_setter,
-    ClassExports, NSZonePtr, SEL,
+    autorelease, id, impl_HostObject_with_superclass, msg, msg_class, msg_super, nil,
+    objc_classes, release, retain, todo_objc_setter, ClassExports, NSZonePtr, SEL,
 };
 
 type UITableViewStyle = NSInteger;
@@ -49,6 +49,8 @@ pub struct UITableViewHostObject {
     section_row_counts: Vec<NSInteger>,
     allows_selection: bool,
     visible_cells: Vec<id>,
+    /// Cells retained by the table after leaving the visible hierarchy.
+    reusable_cells: Vec<id>,
 }
 impl_HostObject_with_superclass!(UITableViewHostObject);
 impl Default for UITableViewHostObject {
@@ -61,6 +63,7 @@ impl Default for UITableViewHostObject {
             section_row_counts: Vec::new(),
             allows_selection: true,
             visible_cells: Vec::new(),
+            reusable_cells: Vec::new(),
         }
     }
 }
@@ -132,7 +135,19 @@ pub const CLASSES: ClassExports = objc_classes! {
         &mut env.objc.borrow_mut::<UITableViewHostObject>(this).visible_cells,
     );
     for cell in old_cells {
+        let reuse_identifier: id = msg![env; cell reuseIdentifier];
+        if reuse_identifier != nil {
+            // Transfer the subview's ownership into the bounded reuse pool
+            // before removeFromSuperview releases the hierarchy's retain.
+            retain(env, cell);
+        }
         () = msg![env; cell removeFromSuperview];
+        if reuse_identifier != nil {
+            env.objc
+                .borrow_mut::<UITableViewHostObject>(this)
+                .reusable_cells
+                .push(cell);
+        }
     }
     let data_source = env.objc.borrow::<UITableViewHostObject>(this).data_source;
     let mut section_row_counts = Vec::new();
@@ -210,6 +225,44 @@ pub const CLASSES: ClassExports = objc_classes! {
         this,
         total_rows
     );
+}
+
+- (id)dequeueReusableCellWithIdentifier:(id)identifier {
+    assert_ne!(identifier, nil, "UITableView reuse identifier must not be nil");
+    let reusable_cells = env
+        .objc
+        .borrow::<UITableViewHostObject>(this)
+        .reusable_cells
+        .clone();
+    let mut matching_index = None;
+    for (index, cell) in reusable_cells.into_iter().enumerate() {
+        let candidate: id = msg![env; cell reuseIdentifier];
+        let matches: bool = candidate != nil && msg![env; candidate isEqual:identifier];
+        if matches {
+            matching_index = Some(index);
+            break;
+        }
+    }
+    let Some(index) = matching_index else {
+        return nil;
+    };
+    let cell = env
+        .objc
+        .borrow_mut::<UITableViewHostObject>(this)
+        .reusable_cells
+        .remove(index);
+    () = msg![env; cell prepareForReuse];
+    autorelease(env, cell)
+}
+
+- (())dealloc {
+    let reusable_cells = std::mem::take(
+        &mut env.objc.borrow_mut::<UITableViewHostObject>(this).reusable_cells,
+    );
+    for cell in reusable_cells {
+        release(env, cell);
+    }
+    msg_super![env; this dealloc]
 }
 
 - (())scrollToRowAtIndexPath:(id)index_path
@@ -320,7 +373,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 #[cfg(test)]
 mod tests {
-    use super::index_path_for_flat_row;
+    use super::*;
+    use crate::frameworks::foundation::ns_string;
+    use crate::Environment;
 
     #[test]
     fn maps_flat_rows_across_sections_and_rejects_out_of_range_rows() {
@@ -331,5 +386,34 @@ mod tests {
         assert_eq!(index_path_for_flat_row(&rows, 2), Some((2, 0)));
         assert_eq!(index_path_for_flat_row(&rows, 4), Some((2, 2)));
         assert_eq!(index_path_for_flat_row(&rows, 5), None);
+    }
+
+    #[test]
+    fn dequeue_matches_identifier_and_transfers_queue_ownership() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let table: id = msg_class![env; UITableView new];
+        let reuse = ns_string::get_static_str(env, "Cell");
+        let other = ns_string::get_static_str(env, "Other");
+        let cell: id = msg_class![env; UITableViewCell alloc];
+        let cell: id = msg![env; cell initWithStyle:0i32 reuseIdentifier:reuse];
+        retain(env, cell);
+        env.objc
+            .borrow_mut::<UITableViewHostObject>(table)
+            .reusable_cells
+            .push(cell);
+        release(env, cell);
+        let missing: id = msg![env; table dequeueReusableCellWithIdentifier:other];
+        assert_eq!(missing, nil);
+        let returned: id = msg![env; table dequeueReusableCellWithIdentifier:reuse];
+        assert_eq!(returned, cell);
+        assert!(env
+            .objc
+            .borrow::<UITableViewHostObject>(table)
+            .reusable_cells
+            .is_empty());
+        release(env, table);
+        release(env, pool);
     }
 }

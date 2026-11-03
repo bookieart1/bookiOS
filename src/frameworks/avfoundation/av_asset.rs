@@ -19,6 +19,11 @@ struct AVURLAssetHostObject {
 }
 impl HostObject for AVURLAssetHostObject {}
 
+struct AVPlayerItemHostObject {
+    asset: id,
+}
+impl HostObject for AVPlayerItemHostObject {}
+
 pub const CLASSES: ClassExports = objc_classes! {
 
 (env, this, _cmd);
@@ -65,6 +70,43 @@ pub const CLASSES: ClassExports = objc_classes! {
     };
     release(env, url);
     release(env, options);
+    env.objc.dealloc_object(this, &mut env.mem)
+}
+
+@end
+
+@implementation AVPlayerItem: NSObject
+
++ (id)allocWithZone:(NSZonePtr)_zone {
+    env.objc.alloc_object(
+        this,
+        Box::new(AVPlayerItemHostObject { asset: nil }),
+        &mut env.mem,
+    )
+}
+
++ (id)playerItemWithAsset:(id)asset {
+    let item: id = msg![env; this alloc];
+    let item: id = msg![env; item initWithAsset:asset];
+    autorelease(env, item)
+}
+
+- (id)initWithAsset:(id)asset {
+    assert_ne!(asset, nil, "AVPlayerItem requires a non-nil asset");
+    let asset = retain(env, asset);
+    let host = env.objc.borrow_mut::<AVPlayerItemHostObject>(this);
+    assert_eq!(host.asset, nil);
+    host.asset = asset;
+    this
+}
+
+- (id)asset {
+    env.objc.borrow::<AVPlayerItemHostObject>(this).asset
+}
+
+- (())dealloc {
+    let asset = env.objc.borrow::<AVPlayerItemHostObject>(this).asset;
+    release(env, asset);
     env.objc.dealloc_object(this, &mut env.mem)
 }
 
@@ -125,5 +167,23 @@ mod tests {
         assert_eq!(returned_url, url);
         release(env, pool);
         release(env, url);
+    }
+
+    #[test]
+    fn player_item_preserves_asset_identity_and_balances_ownership() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let asset: id = msg_class![env; AVAsset new];
+        let count_before: NSUInteger = msg![env; asset retainCount];
+        let item: id = msg_class![env; AVPlayerItem alloc];
+        let item: id = msg![env; item initWithAsset:asset];
+        let returned: id = msg![env; item asset];
+        assert_eq!(returned, asset);
+        let count_during: NSUInteger = msg![env; asset retainCount];
+        assert_eq!(count_during, count_before + 1);
+        release(env, item);
+        let count_after: NSUInteger = msg![env; asset retainCount];
+        assert_eq!(count_after, count_before);
+        release(env, asset);
     }
 }
