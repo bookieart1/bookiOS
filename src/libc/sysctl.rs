@@ -447,6 +447,15 @@ fn sysctlbyname(
         newp,
         newlen
     );
+    // The S5L8900 in the original iPhone model reported by this emulator has
+    // no L2 cache. Historical Darwin therefore has no value for this optional
+    // name: callers must receive the normal "name not found" result rather
+    // than an invented cache size or an emulator panic.
+    if name_str == "hw.l2cachesize" {
+        set_errno(env, ENOENT);
+        log_dbg!("sysctlbyname({name_str:?}) is unavailable on iPhone1,1");
+        return -1;
+    }
     sysctl_generic(
         env,
         |env| {
@@ -635,6 +644,28 @@ mod tests {
         );
         assert_eq!(env.mem.read(output_len), guest_size_of::<i64>());
         assert_eq!(env.mem.read(output.cast::<i64>()), 16 * 1024);
+    }
+
+    #[test]
+    fn l2_cache_size_is_absent_on_the_reported_original_iphone_cpu() {
+        let mut env = Environment::new_fake_for_test();
+        let name = env.mem.alloc_and_write_cstr(b"hw.l2cachesize");
+        let output = env.mem.alloc_and_write(0xfeed_beefu32);
+        let output_len = env.mem.alloc_and_write(guest_size_of::<u32>());
+        assert_eq!(
+            sysctlbyname(
+                &mut env,
+                name.cast_const(),
+                output.cast(),
+                output_len,
+                Ptr::null(),
+                0,
+            ),
+            -1
+        );
+        assert_eq!(get_errno(&mut env), ENOENT);
+        assert_eq!(env.mem.read(output), 0xfeed_beefu32);
+        assert_eq!(env.mem.read(output_len), guest_size_of::<u32>());
     }
 
     #[test]

@@ -474,6 +474,10 @@ pub struct Recorder {
     yields: u64,
     started: Instant,
     next_progress: Instant,
+    /// The first periodic checkpoint also preserves the newest boundaries.
+    /// This is emitted once so a later native/abrupt termination has useful
+    /// lead-up evidence without turning progress reporting into a trace.
+    progress_detail_dumped: bool,
     last_present: Option<Instant>,
     last_present_boundaries: u64,
     healthy_present_streak: u16,
@@ -516,6 +520,7 @@ impl Recorder {
             yields: 0,
             started: now,
             next_progress: now + Duration::from_secs(5),
+            progress_detail_dumped: false,
             last_present: None,
             last_present_boundaries: 0,
             healthy_present_streak: 0,
@@ -872,6 +877,18 @@ impl Recorder {
         // Persist limited evidence even when a host kill prevents a final dump.
         if self.progress.written <= 12 {
             Self::print_progress(&sample);
+        }
+        if !self.progress_detail_dumped {
+            self.progress_detail_dumped = true;
+            const CHECKPOINT_RECENT: usize = 12;
+            echo_no_panic!(
+                "flight first progress checkpoint boundaries: newest {CHECKPOINT_RECENT}; total={}",
+                self.recent.written
+            );
+            let skip = self.recent.iter().count().saturating_sub(CHECKPOINT_RECENT);
+            for event in self.recent.iter().skip(skip) {
+                self.print_event(event);
+            }
         }
     }
     fn print_progress(p: &Progress) {
@@ -2076,6 +2093,7 @@ mod tests {
         }
         assert_eq!(recorder.progress.iter().count(), PROGRESS);
         assert_eq!(recorder.progress.written, 40);
+        assert!(recorder.progress_detail_dumped);
         assert!(std::mem::size_of::<Recorder>() < MAX_RECORDER_BYTES);
         let text = Text::from_bytes(b"name\nforged line");
         assert_eq!(format!("{text}"), "name\\x0aforged line");

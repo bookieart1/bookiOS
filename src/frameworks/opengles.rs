@@ -16,6 +16,14 @@ use touchHLE_gl_bindings::gles11::types::GLenum;
 
 use crate::mem::ConstPtr;
 
+const GL_ERROR_CANDIDATES: usize = 32;
+
+#[derive(Clone, Copy, Default)]
+struct GlErrorCandidate {
+    call: &'static str,
+    args: [u32; 4],
+}
+
 pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
     path: "/System/Library/Frameworks/OpenGLES.framework/OpenGLES",
     aliases: &[],
@@ -39,6 +47,11 @@ pub struct State {
     /// corrupted frame can be correlated with the draws that produced it.
     input_draw_diagnostic_remaining: u8,
     input_draw_diagnostic_emitted: u8,
+    /// Fixed-size history of guest calls that can create or expose an
+    /// incomplete-framebuffer error. It is only printed when an error is
+    /// observed, so healthy gameplay gets no additional log traffic.
+    gl_error_candidates: [GlErrorCandidate; GL_ERROR_CANDIDATES],
+    gl_error_candidate_written: u64,
 }
 impl State {
     fn current_ctx_for_thread(&mut self, thread: crate::ThreadId) -> &mut Option<crate::objc::id> {
@@ -81,6 +94,57 @@ impl State {
         self.input_draw_diagnostic_remaining -= 1;
         self.input_draw_diagnostic_emitted += 1;
         Some(self.input_draw_diagnostic_emitted)
+    }
+
+    pub(crate) fn note_gl_error_candidate(&mut self, call: &'static str, args: [u32; 4]) {
+        let index = self.gl_error_candidate_written as usize % GL_ERROR_CANDIDATES;
+        self.gl_error_candidates[index] = GlErrorCandidate { call, args };
+        self.gl_error_candidate_written = self.gl_error_candidate_written.saturating_add(1);
+    }
+
+    pub(crate) fn note_gl_error_observation(&mut self, error: GLenum, source: &str) {
+        if error == 0 {
+            self.gl_error_candidate_written = 0;
+            return;
+        }
+        self.log_gl_error_candidates(source, error);
+    }
+
+    pub(crate) fn log_gl_error_candidates(&self, source: &str, error: GLenum) {
+        let count = (self.gl_error_candidate_written as usize).min(GL_ERROR_CANDIDATES);
+        log!(
+            "OpenGL ES bounded error provenance: source={source:?}, error={error:#x}, newest {count} candidate calls"
+        );
+        let start = self.gl_error_candidate_written.saturating_sub(count as u64);
+        for sequence in start..self.gl_error_candidate_written {
+            let candidate = self.gl_error_candidates[sequence as usize % GL_ERROR_CANDIDATES];
+            log!(
+                "OpenGL ES error candidate #{}: {} args={:08x?}",
+                sequence + 1,
+                candidate.call,
+                candidate.args
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gl_error_candidate_history_is_bounded_and_clears_after_a_clean_observation() {
+        let mut state = State::default();
+        for value in 0..(GL_ERROR_CANDIDATES as u32 + 5) {
+            state.note_gl_error_candidate("glDrawArrays", [value, 0, 0, 0]);
+        }
+        assert_eq!(state.gl_error_candidate_written, 37);
+        assert_eq!(
+            state.gl_error_candidates[4].args[0],
+            GL_ERROR_CANDIDATES as u32 + 4
+        );
+        state.note_gl_error_observation(0, "guest glGetError");
+        assert_eq!(state.gl_error_candidate_written, 0);
     }
 }
 

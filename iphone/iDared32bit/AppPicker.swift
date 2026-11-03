@@ -419,7 +419,6 @@ final class PickerModel: ObservableObject {
                 compatibilityOverrides,
                 forKey: appPickerCompatibilityOverridesKey
             )
-            page = 0
             pressedApp = nil
         }
     }

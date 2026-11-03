@@ -81,10 +81,18 @@ unsafe fn load_matrix(gles: &mut dyn GLES, matrix: Matrix<4>) {
     gles.LoadMatrixf(matrix.columns().as_ptr() as *const _);
 }
 
-unsafe fn assert_compositor_gl_clean(gles: &mut dyn GLES, stage: &str, layer: id) {
+unsafe fn assert_compositor_gl_clean(
+    gles: &mut dyn GLES,
+    guest_gl_state: &crate::frameworks::opengles::State,
+    stage: &str,
+    layer: id,
+) {
     let error = gles.GetError();
     let framebuffer_status = gles.CheckFramebufferStatusOES(gles11::FRAMEBUFFER_OES);
     let status_error = gles.GetError();
+    if error != gles11::NO_ERROR || status_error != gles11::NO_ERROR {
+        guest_gl_state.log_gl_error_candidates(stage, error.max(status_error));
+    }
     assert!(
         error == gles11::NO_ERROR
             && status_error == gles11::NO_ERROR
@@ -282,7 +290,12 @@ pub fn recomposite_if_necessary(env: &mut Environment, force: bool) -> Option<In
                 texture,
                 0,
             );
-            assert_compositor_gl_clean(gles.as_mut(), "framebuffer-create", nil);
+            assert_compositor_gl_clean(
+                gles.as_mut(),
+                &env.framework_state.opengles,
+                "framebuffer-create",
+                nil,
+            );
             assert_eq!(
                 gles.CheckFramebufferStatusOES(gles11::FRAMEBUFFER_OES),
                 gles11::FRAMEBUFFER_COMPLETE_OES
@@ -435,7 +448,12 @@ pub fn recomposite_if_necessary(env: &mut Environment, force: bool) -> Option<In
         gles.LoadIdentity();
         gles.BindBuffer(gles11::ARRAY_BUFFER, 0);
         gles.BindBuffer(gles11::ELEMENT_ARRAY_BUFFER, 0);
-        assert_compositor_gl_clean(gles.as_mut(), "frame-cleanup", nil);
+        assert_compositor_gl_clean(
+            gles.as_mut(),
+            &env.framework_state.opengles,
+            "frame-cleanup",
+            nil,
+        );
     }
 
     // Present our rendered frame (bound to TEXTURE_2D). This copies it to the
@@ -515,7 +533,12 @@ unsafe fn composite_layer_recursive(
     let mut gles = window.make_internal_gl_ctx_current();
 
     if diagnostic_layer_checks {
-        assert_compositor_gl_clean(gles.as_mut(), "layer-entry", layer);
+        assert_compositor_gl_clean(
+            gles.as_mut(),
+            &env.framework_state.opengles,
+            "layer-entry",
+            layer,
+        );
     }
 
     let opacity = opacity * host_obj.opacity;
@@ -540,7 +563,12 @@ unsafe fn composite_layer_recursive(
         cumulative_transform
     };
     if diagnostic_layer_checks {
-        assert_compositor_gl_clean(gles.as_mut(), "layer-transform", layer);
+        assert_compositor_gl_clean(
+            gles.as_mut(),
+            &env.framework_state.opengles,
+            "layer-transform",
+            layer,
+        );
     }
 
     // Draw background color, if any
@@ -621,7 +649,12 @@ unsafe fn composite_layer_recursive(
         false
     };
     if diagnostic_layer_checks {
-        assert_compositor_gl_clean(gles.as_mut(), "layer-background", layer);
+        assert_compositor_gl_clean(
+            gles.as_mut(),
+            &env.framework_state.opengles,
+            "layer-background",
+            layer,
+        );
     }
 
     let need_texture = host_obj.presented_pixels.is_some()
@@ -644,7 +677,12 @@ unsafe fn composite_layer_recursive(
         }
     }
     if diagnostic_layer_checks {
-        assert_compositor_gl_clean(gles.as_mut(), "layer-texture-bind", layer);
+        assert_compositor_gl_clean(
+            gles.as_mut(),
+            &env.framework_state.opengles,
+            "layer-texture-bind",
+            layer,
+        );
     }
 
     // Update original layer texture with CAEAGLLayer pixels (slow path), if any
@@ -691,7 +729,12 @@ unsafe fn composite_layer_recursive(
         original_host_obj.gles_texture_contents = host_obj.contents;
     }
     if diagnostic_layer_checks {
-        assert_compositor_gl_clean(gles.as_mut(), "layer-texture-upload", layer);
+        assert_compositor_gl_clean(
+            gles.as_mut(),
+            &env.framework_state.opengles,
+            "layer-texture-upload",
+            layer,
+        );
     }
 
     // Draw texture, if any
@@ -756,7 +799,12 @@ unsafe fn composite_layer_recursive(
         gles.TexCoordPointer(2, gles11::FLOAT, 0, tex_coords.as_ptr() as *const GLvoid);
         gles.Enable(gles11::TEXTURE_2D);
         if diagnostic_layer_checks {
-            assert_compositor_gl_clean(gles.as_mut(), "layer-pre-texture-draw", layer);
+            assert_compositor_gl_clean(
+                gles.as_mut(),
+                &env.framework_state.opengles,
+                "layer-pre-texture-draw",
+                layer,
+            );
         }
         gles.DrawElements(
             gles11::TRIANGLES,
@@ -765,11 +813,21 @@ unsafe fn composite_layer_recursive(
             0 as *const GLvoid,
         );
         if diagnostic_layer_checks {
-            assert_compositor_gl_clean(gles.as_mut(), "layer-post-texture-draw", layer);
+            assert_compositor_gl_clean(
+                gles.as_mut(),
+                &env.framework_state.opengles,
+                "layer-post-texture-draw",
+                layer,
+            );
         }
     }
     if diagnostic_layer_checks {
-        assert_compositor_gl_clean(gles.as_mut(), "post-input-layer-draw", layer);
+        assert_compositor_gl_clean(
+            gles.as_mut(),
+            &env.framework_state.opengles,
+            "post-input-layer-draw",
+            layer,
+        );
     }
     std::mem::drop(gles);
 

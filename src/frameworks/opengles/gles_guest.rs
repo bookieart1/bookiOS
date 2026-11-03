@@ -139,7 +139,7 @@ fn panic_on_gl_errors(gles: &mut dyn GLES) {
 // Generic state manipulation
 fn glGetError(env: &mut Environment) -> GLenum {
     let ignore_gl_errors = env.options.ignore_gl_errors;
-    with_ctx_and_mem(env, |gles, _mem| {
+    let err = with_ctx_and_mem(env, |gles, _mem| {
         let err = unsafe { gles.GetError() };
         if err != 0 {
             if ignore_gl_errors {
@@ -151,7 +151,11 @@ fn glGetError(env: &mut Environment) -> GLenum {
             log!("Warning: glGetError() returned {:#x}", err);
         }
         err
-    })
+    });
+    env.framework_state
+        .opengles
+        .note_gl_error_observation(err, "guest glGetError");
+    err
 }
 fn glEnable(env: &mut Environment, cap: GLenum) {
     with_ctx_and_mem(env, |gles, _mem| {
@@ -829,6 +833,10 @@ unsafe fn log_input_draw_state(
 }
 
 fn glDrawArrays(env: &mut Environment, mode: GLenum, first: GLint, count: GLsizei) {
+    env.framework_state.opengles.note_gl_error_candidate(
+        "glDrawArrays",
+        [mode, first as u32, count as u32, 0],
+    );
     let diagnostic_sample = env
         .framework_state
         .opengles
@@ -849,6 +857,10 @@ fn glDrawElements(
     type_: GLenum,
     indices: ConstVoidPtr,
 ) {
+    env.framework_state.opengles.note_gl_error_candidate(
+        "glDrawElements",
+        [mode, count as u32, type_, indices.to_bits()],
+    );
     let diagnostic_sample = env
         .framework_state
         .opengles
@@ -879,6 +891,9 @@ fn glDrawElements(
 
 // Clearing
 fn glClear(env: &mut Environment, mask: GLbitfield) {
+    env.framework_state
+        .opengles
+        .note_gl_error_candidate("glClear", [mask, 0, 0, 0]);
     with_ctx_and_mem(env, |gles, _mem| unsafe { gles.Clear(mask) });
 }
 fn glClearColor(
@@ -1384,11 +1399,19 @@ fn glIsRenderbufferOES(env: &mut Environment, renderbuffer: GLuint) -> GLboolean
     })
 }
 fn glBindFramebufferOES(env: &mut Environment, target: GLenum, framebuffer: GLuint) {
+    env.framework_state.opengles.note_gl_error_candidate(
+        "glBindFramebufferOES",
+        [target, framebuffer, 0, 0],
+    );
     with_ctx_and_mem(env, |gles, _mem| unsafe {
         gles.BindFramebufferOES(target, framebuffer)
     })
 }
 fn glBindRenderbufferOES(env: &mut Environment, target: GLenum, renderbuffer: GLuint) {
+    env.framework_state.opengles.note_gl_error_candidate(
+        "glBindRenderbufferOES",
+        [target, renderbuffer, 0, 0],
+    );
     with_ctx_and_mem(env, |gles, _mem| unsafe {
         gles.BindRenderbufferOES(target, renderbuffer)
     })
@@ -1403,6 +1426,10 @@ fn glRenderbufferStorageOES(
     // apply scale hack: give the app a larger framebuffer than it asked for
     let factor = env.options.scale_hack.get() as GLsizei;
     let (width, height) = (width * factor, height * factor);
+    env.framework_state.opengles.note_gl_error_candidate(
+        "glRenderbufferStorageOES",
+        [target, internalformat, width as u32, height as u32],
+    );
     with_ctx_and_mem(env, |gles, _mem| unsafe {
         gles.RenderbufferStorageOES(target, internalformat, width, height)
     })
@@ -1433,6 +1460,10 @@ fn glFramebufferRenderbufferOES(
     renderbuffertarget: GLenum,
     renderbuffer: GLuint,
 ) {
+    env.framework_state.opengles.note_gl_error_candidate(
+        "glFramebufferRenderbufferOES",
+        [target, attachment, renderbuffertarget, renderbuffer],
+    );
     with_ctx_and_mem(env, |gles, _mem| unsafe {
         gles.FramebufferRenderbufferOES(target, attachment, renderbuffertarget, renderbuffer)
     })
@@ -1445,6 +1476,10 @@ fn glFramebufferTexture2DOES(
     texture: GLuint,
     level: i32,
 ) {
+    env.framework_state.opengles.note_gl_error_candidate(
+        "glFramebufferTexture2DOES",
+        [target, attachment, textarget, texture],
+    );
     with_ctx_and_mem(env, |gles, _mem| unsafe {
         gles.FramebufferTexture2DOES(target, attachment, textarget, texture, level)
     })
