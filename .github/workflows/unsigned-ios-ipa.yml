@@ -16,10 +16,6 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
-  # macOS 15 still defaults to Xcode 16, but its current runner image also
-  # includes Xcode 26.3. Select it explicitly so IPA builds are not dependent
-  # on the much scarcer macOS 26 preview runner pool.
-  DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
   # These are command-line build overrides only. The Xcode project keeps its
   # original App Store identity, while this development IPA installs beside it.
   DEV_BUNDLE_ID: com.bookieart1.idared32bit.dev
@@ -28,9 +24,10 @@ env:
 jobs:
   build-unsigned-ipa:
     name: Build unsigned IPA on macOS
-    # The app uses SwiftUI APIs from the iOS 26 SDK. Xcode 26.3 is selected
-    # explicitly above rather than relying on the runner's default Xcode 16.
-    runs-on: macos-15
+    # The app uses SwiftUI APIs from the iOS 26 SDK. The macOS 15 pool cancelled
+    # the queued Dev 2.06 job without assigning a runner, so use the previously
+    # verified macOS 26 image whose default Xcode supplies that SDK.
+    runs-on: macos-26
     timeout-minutes: 60
 
     steps:
