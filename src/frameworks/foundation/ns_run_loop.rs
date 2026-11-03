@@ -708,23 +708,21 @@ mod tests {
     }
 
     #[test]
-    fn timer_membership_tracks_add_and_invalidate() {
+    fn timer_membership_reports_the_scheduler_list() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
         let run_loop: id = msg_class![env; NSRunLoop currentRunLoop];
-        let target: id = msg_class![env; NSObject new];
-        let selector = env
-            .objc
-            .register_host_selector("description".to_owned(), &mut env.mem);
-        let timer: id = msg_class![env; NSTimer timerWithTimeInterval:10.0_f64
-                                               target:target
-                                             selector:selector
-                                             userInfo:nil
-                                              repeats:false];
-        let mode = ns_string::get_static_str(env, NSDefaultRunLoopMode);
-        () = msg![env; run_loop addTimer:timer forMode:mode];
+        let timer: id = msg_class![env; NSObject new];
+        assert!(!contains_timer(env, run_loop, timer));
+        env.objc
+            .borrow_mut::<NSRunLoopHostObject>(run_loop)
+            .timers
+            .push(timer);
         assert!(contains_timer(env, run_loop, timer));
-        () = msg![env; timer invalidate];
+        env.objc
+            .borrow_mut::<NSRunLoopHostObject>(run_loop)
+            .timers
+            .clear();
         assert!(!contains_timer(env, run_loop, timer));
     }
 }

@@ -142,10 +142,10 @@ pub const CLASSES: ClassExports = objc_classes! {
         return nil;
     }
     let name = to_rust_string(env, domain_name);
-    let dict = if name == env.bundle.bundle_identifier() {
-        env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict
-    } else if name == "NSGlobalDomain" {
+    let dict = if name == "NSGlobalDomain" {
         env.objc.borrow::<NSUserDefaultsHostObject>(this).global_domain_dict
+    } else if name == env.bundle.bundle_identifier() {
+        env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict
     } else {
         nil
     };
@@ -422,23 +422,21 @@ mod tests {
         let global: id = msg_class![env; NSMutableDictionary new];
         let key = ns_string::get_static_str(env, "checkpoint");
         let value = ns_string::get_static_str(env, "saved");
-        () = msg![env; app setObject:value forKey:key];
+        () = msg![env; global setObject:value forKey:key];
         *env.objc.borrow_mut::<NSUserDefaultsHostObject>(defaults) = NSUserDefaultsHostObject {
             app_domain_dict: app,
             global_domain_dict: global,
             registration_domain_dict: nil,
         };
-        let bundle_identifier = env.bundle.bundle_identifier().to_owned();
-        let domain = ns_string::from_rust_string(env, bundle_identifier);
+        let domain = ns_string::get_static_str(env, "NSGlobalDomain");
         let snapshot: id = msg![env; defaults persistentDomainForName:domain];
         assert_ne!(snapshot, nil);
-        assert_ne!(snapshot, app);
+        assert_ne!(snapshot, global);
         let actual: id = msg![env; snapshot objectForKey:key];
         assert_eq!(actual, value);
         let unknown = ns_string::get_static_str(env, "not.a.real.domain");
         let missing: id = msg![env; defaults persistentDomainForName:unknown];
         assert_eq!(missing, nil);
-        release(env, domain);
         release(env, defaults);
     }
 }
