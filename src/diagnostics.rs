@@ -1447,11 +1447,12 @@ impl Environment {
                             };
                             echo_no_panic!(
                                 concat!(
-                                    "flight value producer hint address={address:#010x} ",
+                                    "flight value producer hint address={:#010x} ",
                                     "sequence={} kind={} name={} receiver={:#010x} ",
                                     "class={} pc={:#010x} lr={:#010x}; bounded ",
                                     "boundary correlation, not proof of allocation origin"
                                 ),
+                                address,
                                 event.sequence,
                                 event.call.kind,
                                 event.call.name,
