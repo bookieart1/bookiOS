@@ -5,13 +5,14 @@
  */
 //! `UITableView`.
 //!
-//! This currently models table geometry and scrolling, but not cell rendering.
+//! This models the historical data-source-driven table contract used by early
+//! iPhone applications. Cell reuse and decorations remain intentionally basic.
 
 use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect, CGSize};
 use crate::frameworks::foundation::NSInteger;
 use crate::objc::{
-    id, impl_HostObject_with_superclass, msg, nil, objc_classes, todo_objc_setter, ClassExports,
-    NSZonePtr,
+    id, impl_HostObject_with_superclass, msg, msg_class, nil, objc_classes, todo_objc_setter,
+    ClassExports, NSZonePtr, SEL,
 };
 
 type UITableViewStyle = NSInteger;
@@ -23,6 +24,22 @@ const UITableViewScrollPositionTop: UITableViewScrollPosition = 1;
 const UITableViewScrollPositionMiddle: UITableViewScrollPosition = 2;
 const UITableViewScrollPositionBottom: UITableViewScrollPosition = 3;
 
+fn index_path_for_flat_row(
+    section_row_counts: &[NSInteger],
+    mut flat_row: NSInteger,
+) -> Option<(NSInteger, NSInteger)> {
+    if flat_row < 0 {
+        return None;
+    }
+    for (section, row_count) in section_row_counts.iter().copied().enumerate() {
+        if flat_row < row_count {
+            return Some((section as NSInteger, flat_row));
+        }
+        flat_row -= row_count;
+    }
+    None
+}
+
 pub struct UITableViewHostObject {
     superclass: super::UIScrollViewHostObject,
     /// UITableViewDataSource, weak reference
@@ -30,6 +47,8 @@ pub struct UITableViewHostObject {
     style: UITableViewStyle,
     row_height: CGFloat,
     section_row_counts: Vec<NSInteger>,
+    allows_selection: bool,
+    visible_cells: Vec<id>,
 }
 impl_HostObject_with_superclass!(UITableViewHostObject);
 impl Default for UITableViewHostObject {
@@ -40,6 +59,8 @@ impl Default for UITableViewHostObject {
             style: UITableViewStylePlain,
             row_height: 44.0,
             section_row_counts: Vec::new(),
+            allows_selection: true,
+            visible_cells: Vec::new(),
         }
     }
 }
@@ -92,7 +113,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     todo_objc_setter!(this, height);
 }
 - (())setAllowsSelection:(bool)allows {
-    todo_objc_setter!(this, allows);
+    env.objc.borrow_mut::<UITableViewHostObject>(this).allows_selection = allows;
+}
+- (bool)allowsSelection {
+    env.objc.borrow::<UITableViewHostObject>(this).allows_selection
 }
 - (())setTableHeaderView:(id)view {
     todo_objc_setter!(this, view);
@@ -104,6 +128,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     todo_objc_setter!(this, view);
 }
 - (())reloadData {
+    let old_cells = std::mem::take(
+        &mut env.objc.borrow_mut::<UITableViewHostObject>(this).visible_cells,
+    );
+    for cell in old_cells {
+        () = msg![env; cell removeFromSuperview];
+    }
     let data_source = env.objc.borrow::<UITableViewHostObject>(this).data_source;
     let mut section_row_counts = Vec::new();
     if data_source != nil {
@@ -134,13 +164,46 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     let row_height = env.objc.borrow::<UITableViewHostObject>(this).row_height;
     let total_rows: NSInteger = section_row_counts.iter().copied().sum();
-    env.objc.borrow_mut::<UITableViewHostObject>(this).section_row_counts = section_row_counts;
     let bounds: CGRect = msg![env; this bounds];
     let size = CGSize {
         width: bounds.size.width,
         height: total_rows as CGFloat * row_height,
     };
     () = msg![env; this setContentSize:size];
+
+    // Older applications often construct their entire short menu table in one
+    // pass. Ask the data source for those cells and install them as ordinary
+    // subviews. Bound the eager implementation so a very large data set cannot
+    // turn this partial contract into unbounded work; later cell reuse can lift
+    // this limit without changing the data-source semantics.
+    let mut cells = Vec::new();
+    let mut flat_row: NSInteger = 0;
+    const MAX_EAGER_CELLS: usize = 512;
+    'sections: for (section, row_count) in section_row_counts.iter().copied().enumerate() {
+        for row in 0..row_count {
+            if cells.len() == MAX_EAGER_CELLS {
+                log!("UITableView {:?}: bounded eager cell limit reached", this);
+                break 'sections;
+            }
+            let index_path: id =
+                msg_class![env; NSIndexPath indexPathForRow:row inSection:section as NSInteger];
+            let cell: id = msg![env; data_source tableView:this cellForRowAtIndexPath:index_path];
+            assert_ne!(cell, nil, "UITableView data source returned a nil cell");
+            let frame = CGRect {
+                origin: CGPoint { x: 0.0, y: flat_row as CGFloat * row_height },
+                size: CGSize { width: bounds.size.width, height: row_height },
+            };
+            () = msg![env; cell setFrame:frame];
+            () = msg![env; this addSubview:cell];
+            cells.push(cell);
+            flat_row += 1;
+        }
+    }
+    {
+        let host = env.objc.borrow_mut::<UITableViewHostObject>(this);
+        host.section_row_counts = section_row_counts;
+        host.visible_cells = cells;
+    }
     log_dbg!(
         "[(UITableView*) {:?} reloadData] laid out {} uniform rows",
         this,
@@ -212,9 +275,60 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 }
 - (())deselectRowAtIndexPath:(id)_index_path animated:(bool)_animated {
-    // No row can be selected.
+    // Selection highlighting is not rendered yet.
+}
+
+- (())touchesEnded:(id)touches withEvent:(id)_event {
+    let (allows_selection, was_dragging, offset, counts, row_height) = {
+        let host = env.objc.borrow::<UITableViewHostObject>(this);
+        (
+            host.allows_selection,
+            host.superclass.dragging,
+            host.superclass.content_offset,
+            host.section_row_counts.clone(),
+            host.row_height,
+        )
+    };
+    env.objc.borrow_mut::<UITableViewHostObject>(this).superclass.dragging = false;
+    if !allows_selection || was_dragging || counts.is_empty() {
+        return;
+    }
+    let touch: id = msg![env; touches anyObject];
+    let point: CGPoint = msg![env; touch locationInView:this];
+    let flat = ((point.y + offset.y) / row_height).floor() as NSInteger;
+    let selected = index_path_for_flat_row(&counts, flat);
+    let Some((section, row)) = selected else {
+        return;
+    };
+    let index_path: id = msg_class![env; NSIndexPath indexPathForRow:row inSection:section];
+    let delegate: id = msg![env; this delegate];
+    if delegate != nil {
+        let selector: SEL = env.objc.register_host_selector(
+            "tableView:didSelectRowAtIndexPath:".to_string(), &mut env.mem,
+        );
+        let responds: bool = msg![env; delegate respondsToSelector:selector];
+        if responds {
+            () = msg![env; delegate tableView:this didSelectRowAtIndexPath:index_path];
+        }
+    }
 }
 
 @end
 
 };
+
+#[cfg(test)]
+mod tests {
+    use super::index_path_for_flat_row;
+
+    #[test]
+    fn maps_flat_rows_across_sections_and_rejects_out_of_range_rows() {
+        let rows = [2, 0, 3];
+        assert_eq!(index_path_for_flat_row(&rows, -1), None);
+        assert_eq!(index_path_for_flat_row(&rows, 0), Some((0, 0)));
+        assert_eq!(index_path_for_flat_row(&rows, 1), Some((0, 1)));
+        assert_eq!(index_path_for_flat_row(&rows, 2), Some((2, 0)));
+        assert_eq!(index_path_for_flat_row(&rows, 4), Some((2, 2)));
+        assert_eq!(index_path_for_flat_row(&rows, 5), None);
+    }
+}

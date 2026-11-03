@@ -45,6 +45,7 @@ struct PickerInput: Decodable {
     let initialQuickOptionValues: [Int]?
     let branding: String
     let shortVersionText: String
+    let devVersionText: String
     let copyright: String
     let fileManagerURL: String?
     let websiteURL: String
@@ -1157,13 +1158,17 @@ struct Header: View {
         ZStack(alignment: .topLeading) {
             model.headerColor.color
                 .place(layout.header)
-            Text("v" + model.input.shortVersionText)
-                .font(.system(size: 17, weight: .semibold))
+            VStack(alignment: .leading, spacing: 0) {
+                Text("v" + model.input.shortVersionText)
+                    .font(.system(size: 15, weight: .semibold))
+                Text(model.input.devVersionText)
+                    .font(.system(size: 10, weight: .medium))
+            }
                 .foregroundColor(model.headerTextColor.color)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .place(CGRect(x: 16, y: content.minY, width: 60, height: content.height))
+                .place(CGRect(x: 16, y: content.minY, width: 66, height: content.height))
             // The logo, or the name, is centred, clear of the version and
             // the About button.
             let logoFrame = CGRect(

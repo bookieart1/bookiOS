@@ -10,6 +10,7 @@ use crate::export_c_func;
 use crate::libc::sys::socket::{sockaddr, AF_INET, SOCK_DGRAM, SOCK_STREAM};
 use crate::mem::{guest_size_of, ConstPtr, MutPtr, Ptr, SafeRead};
 use crate::Environment;
+use std::net::Ipv4Addr;
 
 const AI_PASSIVE: i32 = 0x1;
 
@@ -21,9 +22,29 @@ const EAI_FAIL: i32 = 4;
 #[allow(non_camel_case_types)]
 pub type socklen_t = u32;
 
-// TODO: struct definition
+/// Darwin's 32-bit `struct hostent`. `gethostbyname()` returns a pointer to
+/// process-owned static storage whose contents may be replaced by a later
+/// call.
+#[derive(Copy, Clone, Debug)]
+#[repr(C, packed)]
 #[allow(non_camel_case_types)]
-struct hostent {}
+struct hostent {
+    h_name: MutPtr<u8>,
+    h_aliases: MutPtr<MutPtr<u8>>,
+    h_addrtype: i32,
+    h_length: i32,
+    h_addr_list: MutPtr<MutPtr<u8>>,
+}
+unsafe impl SafeRead for hostent {}
+
+#[derive(Default)]
+pub struct State {
+    hostent: Option<MutPtr<hostent>>,
+    name: Option<MutPtr<u8>>,
+    aliases: Option<MutPtr<MutPtr<u8>>>,
+    address: Option<MutPtr<u8>>,
+    address_list: Option<MutPtr<MutPtr<u8>>>,
+}
 
 #[derive(Copy, Clone, Debug)]
 #[repr(C, packed)]
@@ -100,13 +121,74 @@ fn freeaddrinfo(env: &mut Environment, addrinfo: MutPtr<addrinfo>) {
 }
 
 fn gethostbyname(env: &mut Environment, name: ConstPtr<u8>) -> MutPtr<hostent> {
-    log!(
-        "TODO: gethostbyname({:?} \"{}\") => NULL",
-        name,
-        env.mem.cstr_at_utf8(name).unwrap()
-    );
-    // TODO: set h_errno
-    Ptr::null()
+    let name_text = env.mem.cstr_at_utf8(name).unwrap().to_owned();
+    let Ok(address) = name_text.parse::<Ipv4Addr>() else {
+        log!(
+            "TODO: gethostbyname({:?} {:?}) for a hostname requires DNS => NULL",
+            name,
+            name_text
+        );
+        // TODO: set h_errno once its guest storage is implemented.
+        return Ptr::null();
+    };
+
+    // Numeric IPv4 literals are resolved locally by historical BSD/Darwin
+    // gethostbyname(). This does not perform DNS and does not grant network
+    // access: a later connect/send still follows the emulator's offline rules.
+    if env.libc_state.netdb.name.is_none() {
+        env.libc_state.netdb.name = Some(env.mem.alloc(16).cast());
+    }
+    let name_buffer = env.libc_state.netdb.name.unwrap();
+    let name_bytes = name_text.as_bytes();
+    assert!(name_bytes.len() < 16);
+    env.mem
+        .bytes_at_mut(name_buffer, name_bytes.len().try_into().unwrap())
+        .copy_from_slice(name_bytes);
+    env.mem.write(name_buffer + name_bytes.len() as u32, b'\0');
+
+    if env.libc_state.netdb.address.is_none() {
+        env.libc_state.netdb.address = Some(env.mem.alloc(4).cast());
+    }
+    let address_buffer = env.libc_state.netdb.address.unwrap();
+    env.mem
+        .bytes_at_mut(address_buffer, 4)
+        .copy_from_slice(&address.octets());
+
+    if env.libc_state.netdb.aliases.is_none() {
+        let aliases = env.mem.alloc(guest_size_of::<MutPtr<u8>>()).cast();
+        env.mem.write(aliases, MutPtr::<u8>::null());
+        env.libc_state.netdb.aliases = Some(aliases);
+    }
+    let aliases = env.libc_state.netdb.aliases.unwrap();
+    if env.libc_state.netdb.address_list.is_none() {
+        let address_list = env
+            .mem
+            .alloc(guest_size_of::<MutPtr<u8>>() * 2)
+            .cast();
+        env.mem.write(address_list, address_buffer);
+        env.mem
+            .write(address_list + 1, MutPtr::<u8>::null());
+        env.libc_state.netdb.address_list = Some(address_list);
+    }
+    let address_list = env.libc_state.netdb.address_list.unwrap();
+    // The address buffer itself is stable, but rewrite the first pointer in
+    // case this state was initialized by a future alternate path.
+    env.mem.write(address_list, address_buffer);
+
+    let value = hostent {
+        h_name: name_buffer,
+        h_aliases: aliases,
+        h_addrtype: AF_INET,
+        h_length: 4,
+        h_addr_list: address_list,
+    };
+    if env.libc_state.netdb.hostent.is_none() {
+        env.libc_state.netdb.hostent = Some(env.mem.alloc_and_write(value));
+    }
+    let result = env.libc_state.netdb.hostent.unwrap();
+    env.mem.write(result, value);
+    log_dbg!("gethostbyname({:?}) => {:?} ({})", name_text, result, address);
+    result
 }
 
 fn gethostent(_env: &mut Environment) -> MutPtr<hostent> {
@@ -121,3 +203,43 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(gethostbyname(_)),
     export_c_func!(gethostent()),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gethostbyname_resolves_numeric_ipv4_without_network_access() {
+        let mut env = Environment::new_fake_for_test();
+        assert!(!env.options.network_access);
+        let name = env.mem.alloc_and_write_cstr(b"218.145.70.37");
+        let result = gethostbyname(&mut env, name.cast_const());
+        assert!(!result.is_null());
+        let host = env.mem.read(result);
+        let address_type = host.h_addrtype;
+        let address_length = host.h_length;
+        let host_name = host.h_name;
+        let host_address_list = host.h_addr_list;
+        let host_aliases = host.h_aliases;
+        assert_eq!(address_type, AF_INET);
+        assert_eq!(address_length, 4);
+        assert_eq!(
+            env.mem.cstr_at_utf8(host_name.cast_const()),
+            Ok("218.145.70.37")
+        );
+        let first_address = env.mem.read(host_address_list);
+        assert_eq!(
+            env.mem.bytes_at(first_address.cast_const(), 4),
+            &[218, 145, 70, 37]
+        );
+        assert!(env.mem.read(host_address_list + 1).is_null());
+        assert!(env.mem.read(host_aliases).is_null());
+    }
+
+    #[test]
+    fn gethostbyname_does_not_fabricate_dns() {
+        let mut env = Environment::new_fake_for_test();
+        let name = env.mem.alloc_and_write_cstr(b"example.invalid");
+        assert!(gethostbyname(&mut env, name.cast_const()).is_null());
+    }
+}

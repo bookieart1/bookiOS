@@ -262,18 +262,74 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())makeObjectsPerformSelector:(SEL)sel {
     let count: NSUInteger = msg![env; this count];
+    env.diagnostic_array_event("perform-begin", this.to_bits(), 0, 0, count, count);
     for idx in 0..count {
         let obj: id = msg![env; this objectAtIndex:idx];
+        let before: NSUInteger = msg![env; this count];
+        env.diagnostic_array_event(
+            "perform-callback",
+            this.to_bits(),
+            idx,
+            obj.to_bits(),
+            before,
+            before,
+        );
         let _: id = msg![env; obj performSelector:sel];
+        let after: NSUInteger = msg![env; this count];
+        env.diagnostic_array_event(
+            "perform-return",
+            this.to_bits(),
+            idx,
+            obj.to_bits(),
+            before,
+            after,
+        );
     }
+    let after: NSUInteger = msg![env; this count];
+    env.diagnostic_array_event("perform-end", this.to_bits(), count, 0, count, after);
 }
 
 - (())makeObjectsPerformSelector:(SEL)sel withObject:(id)object {
     let count: NSUInteger = msg![env; this count];
+    env.diagnostic_array_event(
+        "perform-object-begin",
+        this.to_bits(),
+        0,
+        object.to_bits(),
+        count,
+        count,
+    );
     for idx in 0..count {
         let obj: id = msg![env; this objectAtIndex:idx];
+        let before: NSUInteger = msg![env; this count];
+        env.diagnostic_array_event(
+            "perform-object-callback",
+            this.to_bits(),
+            idx,
+            obj.to_bits(),
+            before,
+            before,
+        );
         let _: id = msg![env; obj performSelector:sel withObject:object];
+        let after: NSUInteger = msg![env; this count];
+        env.diagnostic_array_event(
+            "perform-object-return",
+            this.to_bits(),
+            idx,
+            obj.to_bits(),
+            before,
+            after,
+        );
     }
+    let after: NSUInteger = msg![env; this count];
+    env.diagnostic_array_event(
+        "perform-object-end",
+        this.to_bits(),
+        count,
+        object.to_bits(),
+        count,
+        after,
+    );
 }
 
 - (NSUInteger)hash {

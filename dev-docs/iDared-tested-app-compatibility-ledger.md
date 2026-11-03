@@ -3981,3 +3981,23 @@ property-list dictionary mutability/origin evidence respectively. No invalid
 receiver, null memory, missing resource, immutable collection, network result,
 or CF ownership rule is relaxed. Full record and predictions:
 `dev-docs/compatibility-2.02-protocol-widechar-null-init-and-causal-origins.md`.
+# Dev 2.17 final expanded IPA-evidence candidate — 2026-11-03
+
+- The reviewed Dev 2.17 implementation at `0a9144d8` remains the base. The
+  final candidate adds numeric-IPv4 `gethostbyname` semantics for ADVENA and
+  ZENONIA 2, bounded data-source-driven UITableView cells/selection for Bungee
+  Ball, richer post-input GLES array-source evidence for Flip's Escape, and
+  per-callback array mutation provenance for Trenches VS.
+- Decoloro, Parachute Ninja, Peggle, Splode and Toy Bot 2 are diagnostic-only
+  tests using bounded or permanent existing evidence streams; no result or
+  invalid object is fabricated. B'Blast, SUPERFALL and Tiki Totems 2 retain the
+  bounded diagnostics from the earlier Dev 2.17 work.
+- EPOCH, JellyCar 3, Junny, Ragdoll 3, Rolando, Topple 2, Unmechanical and
+  Wind-Up Knight retain their documented general/partial contracts. Spoing is
+  the only regression control.
+- Hook World, Legendary War, Slingshot Racing and Mage Gauntlet are explicitly
+  omitted because this candidate contains no safe attributable change for
+  them. See `compatibility-2.17-expanded-ipa-evidence-build.md`.
+- The app-picker header now shows `Dev 2.17`, and this meaningful test batch is
+  placed before the alphabetized remainder. Physical-device status is pending
+  a verified hosted artifact.

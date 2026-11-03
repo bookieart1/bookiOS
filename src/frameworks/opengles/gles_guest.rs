@@ -804,9 +804,27 @@ unsafe fn log_input_draw_state(
     gles.GetIntegerv(gles11::MATRIX_MODE, &mut matrix_mode);
     let blend = gles.IsEnabled(gles11::BLEND);
     let texture_2d = gles.IsEnabled(gles11::TEXTURE_2D);
+    let vertex_enabled = gles.IsEnabled(gles11::VERTEX_ARRAY);
+    let texcoord_enabled = gles.IsEnabled(gles11::TEXTURE_COORD_ARRAY);
+    let mut vertex = [0; 3];
+    let mut texcoord = [0; 3];
+    let mut vertex_buffer = 0;
+    let mut texcoord_buffer = 0;
+    let mut vertex_pointer = std::ptr::null();
+    let mut texcoord_pointer = std::ptr::null();
+    gles.GetIntegerv(gles11::VERTEX_ARRAY_SIZE, &mut vertex[0]);
+    gles.GetIntegerv(gles11::VERTEX_ARRAY_TYPE, &mut vertex[1]);
+    gles.GetIntegerv(gles11::VERTEX_ARRAY_STRIDE, &mut vertex[2]);
+    gles.GetIntegerv(gles11::VERTEX_ARRAY_BUFFER_BINDING, &mut vertex_buffer);
+    gles.GetPointerv(gles11::VERTEX_ARRAY_POINTER, &mut vertex_pointer);
+    gles.GetIntegerv(gles11::TEXTURE_COORD_ARRAY_SIZE, &mut texcoord[0]);
+    gles.GetIntegerv(gles11::TEXTURE_COORD_ARRAY_TYPE, &mut texcoord[1]);
+    gles.GetIntegerv(gles11::TEXTURE_COORD_ARRAY_STRIDE, &mut texcoord[2]);
+    gles.GetIntegerv(gles11::TEXTURE_COORD_ARRAY_BUFFER_BINDING, &mut texcoord_buffer);
+    gles.GetPointerv(gles11::TEXTURE_COORD_ARRAY_POINTER, &mut texcoord_pointer);
     log!(
-        "OpenGL ES bounded draw snapshot #{sample}: {call}, mode {mode:#x}, count {count}, detail {detail:#x}, viewport {:?}, active/client texture {active_texture:#x}/{client_active_texture:#x}, texture {texture_binding}, array/element buffers {array_buffer}/{element_buffer}, matrix {matrix_mode:#x}, blend {blend}, texture2D {texture_2d}",
-        viewport
+        "OpenGL ES bounded draw snapshot #{sample}: {call}, mode {mode:#x}, count {count}, detail {detail:#x}, viewport {:?}, active/client texture {active_texture:#x}/{client_active_texture:#x}, texture {texture_binding}, array/element buffers {array_buffer}/{element_buffer}, matrix {matrix_mode:#x}, blend {blend}, texture2D {texture_2d}, vertex=[enabled={vertex_enabled},buffer={vertex_buffer},size={},type={:#x},stride={},pointer={vertex_pointer:?}], texcoord=[enabled={texcoord_enabled},buffer={texcoord_buffer},size={},type={:#x},stride={},pointer={texcoord_pointer:?}]",
+        viewport, vertex[0], vertex[1], vertex[2], texcoord[0], texcoord[1], texcoord[2]
     );
 }
 

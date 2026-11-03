@@ -138,6 +138,7 @@ pub struct State {
     dlfcn: dlfcn::State,
     keymgr: keymgr::State,
     math: math::State,
+    netdb: netdb::State,
     posix_io: posix_io::State,
     signal: signal::State,
     pub pthread: pthread::State,
