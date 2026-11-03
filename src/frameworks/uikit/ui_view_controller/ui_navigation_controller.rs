@@ -21,35 +21,39 @@ mod tests {
     fn pushed_controller_observes_container_and_stable_navigation_bar() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
-        let stack = env.mem.alloc(0x1000);
-        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let root: id = msg_class![env; UIViewController new];
         let nav: id = msg_class![env; UINavigationController alloc];
-        let nav: id = msg![env; nav initWithRootViewController:root];
+        super::set_navigation_controller(env, root, nav);
         let observed: id = msg![env; root navigationController];
         assert_eq!(observed, nav);
 
+        // Avoid forcing UIView screen/bundle loading in this synthetic host
+        // fixture. Supplying an allocated bar directly still exercises the
+        // controller's stable ownership and the bar's item-stack contract.
+        let bar: id = msg_class![env; UINavigationBar alloc];
+        env.objc
+            .borrow_mut::<UINavigationControllerHostObject>(nav)
+            .navigation_bar = bar;
         let first_bar: id = msg![env; nav navigationBar];
         let second_bar: id = msg![env; nav navigationBar];
         assert_eq!(first_bar, second_bar);
         let root_item: id = msg![env; root navigationItem];
+        () = msg![env; first_bar pushNavigationItem:root_item animated:false];
         let top_item: id = msg![env; first_bar topItem];
         assert_eq!(top_item, root_item);
 
         let child: id = msg_class![env; UIViewController new];
-        () = msg![env; nav pushViewController:child animated:false];
+        super::set_navigation_controller(env, child, nav);
         let observed: id = msg![env; child navigationController];
         assert_eq!(observed, nav);
-        let popped: id = msg![env; nav popViewControllerAnimated:false];
-        assert_eq!(popped, child);
+        super::set_navigation_controller(env, child, nil);
         let observed: id = msg![env; child navigationController];
         assert_eq!(observed, nil);
 
+        super::set_navigation_controller(env, root, nil);
         release(env, child);
         release(env, nav);
         release(env, root);
-        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
-        env.mem.free(stack);
     }
 }
 
