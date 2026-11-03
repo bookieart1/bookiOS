@@ -64,7 +64,8 @@ fn CFReadStreamRead(
         return -1;
     }
     let buffer: MutVoidPtr = buffer.cast();
-    msg![env; stream read:buffer maxLength:buffer_length as NSUInteger]
+    let max_length = buffer_length as NSUInteger;
+    msg![env; stream read:buffer maxLength:max_length]
 }
 
 fn CFReadStreamHasBytesAvailable(env: &mut Environment, stream: CFReadStreamRef) -> bool {
