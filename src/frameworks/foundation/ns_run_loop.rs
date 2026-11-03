@@ -327,11 +327,12 @@ pub(super) fn add_perform_request(
         "Adding object selector request {target:?} {:?} {argument:?} on run loop {run_loop:?}",
         selector.as_str(env.mem.as_mut())
     );
+    let selector_name = selector.as_str(&env.mem).to_owned();
     env.diagnostic_selector_event(
         "scheduled",
         run_loop,
         target,
-        selector.as_str(&env.mem),
+        &selector_name,
         argument,
         delay,
     );
@@ -586,11 +587,12 @@ pub fn run_run_loop(
                         semaphore,
                     } = selector_objects.remove(index).unwrap();
                     log_dbg!("Running object selector request {target:?} {:?} {argument:?} on run loop {run_loop:?}", selector.as_str(env.mem.as_mut()));
+                    let selector_name = selector.as_str(&env.mem).to_owned();
                     env.diagnostic_selector_event(
                         "delivered",
                         run_loop,
                         target,
-                        selector.as_str(&env.mem),
+                        &selector_name,
                         argument,
                         None,
                     );

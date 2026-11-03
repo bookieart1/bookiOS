@@ -261,7 +261,8 @@ pub struct Mem {
     /// A few games set this to `false` via a game-specific hack. See
     /// [crate::Environment] for more info.
     pub(super) zero_memory_on_free: bool,
-    /// Diagnostic copies only; never consulted to allow or reject memory access.
+    /// Diagnostic copies only; never consulted to allow or reject memory
+    /// access.
     pub(crate) object_history: Option<Box<object_history::ObjectHistory>>,
 }
 

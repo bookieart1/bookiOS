@@ -290,7 +290,8 @@ impl ObjectHistory {
         }
     }
 
-    /// Rare VM teardown: bounded scan, including records inside the freed range.
+    /// Rare VM teardown: bounded scan, including records inside the freed
+    /// range.
     pub fn vm_freed(&mut self, address: u32, size: u32) {
         self.heap_event(address, size, "vm-free-range");
         let end = u64::from(address) + u64::from(size);

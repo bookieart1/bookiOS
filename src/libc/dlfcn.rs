@@ -58,7 +58,8 @@ fn dlsym(env: &mut Environment, handle: MutVoidPtr, symbol: ConstPtr<u8>) -> Mut
     // RTLD_DEFAULT searches the process-wide symbol scope. That includes the
     // main executable and its loaded guest dylibs, not only the iPhone OS
     // functions implemented by touchHLE. Older Unity players use this path for
-    // native functions exported by their own executable (via __Internal P/Invoke).
+    // native functions exported by their own executable (via __Internal
+    // P/Invoke).
     // The Mach-O loader has already applied the image slide and preserved the
     // Thumb bit in exported_symbols, so the address can be returned directly.
     if handle == RTLD_DEFAULT {
