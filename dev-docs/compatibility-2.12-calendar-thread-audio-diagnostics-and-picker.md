@@ -85,3 +85,29 @@ picker classification. Following the workstation-safety instruction, no local
 Rust, Cargo, CMake, preflight, or build helper is run. Hosted macOS/Windows
 tests and the hosted unsigned iOS archive are the compilation gates. Skipped
 and allowed-to-fail steps remain separate from actual passes.
+
+## Hosted validation and delivered package
+
+The implementation is `33508cbf20b7243d5bb6771bf2411f669764ab2c` (the
+preceding `9d4ed4cc` commit had only a compile-time diagnostic format-string
+error; no contract changed in the correction).
+
+- Test run [41591043189](https://github.com/bookieart1/iDared32bit/actions/runs/41591043189)
+  passed the native Foundation reference, lint, and **222/222 library tests**
+  on both macOS and Windows. macOS also passed three focused diagnostic
+  reproducer invocations. Android failed while installing NDK r28c before its
+  lint step. Formatting, the full guest-executable suite, and native sanity
+  were branch-gated/skipped and are not claimed as passes.
+- IPA run [41591043208](https://github.com/bookieart1/iDared32bit/actions/runs/41591043208)
+  compiled and packaged the arm64 iOS app successfully.
+- The verified IPA is 20,219,652 bytes, SHA-256
+  `8b5c6f9071f8b1e3e574c8d4ed466e0596ca42afbb7f1dff9538f1c66b091a08`.
+  It embeds the implementation commit/workflow, uses
+  `com.bookieart1.idared32bit.dev` / `iDared Dev`, targets iOS 16.0, and has
+  no provisioning profile or code-signature load command/directory.
+- The preserved native executable and dSYM UUID is
+  `5C3569AB-5D80-3EE0-A58A-A2AFBFBE0E19` (arm64). The matching archive is only
+  valid for `.ips` reports from this exact package.
+
+Physical-device compatibility and picker acceptance remain pending. Hosted
+compilation does not promote any game to working.
