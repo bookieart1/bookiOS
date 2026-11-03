@@ -21,6 +21,8 @@ mod tests {
     fn pushed_controller_observes_container_and_stable_navigation_bar() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let root: id = msg_class![env; UIViewController new];
         let nav: id = msg_class![env; UINavigationController alloc];
         let nav: id = msg![env; nav initWithRootViewController:root];
@@ -46,6 +48,8 @@ mod tests {
         release(env, child);
         release(env, nav);
         release(env, root);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }
 
