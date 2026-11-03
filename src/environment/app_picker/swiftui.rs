@@ -75,11 +75,12 @@ pub fn app_picker(
         .zip(&icons)
         .map(|(app, icon)| {
             format!(
-                "{{\"name\":{},\"iconWidth\":{},\"iconHeight\":{},\"hasIcon\":{}}}",
+                "{{\"name\":{},\"iconWidth\":{},\"iconHeight\":{},\"hasIcon\":{},\"compatibility\":{}}}",
                 json_string(&app.display_name),
                 icon.dimensions().0,
                 icon.dimensions().1,
                 app.icon.is_some(),
+                json_string(super::picker_compatibility(app)),
             )
         })
         .collect();

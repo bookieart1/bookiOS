@@ -42,6 +42,8 @@ struct NSThreadHostObject {
     /// `NSMutableDictionary*`
     thread_dictionary: id,
     owned: bool,
+    /// The logical retain held by Cocoa from `start` until the thread exits.
+    execution_retained: bool,
     /// Whether `main` has returned, for a thread started by `start`.
     finished: bool,
     /// Set by `cancel`. The thread itself checks this with `isCancelled`.
@@ -50,6 +52,29 @@ struct NSThreadHostObject {
     tolerate_type_mismatch: bool,
 }
 impl HostObject for NSThreadHostObject {}
+
+fn retain_for_execution(env: &mut Environment, thread: id) {
+    assert!(!env
+        .objc
+        .borrow::<NSThreadHostObject>(thread)
+        .execution_retained);
+    retain(env, thread);
+    env.objc
+        .borrow_mut::<NSThreadHostObject>(thread)
+        .execution_retained = true;
+}
+
+fn release_execution_retain(env: &mut Environment, thread: id) {
+    let retained = env
+        .objc
+        .borrow::<NSThreadHostObject>(thread)
+        .execution_retained;
+    assert!(retained);
+    env.objc
+        .borrow_mut::<NSThreadHostObject>(thread)
+        .execution_retained = false;
+    release(env, thread);
+}
 
 fn ns_thread_for_pthread(env: &mut Environment, pthread: pthread_t) -> id {
     if !State::get(env).ns_threads.contains_key(&pthread) {
@@ -74,6 +99,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         object: nil,
         thread_dictionary: nil,
         owned: false,
+        execution_retained: false,
         finished: false,
         cancelled: false,
         stack_size: Mem::SECONDARY_THREAD_DEFAULT_STACK_SIZE,
@@ -173,6 +199,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     pthread_attr_setdetachstate(env, attr, PTHREAD_CREATE_DETACHED);
     let thread_ptr: MutPtr<pthread_t> = env.mem.alloc(guest_size_of::<pthread_t>()).cast();
 
+    // Cocoa keeps the NSThread object alive for the execution lifetime even
+    // when its creator autoreleases its last ordinary ownership immediately
+    // after calling start. The retain is released by finish_ns_thread.
+    retain_for_execution(env, this);
     pthread_create(env, thread_ptr, attr.cast_const(), gf, this.cast());
 
     let pthread = env.mem.read(thread_ptr);
@@ -266,8 +296,19 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())dealloc {
     log_dbg!("[(NSThread*){:?} dealloc]", this);
-    let host_object = env.objc.borrow::<NSThreadHostObject>(this);
-    release(env, host_object.thread_dictionary);
+    let (target, object, thread_dictionary) = {
+        let host_object = env.objc.borrow::<NSThreadHostObject>(this);
+        (
+            host_object.target,
+            host_object.object,
+            host_object.thread_dictionary,
+        )
+    };
+    // A thread that was initialized but never started still owns its target
+    // and argument. finish_ns_thread clears both before releasing them.
+    release(env, target);
+    release(env, object);
+    release(env, thread_dictionary);
     env.objc.dealloc_object(this, &mut env.mem)
 }
 
@@ -309,16 +350,18 @@ pub fn _touchHLE_NSThreadInvocationHelper(env: &mut Environment, ns_thread_obj: 
 /// Tidy up after an `NSThread`'s thread is done, whether its `main` returned
 /// or it called `+[NSThread exit]`. This must be called on that thread.
 fn finish_ns_thread(env: &mut Environment, ns_thread_obj: id) {
-    env.objc
-        .borrow_mut::<NSThreadHostObject>(ns_thread_obj)
-        .finished = true;
-
-    let &NSThreadHostObject {
-        target,
-        object,
-        owned,
-        ..
-    } = env.objc.borrow(ns_thread_obj);
+    let (target, object, owned, execution_retained) = {
+        let host = env
+            .objc
+            .borrow_mut::<NSThreadHostObject>(ns_thread_obj);
+        host.finished = true;
+        let values = (host.target, host.object, host.owned, host.execution_retained);
+        // Transfer these releases out of dealloc so they occur exactly when
+        // execution finishes, as NSThread's contract requires.
+        host.target = nil;
+        host.object = nil;
+        values
+    };
     // The objects target and argument are retained during the execution
     // of the detached thread. They are released when the thread finally exits.
     release(env, object);
@@ -332,6 +375,12 @@ fn finish_ns_thread(env: &mut Environment, ns_thread_obj: id) {
         // Releasing only if the object was owned
         // e.g. created with `detachNewThreadSelector:toTarget:withObject:`
         release(env, ns_thread_obj);
+    }
+    // Do this last: for an ordinary caller-created NSThread this may deallocate
+    // the receiver immediately. A POSIX-created thread can acquire its
+    // NSThread facade lazily and therefore has no execution retain to release.
+    if execution_retained {
+        release_execution_retain(env, ns_thread_obj);
     }
 }
 
@@ -358,4 +407,25 @@ pub fn detach_new_thread_inner(
     env.framework_state.foundation.ns_thread.is_multi_threaded = true;
 
     msg![env; new start]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn execution_lifetime_retain_survives_creator_release() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let thread: id = msg_class![env; NSThread new];
+        // +new gives the caller one ownership; starting contributes a separate
+        // logical execution ownership.
+        retain_for_execution(env, thread);
+        assert_eq!(env.objc.get_refcount(thread).get(), 2);
+        release(env, thread);
+        assert_eq!(env.objc.get_refcount(thread).get(), 1);
+        assert!(env.objc.get_host_object(thread).is_some());
+        release_execution_retain(env, thread);
+        assert!(env.objc.get_host_object(thread).is_none());
+    }
 }

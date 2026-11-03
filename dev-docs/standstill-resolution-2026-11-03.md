@@ -343,3 +343,28 @@ Device acceptance is still pending. No standstill has been promoted to working.
 The next result must identify a useful origin/import or falsify the selected
 theory; merely producing a longer log is not acceptance. Spoing is the one
 working control for this diagnostic-only implementation.
+
+## Dev 2.11 device result and Dev 2.12 resolution pass
+
+The physical Dev 2.11 pass observed no slowdown and validated the bounded
+diagnostic infrastructure as usable, but it covered eight selected standstills,
+not the entire portfolio. It produced three actionable general corrections:
+
+- Crash Drive and Jack Lumber identify `_NSBuddhistCalendar` as their shared
+  zero data import.
+- Peggle identifies a 3D-mixer input-bus stream-format query that the emulator
+  incorrectly forced through bus-zero-only state.
+- Topple 2 proves that a started `NSThread` receiver can be deallocated and its
+  storage reused before the thread entry helper runs.
+
+SUPERFALL and Tiki Totems 2 remained inconclusive because their address records
+were evicted before the final invalid consumption. Dev 2.12 adds only bounded
+correlation from a final consumed value to the most recent retained boundary
+that returned it; it does not enlarge the recorder or trace every store.
+Anomaly HD remains unresolved and receives no speculative ownership change.
+
+The selected contracts, predictions, picker filter, and restored Dev 2.10
+follow-up collection are recorded in
+`dev-docs/compatibility-2.12-calendar-thread-audio-diagnostics-and-picker.md`.
+Hosted validation and physical-device acceptance are pending; none of these
+titles is promoted to working by implementation alone.

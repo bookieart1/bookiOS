@@ -21,6 +21,8 @@ struct PickerInput: Decodable {
         let iconWidth: Int
         let iconHeight: Int
         let hasIcon: Bool
+        /// Picker-only ledger grouping; it never changes guest emulation.
+        let compatibility: String
     }
     /// A choice (`choices` set) or a switch. Values are a choice's index, or
     /// 1 for a switch that's on.
@@ -398,6 +400,27 @@ final class PickerModel: ObservableObject {
     @Published var showingStartError: Bool
     var copyrightPages: [String] = []
 
+    @Published var appFilter = AppFilter.saved {
+        didSet {
+            UserDefaults.standard.set(appFilter.rawValue, forKey: appPickerFilterKey)
+            page = 0
+            pressedApp = nil
+        }
+    }
+
+    var filteredAppIndices: [Int] {
+        input.apps.indices.filter { index in
+            switch appFilter {
+            case .all:
+                return true
+            case .playable:
+                return input.apps[index].compatibility == "playable"
+            case .needsWork:
+                return input.apps[index].compatibility != "playable"
+            }
+        }
+    }
+
     /// The value of each of the quick options.
     @Published var quickOptionValues: [Int]
 
@@ -738,10 +761,38 @@ let logoYellow = Color(red: 253 / 255, green: 224 / 255, blue: 22 / 255)
 
 private let headerColorKey = "AppPickerHeaderColor"
 private let appPickerPageKey = "AppPickerPage"
+private let appPickerFilterKey = "AppPickerFilter"
 private let hideHeaderLogoKey = "AppPickerHideHeaderLogo"
 private let hideIconLabelsKey = "AppPickerHideIconLabels"
 private let footerBackgroundKey = "AppPickerFooterBackground"
 private let headerTextColorKey = "AppPickerHeaderTextColor"
+
+enum AppFilter: String, CaseIterable, Hashable {
+    case all
+    case playable
+    case needsWork
+
+    static var saved: AppFilter {
+        UserDefaults.standard.string(forKey: appPickerFilterKey)
+            .flatMap(AppFilter.init(rawValue:)) ?? .all
+    }
+
+    var title: String {
+        switch self {
+        case .all: return "All Games"
+        case .playable: return "Playable"
+        case .needsWork: return "Needs Work"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .all: return "square.grid.2x2.fill"
+        case .playable: return "checkmark.circle.fill"
+        case .needsWork: return "wrench.and.screwdriver.fill"
+        }
+    }
+}
 
 /// The header text colors to choose from, for the version, name and About.
 enum HeaderTextColor: String, CaseIterable {
@@ -1204,6 +1255,7 @@ struct ActionBar: View {
             item("folder.fill", "File Manager") {
                 model.open(model.input.fileManagerURL)
             }
+            filterItem()
             item("gearshape.fill", "Settings") {
                 model.showingSettings = true
             }
@@ -1227,6 +1279,34 @@ struct ActionBar: View {
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func filterItem() -> some View {
+        Menu {
+            ForEach(AppFilter.allCases, id: \.self) { filter in
+                Button {
+                    model.appFilter = filter
+                } label: {
+                    if model.appFilter == filter {
+                        Label(filter.title, systemImage: "checkmark")
+                    } else {
+                        Label(filter.title, systemImage: filter.symbol)
+                    }
+                }
+            }
+        } label: {
+            VStack(spacing: 4) {
+                Image(systemName: model.appFilter.symbol)
+                    .font(.system(size: 21, weight: .semibold))
+                Text("Games")
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
             }
             .foregroundColor(.white)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1278,8 +1358,12 @@ struct IconGrid: View {
     @State private var dragStart: CGPoint?
     @State private var dragOffset: CGFloat = 0
 
+    private var appIndices: [Int] {
+        model.filteredAppIndices
+    }
+
     private var pageCount: Int {
-        (model.input.apps.count + layout.appsPerPage - 1) / layout.appsPerPage
+        (appIndices.count + layout.appsPerPage - 1) / layout.appsPerPage
     }
 
     private var currentPage: Int {
@@ -1291,7 +1375,7 @@ struct IconGrid: View {
 
     private func pageRange(for page: Int) -> Range<Int> {
         let start = page * layout.appsPerPage
-        return start..<min(start + layout.appsPerPage, model.input.apps.count)
+        return start..<min(start + layout.appsPerPage, appIndices.count)
     }
 
     private var visiblePages: [Int] {
@@ -1309,12 +1393,16 @@ struct IconGrid: View {
         let font = UIFont.systemFont(ofSize: labelFontSize, weight: .medium)
         // Empty slots still count as neighbours, with no name.
         let names = (0..<layout.appsPerPage).map { slot in
-            range.contains(range.lowerBound + slot) ? model.input.apps[range.lowerBound + slot].name : ""
+            let filteredIndex = range.lowerBound + slot
+            return range.contains(filteredIndex)
+                ? model.input.apps[appIndices[filteredIndex]].name
+                : ""
         }
         let labels = layOutLabels(names: names, layout: layout, font: font)
 
         ZStack(alignment: .topLeading) {
-            ForEach(Array(range.enumerated()), id: \.element) { slot, app in
+            ForEach(Array(range.enumerated()), id: \.element) { slot, filteredIndex in
+                let app = appIndices[filteredIndex]
                 let iconFrame = layout.iconFrame(slot: slot)
                 Image(uiImage: model.icons[app])
                     .resizable()
@@ -1343,6 +1431,13 @@ struct IconGrid: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             Color.clear
+            if appIndices.isEmpty {
+                Text("No games in this filter")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.white)
+                    .shadow(color: .black.opacity(0.7), radius: 2, y: 1)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
             ForEach(visiblePages, id: \.self) { page in
                 pageContents(page)
                     .offset(
@@ -1363,13 +1458,17 @@ struct IconGrid: View {
 
     private func app(at point: CGPoint) -> Int? {
         let range = pageRange(for: currentPage)
-        for (slot, app) in range.enumerated() where layout.iconFrame(slot: slot).contains(point) {
-            return app
+        for (slot, filteredIndex) in range.enumerated()
+            where layout.iconFrame(slot: slot).contains(point) {
+            return appIndices[filteredIndex]
         }
         return nil
     }
 
     private func touchMoved(_ value: DragGesture.Value) {
+        guard pageCount > 0 else {
+            return
+        }
         if dragStart == nil {
             // Only touches that start in the grid, not on the page control.
             guard layout.gridFrame.contains(value.startLocation),
@@ -1393,7 +1492,7 @@ struct IconGrid: View {
         defer {
             dragStart = nil
         }
-        guard dragStart != nil else {
+        guard pageCount > 0, dragStart != nil else {
             return
         }
         let dx = value.location.x - value.startLocation.x

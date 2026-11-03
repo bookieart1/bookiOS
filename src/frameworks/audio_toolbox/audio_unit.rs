@@ -174,6 +174,42 @@ fn AudioUnitUninitialize(env: &mut Environment, in_unit: AudioUnit) -> OSStatus 
     }
 }
 
+fn stream_format_for_element(
+    host: &audio_components::AudioComponentInstanceHostObject,
+    scope: AudioUnitScope,
+    element: AudioUnitElement,
+) -> Option<AudioStreamBasicDescription> {
+    match (host.kind, scope, element) {
+        (_, kAudioUnitScope_Global, OUTPUT_ELEMENT) => Some(host.global_stream_format),
+        (_, kAudioUnitScope_Output, OUTPUT_ELEMENT) => Some(
+            host.output_stream_format
+                .unwrap_or(host.global_stream_format),
+        ),
+        (audio_components::AudioComponentKind::Output, kAudioUnitScope_Input, OUTPUT_ELEMENT) => {
+            Some(
+                host.input_stream_format
+                    .unwrap_or(host.global_stream_format),
+            )
+        }
+        // RemoteIO's second element is its input side. Microphone rendering is
+        // not implemented, but querying the existing bus format is valid and
+        // does not promise that capture will succeed.
+        (audio_components::AudioComponentKind::Output, kAudioUnitScope_Input, INPUT_ELEMENT)
+        | (audio_components::AudioComponentKind::Output, kAudioUnitScope_Output, INPUT_ELEMENT) => {
+            Some(host.global_stream_format)
+        }
+        (audio_components::AudioComponentKind::Mixer3D, kAudioUnitScope_Input, element)
+            if element < host.input_element_count =>
+        {
+            Some(
+                host.mixer_input_stream_formats[element as usize]
+                    .unwrap_or(host.global_stream_format),
+            )
+        }
+        _ => None,
+    }
+}
+
 fn AudioUnitSetProperty(
     env: &mut Environment,
     in_unit: AudioUnit,
@@ -261,6 +297,9 @@ fn AudioUnitSetProperty(
                     result = paramErr;
                 } else {
                     host_object.input_element_count = count;
+                    host_object
+                        .mixer_input_stream_formats
+                        .resize(count as usize, None);
                     result = 0;
                 }
             }
@@ -273,23 +312,52 @@ fn AudioUnitSetProperty(
                 result
             );
         }
-        kAudioUnitProperty_StreamFormat if in_element == INPUT_ELEMENT => {
+        kAudioUnitProperty_StreamFormat
+            if host_object.kind == audio_components::AudioComponentKind::Output
+                && in_element == INPUT_ELEMENT =>
+        {
             // The format the app wants microphone input in.
-            result = 0;
+            result = if in_data_size == guest_size_of::<AudioStreamBasicDescription>() {
+                0
+            } else {
+                paramErr
+            };
             log!("TODO: Ignoring AudioUnitSetProperty({:?}, kAudioUnitProperty_StreamFormat, {:?}, {:?}, ...) for microphone input, which isn't supported", in_unit, in_scope, in_element);
         }
         kAudioUnitProperty_StreamFormat => {
-            assert_eq!(in_element, OUTPUT_ELEMENT);
-            assert_eq!(in_data_size, guest_size_of::<AudioStreamBasicDescription>());
+            if in_data_size != guest_size_of::<AudioStreamBasicDescription>() {
+                return paramErr;
+            }
             let stream_format = env.mem.read(in_data.cast::<AudioStreamBasicDescription>());
             log_if_broken_audio_format(&stream_format);
-            match in_scope {
-                kAudioUnitScope_Global => host_object.global_stream_format = stream_format,
-                kAudioUnitScope_Output => host_object.output_stream_format = Some(stream_format),
-                kAudioUnitScope_Input => host_object.input_stream_format = Some(stream_format),
-                _ => unimplemented!("in_scope {}", in_scope),
+            result = match (host_object.kind, in_scope, in_element) {
+                (_, kAudioUnitScope_Global, OUTPUT_ELEMENT) => {
+                    host_object.global_stream_format = stream_format;
+                    0
+                }
+                (_, kAudioUnitScope_Output, OUTPUT_ELEMENT) => {
+                    host_object.output_stream_format = Some(stream_format);
+                    0
+                }
+                (
+                    audio_components::AudioComponentKind::Output,
+                    kAudioUnitScope_Input,
+                    OUTPUT_ELEMENT,
+                ) => {
+                    host_object.input_stream_format = Some(stream_format);
+                    0
+                }
+                (
+                    audio_components::AudioComponentKind::Mixer3D,
+                    kAudioUnitScope_Input,
+                    element,
+                ) if element < host_object.input_element_count => {
+                    host_object.mixer_input_stream_formats[element as usize] =
+                        Some(stream_format);
+                    0
+                }
+                _ => paramErr,
             };
-            result = 0;
             log_dbg!("AudioUnitSetProperty({:?}, kAudioUnitProperty_StreamFormat, {:?}, {:?}, {:?}, {:?}) -> {:?}", in_unit, in_scope, in_element, stream_format, in_data_size, result);
         }
         kAudioOutputUnitProperty_EnableIO => {
@@ -351,16 +419,11 @@ fn AudioUnitGetProperty(
         return paramErr;
     };
 
-    assert!(
-        in_element == OUTPUT_ELEMENT,
-        "AudioUnitGetProperty() for property {}, scope {}, element {}",
-        in_id,
-        in_scope,
-        in_element
-    );
-
     match in_id {
         kAudioUnitProperty_ElementCount => {
+            if in_element != OUTPUT_ELEMENT {
+                return paramErr;
+            }
             assert_eq!(env.mem.read(io_data_size), guest_size_of::<u32>());
             let count = match (host_object.kind, in_scope) {
                 (audio_components::AudioComponentKind::Mixer3D, kAudioUnitScope_Input) => {
@@ -373,6 +436,9 @@ fn AudioUnitGetProperty(
             env.mem.write(io_data_size, guest_size_of::<u32>());
         }
         kAudioUnitProperty_MaximumFramesPerSlice => {
+            if in_element != OUTPUT_ELEMENT {
+                return paramErr;
+            }
             assert_eq!(env.mem.read(io_data_size), guest_size_of::<u32>());
             let max_frames: u32 = host_object.maximum_frames_per_slice;
             env.mem.write(out_data.cast(), max_frames);
@@ -383,15 +449,10 @@ fn AudioUnitGetProperty(
                 env.mem.read(io_data_size),
                 guest_size_of::<AudioStreamBasicDescription>()
             );
-            let stream_format = match in_scope {
-                kAudioUnitScope_Global => host_object.global_stream_format,
-                kAudioUnitScope_Output => host_object
-                    .output_stream_format
-                    .unwrap_or(host_object.global_stream_format),
-                kAudioUnitScope_Input => host_object
-                    .input_stream_format
-                    .unwrap_or(host_object.global_stream_format),
-                _ => unimplemented!(),
+            let Some(stream_format) =
+                stream_format_for_element(host_object, in_scope, in_element)
+            else {
+                return paramErr;
             };
             env.mem.write(out_data.cast(), stream_format);
             env.mem.write(
@@ -401,22 +462,12 @@ fn AudioUnitGetProperty(
         }
         kAudioUnitProperty_SampleRate => {
             assert_eq!(env.mem.read(io_data_size), guest_size_of::<f64>());
-            let sample_rate = match in_scope {
-                kAudioUnitScope_Global => host_object.global_stream_format.sample_rate,
-                kAudioUnitScope_Output => {
-                    host_object
-                        .output_stream_format
-                        .unwrap_or(host_object.global_stream_format)
-                        .sample_rate
-                }
-                kAudioUnitScope_Input => {
-                    host_object
-                        .input_stream_format
-                        .unwrap_or(host_object.global_stream_format)
-                        .sample_rate
-                }
-                _ => unimplemented!(),
+            let Some(stream_format) =
+                stream_format_for_element(host_object, in_scope, in_element)
+            else {
+                return paramErr;
             };
+            let sample_rate = stream_format.sample_rate;
             env.mem.write(out_data.cast(), sample_rate);
             env.mem.write(io_data_size.cast(), guest_size_of::<f64>());
         }
@@ -872,5 +923,107 @@ mod tests {
             0
         );
         assert_eq!(env.mem.read(out), 32);
+    }
+
+    #[test]
+    fn mixer_stream_formats_are_independent_per_input_bus() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let unit = AudioUnit::from_bits(0x1234);
+        let host = audio_components::AudioComponentInstanceHostObject {
+            kind: audio_components::AudioComponentKind::Mixer3D,
+            ..Default::default()
+        };
+        let default_format = host.global_stream_format;
+        let default_sample_rate = default_format.sample_rate;
+        audio_components::State::get(&mut env.framework_state)
+            .audio_component_instances
+            .insert(unit, host);
+
+        let count = env.mem.alloc_and_write(2u32);
+        assert_eq!(
+            AudioUnitSetProperty(
+                &mut env,
+                unit,
+                kAudioUnitProperty_ElementCount,
+                kAudioUnitScope_Input,
+                OUTPUT_ELEMENT,
+                count.cast_const().cast_void(),
+                guest_size_of::<u32>(),
+            ),
+            0
+        );
+
+        let mut bus_one_format = default_format;
+        bus_one_format.sample_rate = 22_050.0;
+        bus_one_format.channels_per_frame = 1;
+        let format = env.mem.alloc_and_write(bus_one_format);
+        assert_eq!(
+            AudioUnitSetProperty(
+                &mut env,
+                unit,
+                kAudioUnitProperty_StreamFormat,
+                kAudioUnitScope_Input,
+                1,
+                format.cast_const().cast_void(),
+                guest_size_of::<AudioStreamBasicDescription>(),
+            ),
+            0
+        );
+
+        let out = env
+            .mem
+            .alloc(guest_size_of::<AudioStreamBasicDescription>())
+            .cast::<AudioStreamBasicDescription>();
+        let size = env
+            .mem
+            .alloc_and_write(guest_size_of::<AudioStreamBasicDescription>());
+        assert_eq!(
+            AudioUnitGetProperty(
+                &mut env,
+                unit,
+                kAudioUnitProperty_StreamFormat,
+                kAudioUnitScope_Input,
+                1,
+                out.cast_void(),
+                size,
+            ),
+            0
+        );
+        let actual = env.mem.read(out);
+        let actual_sample_rate = actual.sample_rate;
+        let actual_channels = actual.channels_per_frame;
+        assert_eq!(actual_sample_rate, 22_050.0);
+        assert_eq!(actual_channels, 1);
+
+        env.mem.write(size, guest_size_of::<AudioStreamBasicDescription>());
+        assert_eq!(
+            AudioUnitGetProperty(
+                &mut env,
+                unit,
+                kAudioUnitProperty_StreamFormat,
+                kAudioUnitScope_Input,
+                0,
+                out.cast_void(),
+                size,
+            ),
+            0
+        );
+        let bus_zero = env.mem.read(out);
+        let bus_zero_sample_rate = bus_zero.sample_rate;
+        assert_eq!(bus_zero_sample_rate, default_sample_rate);
+
+        env.mem.write(size, guest_size_of::<AudioStreamBasicDescription>());
+        assert_eq!(
+            AudioUnitGetProperty(
+                &mut env,
+                unit,
+                kAudioUnitProperty_StreamFormat,
+                kAudioUnitScope_Input,
+                2,
+                out.cast_void(),
+                size,
+            ),
+            paramErr
+        );
     }
 }

@@ -601,6 +601,15 @@ impl Recorder {
         }
         self.provenance.iter().find(|slot| slot.object == object)
     }
+    fn last_boundary_returning(&self, value: u32) -> Option<&Event> {
+        if value == 0 {
+            return None;
+        }
+        self.recent
+            .iter()
+            .rev()
+            .find(|event| event.result.is_some_and(|result| result[0] == value))
+    }
     fn watch_object(&mut self, object: u32) {
         if object == 0 || self.watched_objects.contains(&object) {
             return;
@@ -1416,6 +1425,46 @@ impl Environment {
                                 n += 1;
                             }
                         }
+                        let consumed_count = n;
+                        // A returned pointer can be the producer that matters,
+                        // even when its lifetime record was evicted before the
+                        // final invalid consumption. Preserve it as a lookup
+                        // candidate without expanding the recorder or tracing
+                        // guest stores.
+                        for event in recorder.recent.iter().rev().take(8) {
+                            if let Some(result) = event.result {
+                                let address = result[0];
+                                if address != 0 && !candidates[..n].contains(&address) {
+                                    candidates[n] = address;
+                                    n += 1;
+                                }
+                            }
+                        }
+                        let mut producer_hints = 0;
+                        for &address in &candidates[..consumed_count] {
+                            let Some(event) = recorder.last_boundary_returning(address) else {
+                                continue;
+                            };
+                            echo_no_panic!(
+                                concat!(
+                                    "flight value producer hint address={address:#010x} ",
+                                    "sequence={} kind={} name={} receiver={:#010x} ",
+                                    "class={} pc={:#010x} lr={:#010x}; bounded ",
+                                    "boundary correlation, not proof of allocation origin"
+                                ),
+                                event.sequence,
+                                event.call.kind,
+                                event.call.name,
+                                event.call.receiver,
+                                event.call.detail,
+                                event.call.pc,
+                                event.call.lr
+                            );
+                            producer_hints += 1;
+                            if producer_hints == 8 {
+                                break;
+                            }
+                        }
                         let mut shown = 0;
                         for &address in &candidates[..n] {
                             if history.dump(address) {
@@ -1464,6 +1513,24 @@ impl Environment {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_history_correlates_a_consumed_value_with_its_last_return() {
+        let mut recorder = Recorder::new();
+        let call = recorder.begin(Call {
+            kind: "ObjC",
+            name: Text::from_bytes(b"objectForKey:"),
+            receiver: 0x1111,
+            ..Call::default()
+        });
+        recorder.finish(call, [0x3041_3fd0, 0], true, false);
+        let producer = recorder.last_boundary_returning(0x3041_3fd0).unwrap();
+        assert_eq!(producer.call.name.bytes(), b"objectForKey:");
+        assert_eq!(producer.call.receiver, 0x1111);
+        assert!(recorder.last_boundary_returning(0).is_none());
+        assert!(recorder.last_boundary_returning(0xdead_beef).is_none());
+    }
+
     #[test]
     fn diagnostic_missing_selector_preserves_failure_and_captures_caller() {
         use crate::mach_o::MachO;

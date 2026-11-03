@@ -54,6 +54,9 @@ pub struct AudioComponentInstanceHostObject {
     pub global_stream_format: AudioStreamBasicDescription,
     pub input_stream_format: Option<AudioStreamBasicDescription>,
     pub output_stream_format: Option<AudioStreamBasicDescription>,
+    /// Per-input-bus formats for mixer units. Each mixer element is a distinct
+    /// bus and therefore has its own stream format.
+    pub mixer_input_stream_formats: Vec<Option<AudioStreamBasicDescription>>,
     pub render_callback: Option<AURenderCallbackStruct>,
     pub render_notifies: Vec<AURenderCallbackStruct>,
     pub last_render_time: Option<Instant>,
@@ -91,6 +94,7 @@ impl Default for AudioComponentInstanceHostObject {
             },
             input_stream_format: None,
             output_stream_format: None,
+            mixer_input_stream_formats: vec![None],
             render_callback: None,
             render_notifies: Vec::new(),
             last_render_time: None,

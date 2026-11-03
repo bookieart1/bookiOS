@@ -39,10 +39,68 @@ pub const NSTimeZoneCalendarUnit: NSUInteger = 1 << 21;
 
 const NS_UNDEFINED_DATE_COMPONENT: NSInteger = NSInteger::MAX;
 const NS_GREGORIAN_CALENDAR: &str = "gregorian";
+const NS_BUDDHIST_CALENDAR: &str = "buddhist";
+const NS_CHINESE_CALENDAR: &str = "chinese";
+const NS_HEBREW_CALENDAR: &str = "hebrew";
+const NS_ISLAMIC_CALENDAR: &str = "islamic";
+const NS_ISLAMIC_CIVIL_CALENDAR: &str = "islamic-civil";
+const NS_JAPANESE_CALENDAR: &str = "japanese";
+const NS_PERSIAN_CALENDAR: &str = "persian";
+const NS_REPUBLIC_OF_CHINA_CALENDAR: &str = "republic-of-china";
+const NS_INDIAN_CALENDAR: &str = "indian";
+const NS_ISO_8601_CALENDAR: &str = "iso8601";
 
-pub const CONSTANTS: ConstantExports = &[("_NSGregorianCalendar", HostConstant::NSString(
-    NS_GREGORIAN_CALENDAR,
-))];
+// These are identifier strings, not claims that NSCalendar implements each
+// calendar's arithmetic. Several Unity/Mono-era games import the complete
+// historical identifier table even though they only compare or pass the
+// identifiers through. Leaving the symbols unresolved turns an ordinary data
+// lookup into a null-page fault before the app can make that distinction.
+pub const CONSTANTS: ConstantExports = &[
+    (
+        "_NSGregorianCalendar",
+        HostConstant::NSString(NS_GREGORIAN_CALENDAR),
+    ),
+    (
+        "_NSBuddhistCalendar",
+        HostConstant::NSString(NS_BUDDHIST_CALENDAR),
+    ),
+    (
+        "_NSChineseCalendar",
+        HostConstant::NSString(NS_CHINESE_CALENDAR),
+    ),
+    (
+        "_NSHebrewCalendar",
+        HostConstant::NSString(NS_HEBREW_CALENDAR),
+    ),
+    (
+        "_NSIslamicCalendar",
+        HostConstant::NSString(NS_ISLAMIC_CALENDAR),
+    ),
+    (
+        "_NSIslamicCivilCalendar",
+        HostConstant::NSString(NS_ISLAMIC_CIVIL_CALENDAR),
+    ),
+    (
+        "_NSJapaneseCalendar",
+        HostConstant::NSString(NS_JAPANESE_CALENDAR),
+    ),
+    (
+        "_NSPersianCalendar",
+        HostConstant::NSString(NS_PERSIAN_CALENDAR),
+    ),
+    (
+        "_NSRepublicOfChinaCalendar",
+        HostConstant::NSString(NS_REPUBLIC_OF_CHINA_CALENDAR),
+    ),
+    (
+        "_NSIndianCalendar",
+        HostConstant::NSString(NS_INDIAN_CALENDAR),
+    ),
+    (
+        "_NSISO8601Calendar",
+        HostConstant::NSString(NS_ISO_8601_CALENDAR),
+    ),
+];
 
 #[derive(Default)]
 pub struct State {
@@ -424,3 +482,34 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+#[cfg(test)]
+mod constant_tests {
+    use super::*;
+
+    #[test]
+    fn calendar_identifiers_export_historical_string_values() {
+        for (symbol, expected) in [
+            ("_NSGregorianCalendar", "gregorian"),
+            ("_NSBuddhistCalendar", "buddhist"),
+            ("_NSChineseCalendar", "chinese"),
+            ("_NSHebrewCalendar", "hebrew"),
+            ("_NSIslamicCalendar", "islamic"),
+            ("_NSIslamicCivilCalendar", "islamic-civil"),
+            ("_NSJapaneseCalendar", "japanese"),
+            ("_NSPersianCalendar", "persian"),
+            ("_NSRepublicOfChinaCalendar", "republic-of-china"),
+            ("_NSIndianCalendar", "indian"),
+            ("_NSISO8601Calendar", "iso8601"),
+        ] {
+            let (_, constant) = CONSTANTS
+                .iter()
+                .find(|(candidate, _)| *candidate == symbol)
+                .unwrap();
+            let HostConstant::NSString(actual) = constant else {
+                panic!("{symbol} was not exported as NSString");
+            };
+            assert_eq!(*actual, expected);
+        }
+    }
+}

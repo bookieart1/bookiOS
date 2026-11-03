@@ -56,6 +56,70 @@ struct AppInfo {
     icon_ui_image: Option<id>,
 }
 
+/// Broad picker-only compatibility grouping from the maintained device-test
+/// ledger. This never changes guest behavior; it only powers the native
+/// picker's optional Playable / Needs Work filter. "Playable" deliberately
+/// includes titles with a useful gameplay path but a known later defect.
+fn picker_compatibility(app: &AppInfo) -> &'static str {
+    const PLAYABLE_IDENTIFIERS: &[&str] = &[
+        "com.chillingo.spoing",
+        "com.spacesofplay.spiritsiphone",
+    ];
+    const PLAYABLE_NAMES: &[&str] = &[
+        "BLOT",
+        "BOUNCE",
+        "BULBA THE CAT",
+        "BUMPY ROAD",
+        "CRAZYGOLF",
+        "CRAZY GOLF",
+        "CUBE",
+        "DARKNEBULA2",
+        "DARK NEBULA 2",
+        "DH BOWLING",
+        "DIRT",
+        "DODOFLY",
+        "DODO FLY",
+        "GLOWFISH",
+        "GLOWFISH HD",
+        "HAMLET",
+        "INFINIGHT",
+        "MOS SPEEDRUN",
+        "ODDY SMOG",
+        "OSCURA",
+        "PAPER MONSTERS",
+        "PMONSTERS",
+        "PIYO BLOCKS",
+        "RASTAMONKEY",
+        "RASTA MONKEY",
+        "ROBOTO",
+        "SHARPSHOOTER",
+        "SILVERFISH",
+        "SNAIL MAIL",
+        "SOLOMON'S BONEYARD",
+        "SPACE MONKEY",
+        "SPACEMNKEY",
+        "SPEEDRUN",
+        "SPIRITS",
+        "SPLODE",
+        "SPOING",
+        "SUPERFALL",
+        "SWAY",
+        "TOY BOT",
+        "TOYBOT",
+        "TOY BOT 2",
+        "TOYBOT 2",
+    ];
+
+    let name = app.display_name.to_uppercase();
+    if PLAYABLE_IDENTIFIERS.contains(&app.bundle_identifier.as_str())
+        || PLAYABLE_NAMES.contains(&name.as_str())
+    {
+        "playable"
+    } else {
+        "needsWork"
+    }
+}
+
 pub fn app_picker(options: Options) -> Result<(PathBuf, Vec<String>), String> {
     let apps = find_apps(&options);
 
@@ -210,24 +274,44 @@ fn enumerate_apps(
     }
 
     // Put the current focused device-test batch first, in the exact order in
-    // which it should be exercised. Everything else remains alphabetical.
+    // which it should be exercised. The unresolved Dev 2.10 collection then
+    // stays together as a visible follow-up instead of being lost among later
+    // batches. Everything else remains alphabetical.
     // Bundle identifiers avoid depending on localized or truncated names.
     const FOCUSED_TEST_BATCH: &[&str] = &[
-        "com.chillingo.anomalyhd",
         "com.wooglie.crashdrive",
         "com.sega.jacklumber",
         "com.popcap.Peggle",
+        "com.crescentmoongames.slingshotracing",
+        "com.chillingo.spoing",
+        "com.tractiongames.StickSkater",
         "com.craneballs.stuntman",
         "com.spokko.TikiTotems2",
         "com.ngmoco.Topple2",
-        "com.chillingo.spoing",
+        "com.robotinvader.knightmare",
+    ];
+    const DEV_210_FOLLOW_UP: &[&str] = &[
+        "com.gamevil.advena",
+        "com.krome.BoomerangBlast",
+        "com.munkadoogames.bouncymouse",
+        "com.digitalprunes.BungeeBall2Pro",
+        "com.shauninman.flipsescape",
+        "com.whaleislandgames.junny",
+        "com.sandlotgames.locv",
+        "com.teotlstudios.unmechanical",
+        "com.gamevil.zenonia2",
     ];
     apps.sort_by_key(|app| {
-        let batch_index = FOCUSED_TEST_BATCH
+        let focus_index = FOCUSED_TEST_BATCH
             .iter()
             .position(|identifier| *identifier == app.bundle_identifier.as_str())
-            .unwrap_or(FOCUSED_TEST_BATCH.len());
-        (batch_index, app.display_name.to_uppercase())
+            .map(|idx| (0, idx));
+        let follow_up_index = DEV_210_FOLLOW_UP
+            .iter()
+            .position(|identifier| *identifier == app.bundle_identifier.as_str())
+            .map(|idx| (1, idx));
+        let priority = focus_index.or(follow_up_index).unwrap_or((2, 0));
+        (priority, app.display_name.to_uppercase())
     });
 
     Ok(apps)
@@ -1918,6 +2002,33 @@ fn setup_quick_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_app(identifier: &str, name: &str) -> AppInfo {
+        AppInfo {
+            path: PathBuf::new(),
+            bundle_identifier: identifier.to_owned(),
+            display_name: name.to_owned(),
+            icon: None,
+            display_name_ns_string: None,
+            icon_ui_image: None,
+        }
+    }
+
+    #[test]
+    fn picker_compatibility_is_display_only_and_conservative() {
+        assert_eq!(
+            picker_compatibility(&test_app("com.chillingo.spoing", "Spoing")),
+            "playable"
+        );
+        assert_eq!(
+            picker_compatibility(&test_app("com.popcap.Peggle", "Peggle")),
+            "needsWork"
+        );
+        assert_eq!(
+            picker_compatibility(&test_app("unknown.bundle", "New Game")),
+            "needsWork"
+        );
+    }
 
     #[test]
     fn quick_option_args_from_values() {
