@@ -52,8 +52,10 @@ mod tests {
 
         super::super::set_navigation_controller(env, root, nil);
         release(env, child);
-        release(env, nav);
         release(env, root);
+        // `bar` intentionally skipped UIView initialization above, so let the
+        // synthetic environment discard it with `nav` instead of invoking
+        // UIView's registered-view teardown contract on an unregistered view.
     }
 }
 
