@@ -234,9 +234,41 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (bool)renderbufferStorage:(NSUInteger)target
                fromDrawable:(id)drawable { // EAGLDrawable (always CAEAGLayer*)
-    assert!(drawable != nil); // TODO: handle unbinding
-
     assert!(target == gles11::RENDERBUFFER_OES);
+
+    // Passing nil is the documented way to detach the drawable from the
+    // currently bound renderbuffer. It must not allocate new storage.
+    if drawable == nil {
+        let renderbuffer = {
+            let window = env.window.as_mut().expect("OpenGL ES is not supported in headless mode");
+            let mut gles = super::sync_context(
+                &mut env.framework_state.opengles,
+                &mut env.objc,
+                window,
+                env.current_thread,
+            );
+            let mut renderbuffer = 0;
+            unsafe {
+                gles.GetIntegerv(gles11::RENDERBUFFER_BINDING_OES, &mut renderbuffer);
+            }
+            renderbuffer as GLuint
+        };
+        let bindings = env
+            .objc
+            .borrow::<EAGLContextHostObject>(this)
+            .renderbuffer_drawable_bindings
+            .clone();
+        let old_drawable = bindings.borrow_mut().remove(&renderbuffer);
+        if let Some(old_drawable) = old_drawable {
+            release(env, old_drawable);
+        }
+        log!(
+            "EAGL drawable storage detached: context={:?} renderbuffer={}",
+            this,
+            renderbuffer
+        );
+        return true;
+    }
 
     let props: id = msg![env; drawable drawableProperties];
 

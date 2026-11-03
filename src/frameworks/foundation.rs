@@ -221,6 +221,35 @@ fn NSStringFromRange(env: &mut Environment, range: NSRange) -> id {
     ns_string::from_rust_string(env, string)
 }
 
+fn NSRangeFromString(env: &mut Environment, string: id) -> NSRange {
+    if string.is_null() {
+        return NSRange {
+            location: 0,
+            length: 0,
+        };
+    }
+
+    let text = ns_string::to_rust_string(env, string);
+    let text = text.trim();
+    let text = text
+        .strip_prefix('{')
+        .and_then(|value| value.strip_suffix('}'))
+        .unwrap_or(text);
+    let mut fields = text.split(',').map(str::trim);
+    let parsed = fields
+        .next()
+        .and_then(|location| location.parse::<NSUInteger>().ok())
+        .zip(fields.next().and_then(|length| length.parse::<NSUInteger>().ok()))
+        .filter(|_| fields.next().is_none());
+    parsed.map_or(
+        NSRange {
+            location: 0,
+            length: 0,
+        },
+        |(location, length)| NSRange { location, length },
+    )
+}
+
 pub type NSComparisonResult = NSInteger;
 pub const NSOrderedAscending: NSComparisonResult = -1;
 pub const NSOrderedSame: NSComparisonResult = 0;
@@ -246,4 +275,24 @@ fn hash_helper<T: std::hash::Hash>(hashable: &T) -> NSUInteger {
     (hash_u64 as u32) ^ ((hash_u64 >> 32) as u32)
 }
 
-const FUNCTIONS: FunctionExports = &[export_c_func!(NSStringFromRange(_))];
+const FUNCTIONS: FunctionExports = &[
+    export_c_func!(NSStringFromRange(_)),
+    export_c_func!(NSRangeFromString(_)),
+];
+
+#[cfg(test)]
+mod range_tests {
+    use super::*;
+
+    #[test]
+    fn range_string_round_trip_and_malformed_input() {
+        let mut env = Environment::new_fake_for_test();
+        let string = ns_string::from_rust_string(&mut env, "{12, 34}".to_owned());
+        let parsed = NSRangeFromString(&mut env, string);
+        assert_eq!((parsed.location, parsed.length), (12, 34));
+
+        let malformed = ns_string::from_rust_string(&mut env, "not a range".to_owned());
+        let parsed = NSRangeFromString(&mut env, malformed);
+        assert_eq!((parsed.location, parsed.length), (0, 0));
+    }
+}

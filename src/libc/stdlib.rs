@@ -6,7 +6,9 @@
 //! `stdlib.h`
 
 use crate::abi::{CallFromHost, GuestFunction};
-use crate::dyld::{export_c_func, export_c_func_aliased, FunctionExports};
+use crate::dyld::{
+    export_c_func, export_c_func_aliased, ConstantExports, FunctionExports, HostConstant,
+};
 use crate::fs::{resolve_path, GuestPath};
 use crate::libc::clocale::{setlocale, LC_CTYPE};
 use crate::libc::errno::{set_errno, EINVAL};
@@ -18,6 +20,19 @@ use std::str::FromStr;
 use std::time::SystemTime;
 
 pub mod qsort;
+
+/// Process-wide stack-protector guard expected by ARMv7 binaries compiled
+/// with Apple's stack-smashing protection. The guest only requires a stable,
+/// non-zero value; actual violations still take the normal failure path.
+pub const CONSTANTS: ConstantExports = &[(
+    "___stack_chk_guard",
+    HostConstant::Custom(|env| {
+        env.mem
+            .alloc_and_write(0x00ff_0a00u32)
+            .cast_void()
+            .cast_const()
+    }),
+)];
 
 #[derive(Default)]
 pub struct State {

@@ -58,6 +58,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
         ctype::CONSTANTS,
         dispatch::CONSTANTS,
         stdio::CONSTANTS,
+        stdlib::CONSTANTS,
         mach::init::CONSTANTS,
     ],
     function_exports: &[

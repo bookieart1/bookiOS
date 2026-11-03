@@ -19,9 +19,10 @@ use crate::frameworks::foundation::ns_string::{
     from_rust_string, get_static_str, to_rust_string, NSASCIIStringEncoding,
     NSUTF8StringEncoding,
 };
+use crate::frameworks::foundation::ns_file_manager::NSFileSize;
 use crate::frameworks::foundation::NSUInteger;
 use crate::mem::{ConstPtr, MutPtr, Ptr};
-use crate::objc::{id, msg, msg_class, release};
+use crate::objc::{id, msg, msg_class, nil, release, retain};
 use crate::Environment;
 
 pub type CFURLRef = super::CFTypeRef;
@@ -60,6 +61,58 @@ pub fn CFURLGetFileSystemRepresentation(
 
     msg![env; url getFileSystemRepresentation:buffer
                                     maxLength:buffer_size]
+}
+
+/// Historical CFURL resource-property access used by pre-iOS-5 games.  This
+/// first contract deliberately supports only the file-length property already
+/// exported by this framework; unsupported keys fail instead of returning a
+/// fabricated value.
+fn CFURLCreatePropertyFromResource(
+    env: &mut Environment,
+    allocator: CFAllocatorRef,
+    url: CFURLRef,
+    property: CFStringRef,
+    error_code: MutPtr<i32>,
+) -> super::CFTypeRef {
+    assert!(allocator == kCFAllocatorDefault || env.mem.read(allocator).is_system_default());
+    if !error_code.is_null() {
+        env.mem.write(error_code, 0);
+    }
+    if url.is_null() || property.is_null() {
+        if !error_code.is_null() {
+            env.mem.write(error_code, -10); // kCFURLUnknownError
+        }
+        return Ptr::null();
+    }
+
+    let file_length_key = get_static_str(env, "kCFURLFileLength");
+    if !msg![env; property isEqual:file_length_key] {
+        log!("Warning: CFURLCreatePropertyFromResource unsupported property {:?}", property);
+        if !error_code.is_null() {
+            env.mem.write(error_code, -12); // kCFURLPropertyKeyUnavailableError
+        }
+        return Ptr::null();
+    }
+
+    let path: id = msg![env; url path];
+    let manager: id = msg_class![env; NSFileManager defaultManager];
+    let attributes: id = msg![env; manager attributesOfItemAtPath:path error:(Ptr::null())];
+    if attributes == nil {
+        if !error_code.is_null() {
+            env.mem.write(error_code, -4); // kCFURLResourceNotFoundError
+        }
+        return Ptr::null();
+    }
+    let size_key = get_static_str(env, NSFileSize);
+    let value: id = msg![env; attributes objectForKey:size_key];
+    if value == nil {
+        if !error_code.is_null() {
+            env.mem.write(error_code, -12);
+        }
+        return Ptr::null();
+    }
+    retain(env, value);
+    value
 }
 
 pub fn CFURLCreateFromFileSystemRepresentation(
@@ -252,6 +305,7 @@ fn CFURLHasDirectoryPath(env: &mut Environment, url: CFURLRef) -> bool {
 
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFURLGetFileSystemRepresentation(_, _, _, _)),
+    export_c_func!(CFURLCreatePropertyFromResource(_, _, _, _)),
     export_c_func!(CFURLCreateFromFileSystemRepresentation(_, _, _, _)),
     export_c_func!(CFURLCreateWithBytes(_, _, _, _, _)),
     export_c_func!(CFURLCreateWithFileSystemPath(_, _, _, _)),

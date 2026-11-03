@@ -5,7 +5,7 @@
  */
 //! `UILabel`.
 
-use crate::frameworks::core_graphics::cg_context::CGContextSetRGBFillColor;
+use crate::frameworks::core_graphics::cg_context::{CGContextRef, CGContextSetRGBFillColor};
 use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect, CGSize};
 use crate::frameworks::foundation::ns_string::get_static_str;
 use crate::frameworks::foundation::NSInteger;
@@ -32,6 +32,9 @@ pub struct UILabelHostObject {
     text_color: id,
     /// `UIColor*`
     highlighted_text_color: id,
+    /// Optional retained UIColor used by UILabel's historical shadow API.
+    shadow_color: id,
+    shadow_offset: CGSize,
     highlighted: bool,
     text_alignment: UITextAlignment,
     line_break_mode: UILineBreakMode,
@@ -48,6 +51,8 @@ impl Default for UILabelHostObject {
             font: nil,
             text_color: nil,
             highlighted_text_color: nil,
+            shadow_color: nil,
+            shadow_offset: CGSize { width: 0.0, height: -1.0 },
             highlighted: false,
             text_alignment: UITextAlignmentLeft,
             line_break_mode: UILineBreakModeTailTruncation,
@@ -56,6 +61,41 @@ impl Default for UILabelHostObject {
             minimum_font_size: 0.0,
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_label_text(
+    env: &mut crate::Environment,
+    context: CGContextRef,
+    text: id,
+    font: id,
+    color: id,
+    rect: CGRect,
+    calculated_size: CGSize,
+    single_line: bool,
+    text_alignment: UITextAlignment,
+    line_break_mode: UILineBreakMode,
+) {
+    let (r, g, b, a) = ui_color::get_rgba(&env.objc, color);
+    CGContextSetRGBFillColor(env, context, r, g, b, a);
+    let _size: CGSize = if single_line {
+        let x_offset = match text_alignment {
+            UITextAlignmentLeft => 0.0,
+            UITextAlignmentCenter => 0.5,
+            UITextAlignmentRight => 1.0,
+            _ => unimplemented!(),
+        };
+        let point = CGPoint {
+            x: rect.origin.x + x_offset * (rect.size.width - calculated_size.width),
+            y: rect.origin.y,
+        };
+        msg![env; text drawAtPoint:point withFont:font]
+    } else {
+        msg![env; text drawInRect:rect
+                         withFont:font
+                    lineBreakMode:line_break_mode
+                        alignment:text_alignment]
+    };
 }
 
 pub const CLASSES: ClassExports = objc_classes! {
@@ -132,6 +172,8 @@ pub const CLASSES: ClassExports = objc_classes! {
         font,
         text_color,
         highlighted_text_color,
+        shadow_color,
+        shadow_offset: _,
         highlighted: _,
         text_alignment: _,
         line_break_mode: _,
@@ -143,6 +185,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     release(env, font);
     release(env, text_color);
     release(env, highlighted_text_color);
+    release(env, shadow_color);
     msg_super![env; this dealloc]
 }
 
@@ -283,11 +326,24 @@ pub const CLASSES: ClassExports = objc_classes! {
     msg_super![env; this setBackgroundColor:color]
 }
 
+- (id)shadowColor {
+    env.objc.borrow::<UILabelHostObject>(this).shadow_color
+}
 - (())setShadowColor:(id)color { // UIColor*
-    todo_objc_setter!(this, color);
+    let old_color = std::mem::replace(
+        &mut env.objc.borrow_mut::<UILabelHostObject>(this).shadow_color,
+        color
+    );
+    retain(env, color);
+    release(env, old_color);
+    () = msg![env; this setNeedsDisplay];
+}
+- (CGSize)shadowOffset {
+    env.objc.borrow::<UILabelHostObject>(this).shadow_offset
 }
 - (())setShadowOffset:(CGSize)value {
-    todo_objc_setter!(this, value);
+    env.objc.borrow_mut::<UILabelHostObject>(this).shadow_offset = value;
+    () = msg![env; this setNeedsDisplay];
 }
 
 - (())setOpaque:(bool)_opaque {
@@ -332,6 +388,8 @@ pub const CLASSES: ClassExports = objc_classes! {
         font,
         text_color,
         highlighted_text_color,
+        shadow_color,
+        shadow_offset,
         highlighted,
         text_alignment,
         line_break_mode,
@@ -345,8 +403,6 @@ pub const CLASSES: ClassExports = objc_classes! {
     } else {
         text_color
     };
-    let (r, g, b, a) = ui_color::get_rgba(&env.objc, effective_text_color);
-    CGContextSetRGBFillColor(env, context, r, g, b, a);
 
     let single_line = number_of_lines == 1;
 
@@ -380,25 +436,39 @@ pub const CLASSES: ClassExports = objc_classes! {
         },
     };
 
-    let _size: CGSize = if single_line {
-        let x_offset = match text_alignment {
-            UITextAlignmentLeft => 0.0,
-            UITextAlignmentCenter => 0.5,
-            UITextAlignmentRight => 1.0,
-            _ => unimplemented!(),
+    if shadow_color != nil {
+        let shadow_rect = CGRect {
+            origin: CGPoint {
+                x: rect.origin.x + shadow_offset.width,
+                y: rect.origin.y + shadow_offset.height,
+            },
+            size: rect.size,
         };
-        let point = CGPoint {
-            x: rect.origin.x + x_offset * (bounds.size.width - calculated_size.width),
-            y: rect.origin.y
-        };
-        msg![env; text drawAtPoint:point
-                          withFont:font]
-    } else {
-        msg![env; text drawInRect:rect
-                         withFont:font
-                    lineBreakMode:line_break_mode
-                        alignment:text_alignment]
-    };
+        draw_label_text(
+            env,
+            context,
+            text,
+            font,
+            shadow_color,
+            shadow_rect,
+            calculated_size,
+            single_line,
+            text_alignment,
+            line_break_mode,
+        );
+    }
+    draw_label_text(
+        env,
+        context,
+        text,
+        font,
+        effective_text_color,
+        rect,
+        calculated_size,
+        single_line,
+        text_alignment,
+        line_break_mode,
+    );
 }
 
 @end

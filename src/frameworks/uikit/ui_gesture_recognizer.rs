@@ -31,6 +31,8 @@ struct UIGestureRecognizerHostObject {
     targets: Vec<(id, SEL)>,
     /// The view is retained by the view-recognizer relationship, not here.
     view: id,
+    /// UIKit's gesture-recognizer delegate property is assign/non-retaining.
+    delegate: id,
     state: UIGestureRecognizerState,
     enabled: bool,
     cancels_touches_in_view: bool,
@@ -250,6 +252,12 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (id)view {
     env.objc.borrow::<UIGestureRecognizerHostObject>(this).view
+}
+- (id)delegate {
+    env.objc.borrow::<UIGestureRecognizerHostObject>(this).delegate
+}
+- (())setDelegate:(id)delegate {
+    env.objc.borrow_mut::<UIGestureRecognizerHostObject>(this).delegate = delegate;
 }
 - (bool)isEnabled {
     env.objc.borrow::<UIGestureRecognizerHostObject>(this).enabled

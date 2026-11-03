@@ -21,6 +21,8 @@ struct GzStream {
     data: Vec<u8>,
     position: usize,
     eof: bool,
+    /// True when zlib is transparently reading an uncompressed file.
+    direct: bool,
 }
 #[derive(Default)]
 pub struct State {
@@ -54,7 +56,8 @@ fn gzopen(env: &mut Environment, path: ConstPtr<u8>, mode: ConstPtr<u8>) -> MutV
         return Ptr::null();
     }
     // zlib's gzopen transparently reads files without a gzip header too.
-    let data = if compressed.starts_with(&[0x1f, 0x8b]) {
+    let direct = !compressed.starts_with(&[0x1f, 0x8b]);
+    let data = if !direct {
         let mut decoded = Vec::new();
         if let Err(error) = GzDecoder::new(&compressed[..]).read_to_end(&mut decoded) {
             log!("Warning: gzopen could not decompress {path:?}: {error}");
@@ -73,6 +76,7 @@ fn gzopen(env: &mut Environment, path: ConstPtr<u8>, mode: ConstPtr<u8>) -> MutV
             data,
             position: 0,
             eof: false,
+            direct,
         },
     );
     assert!(previous.is_none());
@@ -138,6 +142,14 @@ fn gztell(env: &mut Environment, file: MutVoidPtr) -> GuestISize {
         .unwrap_or(-1)
 }
 
+fn gzdirect(env: &mut Environment, file: MutVoidPtr) -> i32 {
+    env.libc_state
+        .zlib
+        .streams
+        .get(&file)
+        .map_or(0, |stream| i32::from(stream.direct))
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(gzopen(_, _)),
     export_c_func!(gzread(_, _, _)),
@@ -145,6 +157,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(gzeof(_)),
     export_c_func!(gzrewind(_)),
     export_c_func!(gztell(_)),
+    export_c_func!(gzdirect(_)),
 ];
 
 #[cfg(test)]
@@ -161,6 +174,7 @@ mod tests {
                 data: b"abcdef".to_vec(),
                 position: 0,
                 eof: false,
+                direct: false,
             },
         );
         let buffer = env.mem.alloc(8);
@@ -171,6 +185,7 @@ mod tests {
         assert_eq!(gzeof(&mut env, handle), 1);
         assert_eq!(gzrewind(&mut env, handle), Z_OK);
         assert_eq!(gztell(&mut env, handle), 0);
+        assert_eq!(gzdirect(&mut env, handle), 0);
         assert_eq!(gzclose(&mut env, handle), Z_OK);
         env.mem.free(buffer);
     }

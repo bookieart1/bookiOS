@@ -12,7 +12,7 @@ mod path_algorithms;
 
 use super::ns_error::{NSCocoaErrorDomain, NSFilePathErrorKey, NSFileReadNoSuchFileError};
 use super::ns_keyed_archiver::set_value_to_encode_for_current_key;
-use super::{ns_array, ns_keyed_unarchiver};
+use super::{ns_array, ns_dictionary, ns_keyed_unarchiver};
 use super::{
     unichar, NSComparisonResult, NSInteger, NSNotFound, NSOrderedAscending, NSOrderedDescending,
     NSOrderedSame, NSRange, NSUInteger,
@@ -480,6 +480,132 @@ pub fn from_rust_ordering(ordering: std::cmp::Ordering) -> NSComparisonResult {
     }
 }
 
+struct StringsFileParser {
+    chars: Vec<char>,
+    position: usize,
+}
+
+impl StringsFileParser {
+    fn new(input: &str) -> Self {
+        Self {
+            chars: input.chars().collect(),
+            position: 0,
+        }
+    }
+
+    fn skip_trivia(&mut self) -> Option<()> {
+        loop {
+            while self.chars.get(self.position).is_some_and(|c| c.is_whitespace()) {
+                self.position += 1;
+            }
+            if self.chars.get(self.position) == Some(&'/')
+                && self.chars.get(self.position + 1) == Some(&'/')
+            {
+                self.position += 2;
+                while self.chars.get(self.position).is_some_and(|c| *c != '\n') {
+                    self.position += 1;
+                }
+            } else if self.chars.get(self.position) == Some(&'/')
+                && self.chars.get(self.position + 1) == Some(&'*')
+            {
+                self.position += 2;
+                while !(self.chars.get(self.position) == Some(&'*')
+                    && self.chars.get(self.position + 1) == Some(&'/'))
+                {
+                    if self.position >= self.chars.len() {
+                        return None;
+                    }
+                    self.position += 1;
+                }
+                self.position += 2;
+            } else {
+                return Some(());
+            }
+        }
+    }
+
+    fn parse_quoted(&mut self) -> Option<String> {
+        if self.chars.get(self.position) != Some(&'"') {
+            return None;
+        }
+        self.position += 1;
+        let mut result = String::new();
+        loop {
+            let ch = *self.chars.get(self.position)?;
+            self.position += 1;
+            match ch {
+                '"' => return Some(result),
+                '\\' => {
+                    let escaped = *self.chars.get(self.position)?;
+                    self.position += 1;
+                    match escaped {
+                        'n' => result.push('\n'),
+                        'r' => result.push('\r'),
+                        't' => result.push('\t'),
+                        '"' => result.push('"'),
+                        '\\' => result.push('\\'),
+                        'u' | 'U' => {
+                            let digits: String = self
+                                .chars
+                                .get(self.position..self.position + 4)?
+                                .iter()
+                                .collect();
+                            self.position += 4;
+                            let scalar = u32::from_str_radix(&digits, 16).ok()?;
+                            result.push(char::from_u32(scalar)?);
+                        }
+                        other => result.push(other),
+                    }
+                }
+                other => result.push(other),
+            }
+        }
+    }
+
+    fn parse_bare_until(&mut self, delimiter: char) -> Option<String> {
+        let start = self.position;
+        while self.chars.get(self.position).is_some_and(|c| *c != delimiter) {
+            self.position += 1;
+        }
+        if self.position == start {
+            return None;
+        }
+        Some(self.chars[start..self.position].iter().collect::<String>().trim().to_owned())
+    }
+
+    fn parse_value(&mut self, delimiter: char) -> Option<String> {
+        self.skip_trivia()?;
+        if self.chars.get(self.position) == Some(&'"') {
+            self.parse_quoted()
+        } else {
+            self.parse_bare_until(delimiter)
+        }
+    }
+
+    fn parse(mut self) -> Option<Vec<(String, String)>> {
+        let mut entries = Vec::new();
+        loop {
+            self.skip_trivia()?;
+            if self.position == self.chars.len() {
+                return Some(entries);
+            }
+            let key = self.parse_value('=')?;
+            self.skip_trivia()?;
+            if self.chars.get(self.position) != Some(&'=') {
+                return None;
+            }
+            self.position += 1;
+            let value = self.parse_value(';')?;
+            self.skip_trivia()?;
+            if self.chars.get(self.position) != Some(&';') {
+                return None;
+            }
+            self.position += 1;
+            entries.push((key, value));
+        }
+    }
+}
+
 pub const CLASSES: ClassExports = objc_classes! {
 
 (env, this, _cmd);
@@ -496,6 +622,26 @@ pub const CLASSES: ClassExports = objc_classes! {
     // to have the normal behaviour. Unimplemented: call superclass alloc then.
     assert!(this == env.objc.get_known_class("NSString", &mut env.mem));
     msg_class![env; _touchHLE_NSString allocWithZone:zone]
+}
+
+- (id)propertyListFromStringsFileFormat {
+    let source = to_rust_string(env, this).into_owned();
+    let Some(parsed) = StringsFileParser::new(&source).parse() else {
+        log!("Warning: propertyListFromStringsFileFormat could not parse strings data");
+        return nil;
+    };
+    let mut objects = Vec::with_capacity(parsed.len());
+    for (key, value) in parsed {
+        let key = from_rust_string(env, key);
+        let value = from_rust_string(env, value);
+        objects.push((key, value));
+    }
+    let dictionary = ns_dictionary::dict_from_keys_and_objects(env, &objects);
+    for (key, value) in objects {
+        release(env, key);
+        release(env, value);
+    }
+    autorelease(env, dictionary)
 }
 
 + (id)string {
@@ -2596,6 +2742,23 @@ fn line_range_helper(
 #[cfg(test)]
 mod ns_string_tests {
     use super::*;
+
+    #[test]
+    fn strings_file_parser_handles_comments_escapes_and_bare_values() {
+        let parsed = StringsFileParser::new(
+            r#"/* header */ "hello" = "line\nvalue"; // comment
+                bare = value;"#,
+        )
+        .parse()
+        .unwrap();
+        assert_eq!(
+            parsed,
+            vec![
+                ("hello".to_owned(), "line\nvalue".to_owned()),
+                ("bare".to_owned(), "value".to_owned()),
+            ]
+        );
+    }
 
     #[test]
     fn invalid_utf8_is_a_failed_decode() {
