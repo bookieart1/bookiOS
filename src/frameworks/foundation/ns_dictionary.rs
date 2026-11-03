@@ -1550,14 +1550,15 @@ mod tests {
     #[test]
     fn strings_file_description_serializes_number_values_without_quotes() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let key = get_static_str(&mut env, "lives");
-        let value: id = msg_class![&mut env; NSNumber numberWithInt:3i32];
-        let dictionary = dict_from_keys_and_objects(&mut env, &[(key, value)]);
-        let description: id = msg![&mut env; dictionary descriptionInStringsFileFormat];
+        let env = &mut env;
+        let key = get_static_str(env, "lives");
+        let value: id = msg_class![env; NSNumber numberWithInt:3i32];
+        let dictionary = dict_from_keys_and_objects(env, &[(key, value)]);
+        let description: id = msg![env; dictionary descriptionInStringsFileFormat];
         assert_eq!(
-            to_rust_string(&mut env, description),
+            to_rust_string(env, description),
             "\"lives\" = 3;\n"
         );
-        release(&mut env, dictionary);
+        release(env, dictionary);
     }
 }
