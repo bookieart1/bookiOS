@@ -624,26 +624,6 @@ pub const CLASSES: ClassExports = objc_classes! {
     msg_class![env; _touchHLE_NSString allocWithZone:zone]
 }
 
-- (id)propertyListFromStringsFileFormat {
-    let source = to_rust_string(env, this).into_owned();
-    let Some(parsed) = StringsFileParser::new(&source).parse() else {
-        log!("Warning: propertyListFromStringsFileFormat could not parse strings data");
-        return nil;
-    };
-    let mut objects = Vec::with_capacity(parsed.len());
-    for (key, value) in parsed {
-        let key = from_rust_string(env, key);
-        let value = from_rust_string(env, value);
-        objects.push((key, value));
-    }
-    let dictionary = ns_dictionary::dict_from_keys_and_objects(env, &objects);
-    for (key, value) in objects {
-        release(env, key);
-        release(env, value);
-    }
-    autorelease(env, dictionary)
-}
-
 + (id)string {
     let str: id = msg![env; this new];
     autorelease(env, str)
@@ -759,6 +739,26 @@ pub const CLASSES: ClassExports = objc_classes! {
     // I've seen of this method was on ASCII strings, so let's just hardcode
     // UTF-8 and hope that works.
     NSUTF8StringEncoding
+}
+
+- (id)propertyListFromStringsFileFormat {
+    let source = to_rust_string(env, this).into_owned();
+    let Some(parsed) = StringsFileParser::new(&source).parse() else {
+        log!("Warning: propertyListFromStringsFileFormat could not parse strings data");
+        return nil;
+    };
+    let mut objects = Vec::with_capacity(parsed.len());
+    for (key, value) in parsed {
+        let key = from_rust_string(env, key);
+        let value = from_rust_string(env, value);
+        objects.push((key, value));
+    }
+    let dictionary = ns_dictionary::dict_from_keys_and_objects(env, &objects);
+    for (key, value) in objects {
+        release(env, key);
+        release(env, value);
+    }
+    autorelease(env, dictionary)
 }
 
 - (id)initWithUTF8String:(ConstPtr<u8>)utf8_string {
