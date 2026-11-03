@@ -43,6 +43,8 @@ struct UIViewControllerHostObject {
     title: id,
     /// Lazily-created UINavigationItem, retained for the controller lifetime.
     navigation_item: id,
+    /// The UINavigationController containing this controller. Weak.
+    navigation_controller: id,
     /// The view controller this one presents modally, retained.
     modal_view_controller: id,
     /// The view controller presenting this one modally. Weak.
@@ -252,9 +254,16 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (id)modalViewController {
     env.objc.borrow::<UIViewControllerHostObject>(this).modal_view_controller
 }
-// TODO: also the navigation controller for the controllers it pushes.
+- (id)navigationController {
+    env.objc.borrow::<UIViewControllerHostObject>(this).navigation_controller
+}
 - (id)parentViewController {
-    env.objc.borrow::<UIViewControllerHostObject>(this).parent_view_controller
+    let host = env.objc.borrow::<UIViewControllerHostObject>(this);
+    if host.parent_view_controller != nil {
+        host.parent_view_controller
+    } else {
+        host.navigation_controller
+    }
 }
 
 // Like iPhone OS 3, the modal view covers the whole window. There's no
@@ -370,6 +379,12 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+fn set_navigation_controller(env: &mut Environment, controller: id, navigation_controller: id) {
+    env.objc
+        .borrow_mut::<UIViewControllerHostObject>(controller)
+        .navigation_controller = navigation_controller;
+}
 
 /// A helper function to resolve suitable NIB name for a `view_controller`
 /// in the `bundle`. Returns nil if fails.

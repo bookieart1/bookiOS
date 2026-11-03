@@ -21,6 +21,8 @@ const SIGNALS: usize = 24;
 const PROGRESS: usize = 24;
 const CRASH_CALLERS: usize = 8;
 const PROVENANCE: usize = 128;
+const VALUE_ORIGINS: usize = 512;
+const VALUE_ORIGIN_WAYS: usize = 4;
 const BOUNDARY_DETAILS: usize = 8;
 const BUNDLE_CANDIDATES: usize = 16;
 const BUNDLE_DIRECTORY_ENTRIES: usize = 24;
@@ -218,6 +220,22 @@ struct Provenance {
     source_argument: ShortText,
 }
 
+/// Compact, bounded last-return provenance for non-nil Objective-C results.
+/// This deliberately survives both the recent-event ring and object
+/// deallocation so a later stale consumption can still be tied to its most
+/// recent API producer. It is not an allocation or guest-store trace.
+#[derive(Clone, Copy, Debug, Default)]
+struct ValueOrigin {
+    sequence: u64,
+    value: u32,
+    kind: &'static str,
+    name: ShortText,
+    receiver: u32,
+    detail: ShortText,
+    pc: u32,
+    lr: u32,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct BoundaryDetail {
     call_sequence: u64,
@@ -375,6 +393,7 @@ pub struct Recorder {
     /// trace: it exists to retain collection/coder provenance after the main
     /// event ring wraps.
     provenance: [Provenance; PROVENANCE],
+    value_origins: [ValueOrigin; VALUE_ORIGINS],
     boundary_details: Ring<BoundaryDetail, BOUNDARY_DETAILS>,
     bundle_candidates: Ring<Text, BUNDLE_CANDIDATES>,
     bundle_directory_entries: Ring<Text, BUNDLE_DIRECTORY_ENTRIES>,
@@ -416,6 +435,7 @@ impl Recorder {
             signals: Ring::default(),
             progress: Ring::default(),
             provenance: [Provenance::default(); PROVENANCE],
+            value_origins: [ValueOrigin::default(); VALUE_ORIGINS],
             boundary_details: Ring::default(),
             bundle_candidates: Ring::default(),
             bundle_directory_entries: Ring::default(),
@@ -498,6 +518,9 @@ impl Recorder {
             },
         };
         self.recent.push(event);
+        if object_result && result[0] != 0 {
+            self.remember_value_origin(result[0], event);
+        }
         if dictionary_result && Self::tracks_provenance(&call) {
             // A dictionary obtained from another tracked dictionary inherits
             // the source container's property-list mutability contract. This
@@ -537,6 +560,44 @@ impl Recorder {
             .windows(b"Dictionary".len())
             .any(|window| window == b"Dictionary")
             && (name.starts_with(b"initWith") || name.starts_with(b"dictionaryWith")))
+    }
+    fn remember_value_origin(&mut self, value: u32, event: Event) {
+        let bucket_count = VALUE_ORIGINS / VALUE_ORIGIN_WAYS;
+        let bucket = ((value as usize).wrapping_mul(0x9e37_79b1) >> 4) % bucket_count;
+        let range = bucket * VALUE_ORIGIN_WAYS..(bucket + 1) * VALUE_ORIGIN_WAYS;
+        let slots = &mut self.value_origins[range];
+        let index = slots
+            .iter()
+            .position(|slot| slot.value == value)
+            .unwrap_or_else(|| {
+                slots
+                    .iter()
+                    .enumerate()
+                    .min_by_key(|(_, slot)| slot.sequence)
+                    .unwrap()
+                    .0
+            });
+        slots[index] = ValueOrigin {
+            sequence: event.sequence,
+            value,
+            kind: event.call.kind,
+            name: ShortText::from_text(event.call.name),
+            receiver: event.call.receiver,
+            detail: ShortText::from_text(event.call.detail),
+            pc: event.call.pc,
+            lr: event.call.lr,
+        };
+    }
+    fn value_origin_for(&self, value: u32) -> Option<&ValueOrigin> {
+        if value == 0 {
+            return None;
+        }
+        let bucket_count = VALUE_ORIGINS / VALUE_ORIGIN_WAYS;
+        let bucket = ((value as usize).wrapping_mul(0x9e37_79b1) >> 4) % bucket_count;
+        self.value_origins
+            [bucket * VALUE_ORIGIN_WAYS..(bucket + 1) * VALUE_ORIGIN_WAYS]
+            .iter()
+            .find(|slot| slot.value == value)
     }
     fn remember_provenance(&mut self, object: u32, event: Event) {
         let detail = self
@@ -1442,6 +1503,29 @@ impl Environment {
                         }
                         let mut producer_hints = 0;
                         for &address in &candidates[..consumed_count] {
+                            if let Some(origin) = recorder.value_origin_for(address) {
+                                echo_no_panic!(
+                                    concat!(
+                                        "flight retained value producer address={:#010x} ",
+                                        "sequence={} kind={} name={} receiver={:#010x} ",
+                                        "class={} pc={:#010x} lr={:#010x}; compact bounded ",
+                                        "last-return correlation, not proof of allocation origin"
+                                    ),
+                                    address,
+                                    origin.sequence,
+                                    origin.kind,
+                                    origin.name,
+                                    origin.receiver,
+                                    origin.detail,
+                                    origin.pc,
+                                    origin.lr
+                                );
+                                producer_hints += 1;
+                                if producer_hints == 8 {
+                                    break;
+                                }
+                                continue;
+                            }
                             let Some(event) = recorder.last_boundary_returning(address) else {
                                 continue;
                             };
@@ -1530,6 +1614,22 @@ mod tests {
         assert_eq!(producer.call.receiver, 0x1111);
         assert!(recorder.last_boundary_returning(0).is_none());
         assert!(recorder.last_boundary_returning(0xdead_beef).is_none());
+        let retained = recorder.value_origin_for(0x3041_3fd0).unwrap();
+        assert_eq!(retained.name.bytes(), b"objectForKey:");
+        for i in 0..(RECENT * 4) {
+            let call = recorder.begin(Call {
+                kind: "ObjC",
+                name: Text::from_bytes(b"description"),
+                receiver: i as u32 + 1,
+                ..Call::default()
+            });
+            recorder.finish(call, [0x5000_0000 + i as u32, 0], true, false);
+        }
+        assert!(recorder.last_boundary_returning(0x3041_3fd0).is_none());
+        assert_eq!(
+            recorder.value_origin_for(0x3041_3fd0).unwrap().receiver,
+            0x1111
+        );
     }
 
     #[test]

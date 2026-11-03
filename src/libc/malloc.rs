@@ -137,6 +137,22 @@ fn malloc_destroy_zone(env: &mut Environment, zone: MutPtr<malloc_zone_t>) {
 }
 
 fn malloc_zone_free(env: &mut Environment, zone: MutPtr<malloc_zone_t>, ptr: MutVoidPtr) {
+    if ptr.is_null() {
+        return;
+    }
+    // Match free(): Objective-C objects allocated by this runtime must leave
+    // the host-object table before their guest allocation becomes reusable.
+    // Otherwise a valid allocator reuse becomes an emulator-side object-table
+    // collision. Objective-C allocations always use the default object heap;
+    // dealloc_object performs that corresponding free itself.
+    if env.objc.get_host_object(ptr.cast()).is_some() {
+        log!(
+            "App attempted to call malloc_zone_free({:?}) on an object, calling dealloc_object() instead!",
+            ptr
+        );
+        env.objc.dealloc_object(ptr.cast(), &mut env.mem);
+        return;
+    }
     with_zone(env, zone, |mem, heap| mem.free_in_heap(heap, ptr))
 }
 

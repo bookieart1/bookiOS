@@ -34,6 +34,7 @@ pub const EROFS: i32 = 30;
 pub const EAGAIN: i32 = 35;
 pub const EPROTONOSUPPORT: i32 = 43;
 pub const ENOTSUP: i32 = 45;
+pub const EAFNOSUPPORT: i32 = 47;
 pub const ENETUNREACH: i32 = 51;
 pub const ECONNRESET: i32 = 54;
 pub const ETIMEDOUT: i32 = 60;
@@ -135,6 +136,7 @@ fn strerror(env: &mut Environment, err_num: i32) -> ConstPtr<u8> {
             EAGAIN => "Resource temporarily unavailable",
             EPROTONOSUPPORT => "Protocol not supported",
             ENOTSUP => "Operation not supported",
+            EAFNOSUPPORT => "Address family not supported by protocol family",
             ECONNRESET => "Connection reset by peer",
             ETIMEDOUT => "Operation timed out",
             ENOTEMPTY => "Directory not empty",

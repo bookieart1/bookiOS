@@ -44,6 +44,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     this
 }
 
+- (id)initWithCoder:(id)_coder {
+    this
+}
+
 - (id)title {
     env.objc.borrow::<UINavigationItemHostObject>(this).title
 }

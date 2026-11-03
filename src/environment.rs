@@ -2655,31 +2655,23 @@ mod memory_fault_diagnostic_tests {
             env.cpu.regs_mut()[cpu::Cpu::SP] = stack.to_bits();
             env.cpu.regs_mut()[cpu::Cpu::LR] = 0x1235;
             env.cpu.regs_mut()[cpu::Cpu::PC] = f.addr_without_thumb_bit() + 4;
-            // Unlike free(), the existing zone-free path does not remove the
-            // Objective-C registration. Reproduce that invariant violation
-            // through its real guest ABI, without claiming this is Peggle's path.
+            // Zone-free must mirror free() for an Objective-C allocation: the
+            // guest allocation and host registration are one lifetime.
             env.handle_cpu_state(cpu::CpuState::Svc(svc & 0x00ff_ffff));
-            assert!(env.objc.get_host_object(object).is_some());
-            let error = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            assert!(env.objc.get_host_object(object).is_none());
+            let replacement =
                 env.objc
                     .alloc_object(isa, Box::new(TrivialHostObject), &mut env.mem);
-            }))
-            .expect_err("collision must still fail with diagnostics on or off");
-            let message = error.downcast_ref::<String>().unwrap();
-            assert!(message.contains("Object allocation collision"), "{message}");
+            assert_eq!(replacement, object, "freed address should be safely reusable");
             if let Some(history) = &env.mem.object_history {
                 let record = history.get(object.to_bits()).unwrap();
                 assert_eq!(record.origin.class, isa.to_bits());
-                assert_eq!(record.removed.sequence, 0);
-                assert_eq!(record.freed.action, "heap-free-completed");
-                assert_eq!(record.freed.context.api, "_malloc_zone_free");
-                assert_eq!(record.freed.context.lr, 0x1235);
-                assert!(record.events().any(|e| e.action == "object-table-collision"));
+                assert_ne!(record.removed.sequence, 0);
+                assert!(record.events().all(|e| e.action != "object-table-collision"));
                 history.dump(object.to_bits());
             }
-            // The collision must not write a replacement object header.
-            let current_isa: u32 = env.mem.read(object.cast());
-            assert_eq!(current_isa, 0);
+            let current_isa: u32 = env.mem.read(replacement.cast());
+            assert_eq!(current_isa, isa.to_bits());
         }
     }
 

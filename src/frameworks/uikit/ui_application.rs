@@ -598,6 +598,8 @@ const UIApplicationWillTerminateNotification: &str = "UIApplicationWillTerminate
 /// Other app notifications
 const UIApplicationLaunchOptionsRemoteNotificationKey: &str =
     "UIApplicationLaunchOptionsRemoteNotificationKey";
+const UIApplicationLaunchOptionsLocalNotificationKey: &str =
+    "UIApplicationLaunchOptionsLocalNotificationKey";
 const UIApplicationLaunchOptionsURLKey: &str = "UIApplicationLaunchOptionsURLKey";
 const UIApplicationDidReceiveMemoryWarningNotification: &str =
     "UIApplicationDidReceiveMemoryWarningNotification";
@@ -643,6 +645,10 @@ pub const CONSTANTS: ConstantExports = &[
     (
         "_UIApplicationDidReceiveMemoryWarningNotification",
         HostConstant::NSString(UIApplicationDidReceiveMemoryWarningNotification),
+    ),
+    (
+        "_UIApplicationLaunchOptionsLocalNotificationKey",
+        HostConstant::NSString(UIApplicationLaunchOptionsLocalNotificationKey),
     ),
     (
         "_UIApplicationLaunchOptionsRemoteNotificationKey",

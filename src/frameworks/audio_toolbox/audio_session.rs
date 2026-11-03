@@ -32,6 +32,10 @@ const kAudioSessionProperty_PreferredHardwareIOBufferDuration: AudioSessionPrope
     fourcc(b"iobd");
 const kAudioSessionProperty_PreferredHardwareSampleRate: AudioSessionPropertyID = fourcc(b"hwsr");
 const kAudioSessionProperty_AudioRoute: AudioSessionPropertyID = fourcc(b"rout");
+// This process has no audio-input capture path. Historical Audio Session
+// reports that fact as a UInt32 Boolean rather than treating the property as
+// unsupported.
+const kAudioSessionProperty_AudioInputAvailable: AudioSessionPropertyID = fourcc(b"aiav");
 // No other app's audio plays inside the emulator, so there's nothing to mix.
 const kAudioSessionProperty_OverrideCategoryMixWithOthers: AudioSessionPropertyID = fourcc(b"cmix");
 
@@ -134,6 +138,10 @@ fn AudioSessionGetProperty(
             // Apps may or may not release this string, so it's a static one,
             // which ignores releases.
             let value: CFStringRef = ns_string::get_static_str(env, "Speaker");
+            env.mem.write(out_data.cast(), value);
+        }
+        kAudioSessionProperty_AudioInputAvailable => {
+            let value: u32 = 0;
             env.mem.write(out_data.cast(), value);
         }
         _ => unreachable!(),
@@ -244,6 +252,7 @@ fn get_audio_session_property_size(in_ID: AudioSessionPropertyID) -> GuestUSize 
         kAudioSessionProperty_CurrentHardwareOutputVolume => guest_size_of::<f32>(),
         kAudioSessionProperty_CurrentHardwareIOBufferDuration => guest_size_of::<f32>(),
         kAudioSessionProperty_AudioRoute => guest_size_of::<CFStringRef>(),
+        kAudioSessionProperty_AudioInputAvailable => guest_size_of::<u32>(),
         _ => unimplemented!("Unimplemented property ID: {}", debug_fourcc(in_ID)),
     }
 }
@@ -257,3 +266,29 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(AudioSessionAddPropertyListener(_, _, _)),
     export_c_func!(AudioSessionRemovePropertyListenerWithUserData(_, _, _)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_input_available_uses_historical_uint32_shape() {
+        assert_eq!(
+            get_audio_session_property_size(kAudioSessionProperty_AudioInputAvailable),
+            guest_size_of::<u32>()
+        );
+        let mut env = Environment::new_fake_for_test();
+        let size = env.mem.alloc_and_write(guest_size_of::<u32>());
+        let value = env.mem.alloc_and_write(u32::MAX);
+        assert_eq!(
+            AudioSessionGetProperty(
+                &mut env,
+                kAudioSessionProperty_AudioInputAvailable,
+                size,
+                value.cast(),
+            ),
+            0
+        );
+        assert_eq!(env.mem.read(value), 0);
+    }
+}

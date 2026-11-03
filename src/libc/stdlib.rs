@@ -42,7 +42,6 @@ pub struct State {
     rand48: u64,
     fcvt_buf: Option<MutPtr<u8>>,
 }
-
 // Sizes of zero are implementation-defined. macOS will happily give you back
 // an allocation for any of these, so presumably iPhone OS does too.
 // (touchHLE's allocator will round up allocations to at least 16 bytes.)
@@ -811,6 +810,13 @@ mod tests {
         assert_eq!(atoll(&mut env, string.cast_const()), -4_294_967_297);
         env.mem.free(string.cast());
     }
+
+    #[test]
+    fn empty_input_with_autodetected_base_is_a_failed_conversion() {
+        let mut env = Environment::new_fake_for_test();
+        let input = env.mem.alloc_and_write_cstr(b"");
+        assert!(strtol_inner(&mut env, input.cast_const(), 0).is_err());
+    }
 }
 
 /// A simple wrapper around [atof_inner_generic] for the case of C string.
@@ -1117,6 +1123,11 @@ where
     let s = std::str::from_utf8(&chars).unwrap();
     log_dbg!("strtol_inner_generic('{}', {})", s, base);
 
+    // An empty/short input can end before base autodetection completes. That
+    // is an ordinary failed conversion, not an invalid explicit base.
+    if base == 0 {
+        return Err(());
+    }
     assert!((2..=36).contains(&base));
     let magnitude_len = len - prefix_length;
     let res = if magnitude_len > 0 {

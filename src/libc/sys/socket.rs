@@ -29,8 +29,8 @@
 
 use crate::dyld::{export_c_func, FunctionExports};
 use crate::libc::errno::{
-    set_errno, EAGAIN, EBADF, ECONNREFUSED, ECONNRESET, EHOSTUNREACH, EINVAL, ENETUNREACH,
-    ETIMEDOUT,
+    set_errno, EAFNOSUPPORT, EAGAIN, EBADF, ECONNREFUSED, ECONNRESET, EHOSTUNREACH, EINVAL,
+    ENETUNREACH, EPROTONOSUPPORT, ETIMEDOUT,
 };
 use crate::libc::posix_io::{
     close, find_or_create_socket, is_nonblocking, is_socket, FileDescriptor,
@@ -226,9 +226,18 @@ fn socket(env: &mut Environment, domain: i32, type_: i32, protocol: i32) -> File
         log_once!("Network access is off, so sockets work as in airplane mode: connecting or sending to other machines will fail. Use --allow-network-access to change this.");
     }
 
-    assert_eq!(domain, AF_INET);
-    assert!(type_ == SOCK_STREAM || type_ == SOCK_DGRAM);
-    assert!(protocol == IPPROTO_TCP || protocol == IPPROTO_UDP || protocol == 0);
+    if domain != AF_INET {
+        set_errno(env, EAFNOSUPPORT);
+        return -1;
+    }
+    if type_ != SOCK_STREAM && type_ != SOCK_DGRAM {
+        set_errno(env, EINVAL);
+        return -1;
+    }
+    if protocol != IPPROTO_TCP && protocol != IPPROTO_UDP && protocol != 0 {
+        set_errno(env, EPROTONOSUPPORT);
+        return -1;
+    }
 
     let fd = find_or_create_socket(env);
     assert!(!State::get(env).sockets.contains_key(&fd));
@@ -1332,6 +1341,20 @@ mod tests {
         assert_eq!(
             address.to_sockaddr_v4_for_input(guest_size_of::<sockaddr>()),
             SocketAddrV4::new(std::net::Ipv4Addr::BROADCAST, 80)
+        );
+    }
+
+    #[test]
+    fn invalid_socket_arguments_fail_without_allocating_a_descriptor() {
+        let mut env = Environment::new_fake_for_test();
+        assert_eq!(socket(&mut env, 0, 0, 0), -1);
+        assert_eq!(crate::libc::errno::get_errno(&mut env), EAFNOSUPPORT);
+        assert_eq!(socket(&mut env, AF_INET, 0, 0), -1);
+        assert_eq!(crate::libc::errno::get_errno(&mut env), EINVAL);
+        assert_eq!(socket(&mut env, AF_INET, SOCK_STREAM, 99), -1);
+        assert_eq!(
+            crate::libc::errno::get_errno(&mut env),
+            EPROTONOSUPPORT
         );
     }
 

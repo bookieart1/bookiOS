@@ -62,7 +62,21 @@ struct AppInfo {
 /// includes titles with a useful gameplay path but a known later defect.
 fn picker_compatibility(app: &AppInfo) -> &'static str {
     const PLAYABLE_IDENTIFIERS: &[&str] = &[
+        "CW-Gunner",
+        "com.BaneGames.FlickBuddies",
+        "com.andrewgarrison.SimplePhysics",
         "com.chillingo.spoing",
+        "com.clickgamer.floealittlebear",
+        "com.clickgamer.sticky",
+        "com.dtp-entertainment.skijumping",
+        "com.ezone.Diversion",
+        "com.gamevil.airpenguin",
+        "com.geekbeach.minibeastshd",
+        "com.mikemassei.daredevildave",
+        "com.nocturnsoft.nsactionblockbuster",
+        "com.raptisoft.solomonsboneyard",
+        "com.sega.chuchu",
+        "com.simogo.kosmospin",
         "com.spacesofplay.spiritsiphone",
     ];
     const PLAYABLE_NAMES: &[&str] = &[
@@ -80,7 +94,6 @@ fn picker_compatibility(app: &AppInfo) -> &'static str {
         "DODOFLY",
         "DODO FLY",
         "GLOWFISH",
-        "GLOWFISH HD",
         "HAMLET",
         "INFINIGHT",
         "MOS SPEEDRUN",
@@ -100,14 +113,12 @@ fn picker_compatibility(app: &AppInfo) -> &'static str {
         "SPACEMNKEY",
         "SPEEDRUN",
         "SPIRITS",
-        "SPLODE",
         "SPOING",
+        "STICKY",
         "SUPERFALL",
         "SWAY",
         "TOY BOT",
         "TOYBOT",
-        "TOY BOT 2",
-        "TOYBOT 2",
     ];
 
     let name = app.display_name.to_uppercase();
@@ -273,44 +284,39 @@ fn enumerate_apps(
         });
     }
 
-    // Put the current focused device-test batch first, in the exact order in
-    // which it should be exercised. The unresolved Dev 2.10 collection then
-    // stays together as a visible follow-up instead of being lost among later
-    // batches. Everything else remains alphabetical.
+    // Put the current focused device-test batch first, in alphabetical order,
+    // so a full round can be exercised without repeatedly paging through the
+    // library. Everything else remains alphabetical.
     // Bundle identifiers avoid depending on localized or truncated names.
-    const FOCUSED_TEST_BATCH: &[&str] = &[
+    const DEV_213_TEST_BATCH: &[&str] = &[
+        "com.gamevil.advena",
+        "com.krome.BoomerangBlast",
+        "com.digitalprunes.BungeeBall2Pro",
         "com.wooglie.crashdrive",
+        "eu.ukando.decoloroiphone",
+        "com.uppercut-games.epoch",
+        "com.shauninman.flipsescape",
         "com.sega.jacklumber",
+        "com.disney.JellyCar3",
+        "com.whaleislandgames.junny",
+        "com.sandlotgames.locv",
         "com.popcap.Peggle",
         "com.crescentmoongames.slingshotracing",
-        "com.chillingo.spoing",
         "com.tractiongames.StickSkater",
         "com.craneballs.stuntman",
         "com.spokko.TikiTotems2",
         "com.ngmoco.Topple2",
-        "com.robotinvader.knightmare",
-    ];
-    const DEV_210_FOLLOW_UP: &[&str] = &[
-        "com.gamevil.advena",
-        "com.krome.BoomerangBlast",
-        "com.munkadoogames.bouncymouse",
-        "com.digitalprunes.BungeeBall2Pro",
-        "com.shauninman.flipsescape",
-        "com.whaleislandgames.junny",
-        "com.sandlotgames.locv",
         "com.teotlstudios.unmechanical",
+        "com.robotinvader.knightmare",
         "com.gamevil.zenonia2",
+        "com.chillingo.spoing",
     ];
     apps.sort_by_key(|app| {
-        let focus_index = FOCUSED_TEST_BATCH
+        let focus_index = DEV_213_TEST_BATCH
             .iter()
             .position(|identifier| *identifier == app.bundle_identifier.as_str())
             .map(|idx| (0, idx));
-        let follow_up_index = DEV_210_FOLLOW_UP
-            .iter()
-            .position(|identifier| *identifier == app.bundle_identifier.as_str())
-            .map(|idx| (1, idx));
-        let priority = focus_index.or(follow_up_index).unwrap_or((2, 0));
+        let priority = focus_index.unwrap_or((1, 0));
         (priority, app.display_name.to_uppercase())
     });
 
@@ -2019,6 +2025,26 @@ mod tests {
         assert_eq!(
             picker_compatibility(&test_app("com.chillingo.spoing", "Spoing")),
             "playable"
+        );
+        assert_eq!(
+            picker_compatibility(&test_app("com.sega.chuchu", "ChuChu Rocket")),
+            "playable"
+        );
+        assert_eq!(
+            picker_compatibility(&test_app("com.clickgamer.sticky", "Sticky")),
+            "playable"
+        );
+        assert_eq!(
+            picker_compatibility(&test_app("unknown.bundle", "Glowfish HD")),
+            "needsWork"
+        );
+        assert_eq!(
+            picker_compatibility(&test_app("unknown.bundle", "Splode")),
+            "needsWork"
+        );
+        assert_eq!(
+            picker_compatibility(&test_app("unknown.bundle", "Toy Bot 2")),
+            "needsWork"
         );
         assert_eq!(
             picker_compatibility(&test_app("com.popcap.Peggle", "Peggle")),

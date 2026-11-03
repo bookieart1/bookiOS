@@ -79,8 +79,8 @@ pub(super) struct EAGLContextHostObject {
     /// other platforms, where binding 0 is genuinely the default
     /// framebuffer.
     drawable_framebuffer: GLuint,
-    /// Number of bounded first-presentation state snapshots already logged.
-    diagnostic_present_snapshots: u8,
+    /// Presentation count used for a fixed set of bounded GL-state milestones.
+    diagnostic_present_snapshots: u16,
 }
 impl HostObject for EAGLContextHostObject {}
 
@@ -357,12 +357,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     let diagnostic_snapshot = {
         let host = env.objc.borrow_mut::<EAGLContextHostObject>(this);
-        if host.diagnostic_present_snapshots < 3 {
-            host.diagnostic_present_snapshots += 1;
-            Some(host.diagnostic_present_snapshots)
-        } else {
-            None
-        }
+        host.diagnostic_present_snapshots = host.diagnostic_present_snapshots.saturating_add(1);
+        let frame = host.diagnostic_present_snapshots;
+        matches!(frame, 1 | 2 | 3 | 8 | 16 | 32 | 64 | 128).then_some(frame)
     };
 
     let fullscreen_layer = find_fullscreen_eagl_layer(env);
@@ -386,9 +383,11 @@ pub const CLASSES: ClassExports = objc_classes! {
         let framebuffer_status = unsafe {
             gles.CheckFramebufferStatusOES(gles11::FRAMEBUFFER_OES)
         };
+        let texture_2d = unsafe { get_int(gles.as_mut(), gles11::TEXTURE_BINDING_2D) };
+        let matrix_mode = unsafe { get_int(gles.as_mut(), gles11::MATRIX_MODE) };
         let scissor_enabled = unsafe { gles.IsEnabled(gles11::SCISSOR_TEST) } != gles11::FALSE;
         log!(
-            "EAGL present state {}/3: context={:?} renderbuffer={} size={}x{} framebuffer={} status={:#x} viewport={:?} scissor-enabled={} scissor={:?}",
+            "EAGL present milestone frame={}: context={:?} renderbuffer={} size={}x{} framebuffer={} status={:#x} viewport={:?} scissor-enabled={} scissor={:?} texture2d={} matrix-mode={:#x}",
             snapshot,
             this,
             renderbuffer,
@@ -398,7 +397,9 @@ pub const CLASSES: ClassExports = objc_classes! {
             framebuffer_status,
             viewport,
             scissor_enabled,
-            scissor
+            scissor,
+            texture_2d,
+            matrix_mode
         );
     }
 

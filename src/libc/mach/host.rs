@@ -36,6 +36,7 @@ pub const PHYSICAL_MEMORY: natural_t =
     (FREE_COUNT + ACTIVE_COUNT + INACTIVE_COUNT + WIRE_COUNT) * PAGE_SIZE;
 
 const HOST_VM_INFO: host_flavor_t = 2;
+const KERN_INVALID_ARGUMENT: kern_return_t = 4;
 
 #[repr(C, packed)]
 struct vm_statistics {
@@ -82,7 +83,9 @@ fn host_statistics(
     assert_eq!(flavor, HOST_VM_INFO);
     let out_size_available = env.mem.read(host_info_out_count);
     let out_size_expected = guest_size_of::<vm_statistics>() / guest_size_of::<natural_t>();
-    assert_eq!(out_size_expected, out_size_available);
+    if out_size_available < out_size_expected {
+        return KERN_INVALID_ARGUMENT;
+    }
     // Below values corresponds to a run of an iPod Touch 4 running iOS 6.1.
     // As touchHLE doesn't have a paging system (yet? never?),
     // those numbers are (mostly) meaningless.
@@ -112,6 +115,9 @@ fn host_statistics(
             speculative_count: 0,
         },
     );
+    // Mach APIs accept a capacity on entry and report the number of natural_t
+    // values actually written on return. Extra caller capacity is valid.
+    env.mem.write(host_info_out_count, out_size_expected);
     KERN_SUCCESS
 }
 
@@ -120,3 +126,27 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(host_page_size(_, _)),
     export_c_func!(host_statistics(_, _, _, _)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_statistics_accepts_capacity_and_reports_words_written() {
+        let mut env = Environment::new_fake_for_test();
+        let output = env.mem.alloc(60 * guest_size_of::<natural_t>()).cast();
+        let count = env.mem.alloc_and_write(60);
+        assert_eq!(
+            host_statistics(&mut env, MACH_HOST_SELF, HOST_VM_INFO, output, count),
+            KERN_SUCCESS
+        );
+        let expected = guest_size_of::<vm_statistics>() / guest_size_of::<natural_t>();
+        assert_eq!(env.mem.read(count), expected);
+
+        env.mem.write(count, expected - 1);
+        assert_eq!(
+            host_statistics(&mut env, MACH_HOST_SELF, HOST_VM_INFO, output, count),
+            KERN_INVALID_ARGUMENT
+        );
+    }
+}

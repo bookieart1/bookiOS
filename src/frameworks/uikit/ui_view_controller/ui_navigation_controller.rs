@@ -5,11 +5,48 @@
  */
 //! `UINavigationController`.
 
+use crate::frameworks::core_graphics::CGRect;
 use crate::frameworks::foundation::{ns_array, NSUInteger};
 use crate::objc::{
-    autorelease, id, impl_HostObject_with_superclass, msg, nil, objc_classes, release, retain,
-    ClassExports, NSZonePtr, SEL,
+    autorelease, id, impl_HostObject_with_superclass, msg, msg_class, msg_super, nil,
+    objc_classes, release, retain, ClassExports, NSZonePtr, SEL,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Environment;
+
+    #[test]
+    fn pushed_controller_observes_container_and_stable_navigation_bar() {
+        let mut env = Environment::new_fake_for_test();
+        let root: id = msg_class![env; UIViewController new];
+        let nav: id = msg_class![env; UINavigationController alloc];
+        let nav: id = msg![env; nav initWithRootViewController:root];
+        let observed: id = msg![env; root navigationController];
+        assert_eq!(observed, nav);
+
+        let first_bar: id = msg![env; nav navigationBar];
+        let second_bar: id = msg![env; nav navigationBar];
+        assert_eq!(first_bar, second_bar);
+        let root_item: id = msg![env; root navigationItem];
+        let top_item: id = msg![env; first_bar topItem];
+        assert_eq!(top_item, root_item);
+
+        let child: id = msg_class![env; UIViewController new];
+        () = msg![env; nav pushViewController:child animated:false];
+        let observed: id = msg![env; child navigationController];
+        assert_eq!(observed, nav);
+        let popped: id = msg![env; nav popViewControllerAnimated:false];
+        assert_eq!(popped, child);
+        let observed: id = msg![env; child navigationController];
+        assert_eq!(observed, nil);
+
+        release(&mut env, child);
+        release(&mut env, nav);
+        release(&mut env, root);
+    }
+}
 
 // TODO: navigation bar and toolbar
 // TODO: animations
@@ -22,6 +59,8 @@ struct UINavigationControllerHostObject {
     /// Navigation stack of view controllers, non-retaining
     /// (we explicitly retain/release on push/pop messages)
     navigation_stack: Vec<id>,
+    /// Stable UINavigationBar owned by the controller.
+    navigation_bar: id,
     /// Whether the controller's navigation bar is hidden. The navigation bar
     /// itself is not rendered yet, but callers can still observe and update the
     /// public property consistently.
@@ -45,6 +84,19 @@ pub const CLASSES: ClassExports = objc_classes! {
     this
 }
 
+- (())dealloc {
+    let (stack, navigation_bar) = {
+        let host = env.objc.borrow_mut::<UINavigationControllerHostObject>(this);
+        (std::mem::take(&mut host.navigation_stack), host.navigation_bar)
+    };
+    for controller in stack {
+        super::set_navigation_controller(env, controller, nil);
+        release(env, controller);
+    }
+    release(env, navigation_bar);
+    msg_super![env; this dealloc]
+}
+
 // weak/non-retaining
 - (())setDelegate:(id)delegate { // something implementing UINavigationControllerDelegate
     log_dbg!("[(UINavigationController*){:?} setDelegate:{:?}]", this, delegate);
@@ -61,6 +113,11 @@ pub const CLASSES: ClassExports = objc_classes! {
     assert!(!stack.contains(&view_controller));
     stack.push(view_controller);
     retain(env, view_controller);
+    super::set_navigation_controller(env, view_controller, this);
+
+    let navigation_bar: id = msg![env; this navigationBar];
+    let navigation_item: id = msg![env; view_controller navigationItem];
+    () = msg![env; navigation_bar pushNavigationItem:navigation_item animated:false];
 
     let delegate = env.objc.borrow::<UINavigationControllerHostObject>(this).delegate;
     let sel: SEL = env
@@ -98,6 +155,35 @@ pub const CLASSES: ClassExports = objc_classes! {
         nil
     }
 }
+- (id)visibleViewController {
+    msg![env; this topViewController]
+}
+
+- (id)popViewControllerAnimated:(bool)_animated {
+    let controller = {
+        let stack = &mut env
+            .objc
+            .borrow_mut::<UINavigationControllerHostObject>(this)
+            .navigation_stack;
+        if stack.len() <= 1 {
+            return nil;
+        }
+        stack.pop().unwrap()
+    };
+    let view = env
+        .objc
+        .borrow::<super::UIViewControllerHostObject>(controller)
+        .view;
+    if view != nil {
+        () = msg![env; controller viewWillDisappear:false];
+        () = msg![env; view removeFromSuperview];
+        () = msg![env; controller viewDidDisappear:false];
+    }
+    super::set_navigation_controller(env, controller, nil);
+    let navigation_bar: id = msg![env; this navigationBar];
+    let _: id = msg![env; navigation_bar popNavigationItemAnimated:false];
+    autorelease(env, controller)
+}
 
 - (id)viewControllers {
     let vcs = env.objc.borrow::<UINavigationControllerHostObject>(this).navigation_stack.to_vec();
@@ -126,8 +212,11 @@ pub const CLASSES: ClassExports = objc_classes! {
         // TODO: view{Will,Did}Disappear: messages for vc?
         () = msg![env; vc_view removeFromSuperview];
 
+        super::set_navigation_controller(env, controller, nil);
         release(env, controller);
     }
+    let navigation_bar: id = msg![env; this navigationBar];
+    () = msg![env; navigation_bar setItems:nil animated:false];
 
     let mut tmp_stack: Vec<id> = Vec::new();
     let count: NSUInteger = msg![env; controllers count];
@@ -137,6 +226,9 @@ pub const CLASSES: ClassExports = objc_classes! {
         let next: id = msg![env; controllers objectAtIndex:i];
         tmp_stack.push(next);
         retain(env, next);
+        super::set_navigation_controller(env, next, this);
+        let item: id = msg![env; next navigationItem];
+        () = msg![env; navigation_bar pushNavigationItem:item animated:false];
     }
     env.objc.borrow_mut::<UINavigationControllerHostObject>(this).navigation_stack = tmp_stack;
 
@@ -147,8 +239,20 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)navigationBar {
-    // TODO
-    nil
+    let existing = env
+        .objc
+        .borrow::<UINavigationControllerHostObject>(this)
+        .navigation_bar;
+    if existing != nil {
+        return existing;
+    }
+    let bar: id = msg_class![env; UINavigationBar alloc];
+    let frame = CGRect::default();
+    let bar: id = msg![env; bar initWithFrame:frame];
+    env.objc
+        .borrow_mut::<UINavigationControllerHostObject>(this)
+        .navigation_bar = bar;
+    bar
 }
 - (bool)isNavigationBarHidden {
     env.objc.borrow::<UINavigationControllerHostObject>(this).navigation_bar_hidden
