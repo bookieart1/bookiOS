@@ -18,12 +18,12 @@ mod tests {
     use crate::Environment;
 
     #[test]
-    fn pushed_controller_observes_container_and_stable_navigation_bar() {
+    fn controller_observes_container_and_stable_navigation_bar_state() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
         let root: id = msg_class![env; UIViewController new];
         let nav: id = msg_class![env; UINavigationController alloc];
-        super::set_navigation_controller(env, root, nav);
+        super::super::set_navigation_controller(env, root, nav);
         let observed: id = msg![env; root navigationController];
         assert_eq!(observed, nav);
 
@@ -43,14 +43,14 @@ mod tests {
         assert_eq!(top_item, root_item);
 
         let child: id = msg_class![env; UIViewController new];
-        super::set_navigation_controller(env, child, nav);
+        super::super::set_navigation_controller(env, child, nav);
         let observed: id = msg![env; child navigationController];
         assert_eq!(observed, nav);
-        super::set_navigation_controller(env, child, nil);
+        super::super::set_navigation_controller(env, child, nil);
         let observed: id = msg![env; child navigationController];
         assert_eq!(observed, nil);
 
-        super::set_navigation_controller(env, root, nil);
+        super::super::set_navigation_controller(env, root, nil);
         release(env, child);
         release(env, nav);
         release(env, root);
