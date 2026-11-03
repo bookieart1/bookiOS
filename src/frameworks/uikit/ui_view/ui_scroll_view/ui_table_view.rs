@@ -392,6 +392,11 @@ mod tests {
     fn dequeue_matches_identifier_and_transfers_queue_ownership() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        // UIView initialization passes CGRect values through the guest ABI.
+        // The lightweight fixture has no stack unless the test supplies one.
+        let stack_size = 0x1000;
+        let stack = env.mem.alloc(stack_size);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + stack_size;
         let pool: id = msg_class![env; NSAutoreleasePool new];
         let table: id = msg_class![env; UITableView new];
         let reuse = ns_string::get_static_str(env, "Cell");
@@ -415,5 +420,7 @@ mod tests {
             .is_empty());
         release(env, table);
         release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

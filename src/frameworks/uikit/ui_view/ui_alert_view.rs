@@ -25,6 +25,11 @@ mod tests {
     fn historical_initializer_preserves_button_roles_and_order() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        // UIView initialization passes CGRect values through the guest ABI.
+        // The lightweight fixture has no stack unless the test supplies one.
+        let stack_size = 0x1000;
+        let stack = env.mem.alloc(stack_size);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + stack_size;
         let title = ns_string::get_static_str(env, "Title");
         let message = ns_string::get_static_str(env, "Message");
         let default_button = ns_string::get_static_str(env, "Play");
@@ -50,6 +55,8 @@ mod tests {
         assert!(equal);
         release(env, alert);
         release(env, extras);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }
 
