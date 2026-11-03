@@ -115,6 +115,42 @@ fn decode_arm_pc_relative_literal_load(
     Some((((instruction >> 12) & 0xf) as u8, literal_address))
 }
 
+/// Recognize one straight-line A32 import-load idiom seen in several engines:
+/// LDR Rn,[PC,#literal]; MOV; MOV; LDR Rn,[PC,Rn]; LDR Rn,[Rn].
+/// Reject other instructions, conditions, writeback and intervening writes.
+/// This is terminal reconstruction from current memory, not execution tracing.
+fn decode_arm_indirect_literal_chain(
+    fault: u32,
+    read: impl Fn(u32) -> Option<u32>,
+) -> Option<(u8, u32, u32, u32)> {
+    let first = fault.checked_sub(16)?;
+    let literal_load = read(first)?;
+    if literal_load >> 28 != 0xe {
+        return None;
+    }
+    let (register, literal) = decode_arm_pc_relative_literal_load(first, literal_load)?;
+    if register == 15 {
+        return None;
+    }
+    for address in [first + 4, first + 8] {
+        let instruction = read(address)?;
+        if !matches!(instruction & 0xffff_0000, 0xe1a0_0000 | 0xe3a0_0000)
+            || ((instruction >> 12) & 15) == u32::from(register)
+            || ((instruction >> 12) & 15) == 15
+        {
+            return None;
+        }
+    }
+    let r = u32::from(register);
+    if read(fault - 4)? != (0xe79f_0000 | (r << 12) | r)
+        || read(fault)? != (0xe590_0000 | (r << 16) | (r << 12))
+    {
+        return None;
+    }
+    let slot = fault.wrapping_add(4).wrapping_add(read(literal)?);
+    Some((register, literal, slot, read(slot)?))
+}
+
 impl Thread {
     fn is_blocked(&self) -> bool {
         !matches!(self.blocked_by, ThreadBlock::NotBlocked)
@@ -584,6 +620,9 @@ impl Environment {
         let mut objc = objc::ObjC::new();
 
         let mut diagnostics = options.diagnostics.then(crate::diagnostics::Recorder::new);
+        mem.object_history = options
+            .diagnostics
+            .then(|| Box::new(crate::mem::object_history::ObjectHistory::new()));
         let mut dyld = dyld::Dyld::new();
         dyld.do_initial_linking(
             &bins,
@@ -1769,6 +1808,46 @@ impl Environment {
         // stripped producer can be inspected without instruction tracing.
         if (cpsr & cpu::Cpu::CPSR_THUMB) == 0 {
             let fault_instruction = pc.saturating_sub(4);
+            if self.diagnostics.is_some() {
+                let read = |address| {
+                    let bytes = self
+                        .mem
+                        .get_bytes_fallible(mem::ConstVoidPtr::from_bits(address), 4)?;
+                    Some(u32::from_le_bytes(bytes.try_into().ok()?))
+                };
+                if let Some((register, literal, slot, value)) =
+                    decode_arm_indirect_literal_chain(fault_instruction, read)
+                {
+                    log_no_panic!("{source} A32 indirect-load candidate: R{register}, literal={literal:#010x}, import-slot={slot:#010x}, current-slot-value={value:#010x}, current-register={:#010x}; exact instruction idiom, current-memory reconstruction only", self.cpu.regs()[register as usize]);
+                    for bin in &self.bins {
+                        for (address, symbol) in &bin.external_relocations {
+                            if *address == slot {
+                                log_no_panic!("{source} indirect-load relocation: {}!{symbol}", bin.name);
+                            }
+                        }
+                        for section in &bin.sections {
+                            let Some(info) = &section.dyld_indirect_symbol_info else {
+                                continue;
+                            };
+                            if section.type_ != mach_o::SectionType::NonLazySymbolPointers
+                                || info.entry_size == 0
+                                || slot < section.addr
+                            {
+                                continue;
+                            }
+                            let offset = slot - section.addr;
+                            if offset < section.size && offset.is_multiple_of(info.entry_size) {
+                                if let Some(Some(symbol)) = info
+                                    .indirect_undef_symbols
+                                    .get((offset / info.entry_size) as usize)
+                                {
+                                    log_no_panic!("{source} indirect-load import: {}!{symbol}", bin.name);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             for distance in (4..=32).step_by(4) {
                 let instruction_address = fault_instruction.saturating_sub(distance);
                 let instruction_ptr = mem::ConstVoidPtr::from_bits(instruction_address);
@@ -2515,6 +2594,79 @@ impl Drop for Environment {
 #[cfg(test)]
 mod memory_fault_diagnostic_tests {
     use super::{decode_arm_direct_global_getter, decode_arm_pc_relative_literal_load};
+
+    #[test]
+    fn indirect_literal_chain_reconstructs_slot_and_rejects_overwritten_register() {
+        use super::decode_arm_indirect_literal_chain;
+        let mut words = std::collections::HashMap::from([
+            (0x1000, 0xe59f_3294),
+            (0x1004, 0xe1a0_1004),
+            (0x1008, 0xe3a0_2001),
+            (0x100c, 0xe79f_3003),
+            (0x1010, 0xe593_3000),
+            (0x129c, 0x1000),
+            (0x2014, 0),
+        ]);
+        assert_eq!(
+            decode_arm_indirect_literal_chain(0x1010, |a| words.get(&a).copied()),
+            Some((3, 0x129c, 0x2014, 0))
+        );
+        words.insert(0x1008, 0xe3a0_3001);
+        assert!(decode_arm_indirect_literal_chain(0x1010, |a| words.get(&a).copied()).is_none());
+        words.insert(0x1008, 0xeb00_0000);
+        assert!(decode_arm_indirect_literal_chain(0x1010, |a| words.get(&a).copied()).is_none());
+        assert!(decode_arm_indirect_literal_chain(0, |_| None).is_none());
+    }
+
+    #[test]
+    fn object_history_preserves_collision_after_guest_free_svc() {
+        use super::*;
+        use crate::objc::{id, msg_class, TrivialHostObject};
+        for enabled in [false, true] {
+            let mut environment = Environment::new_fake_for_test();
+            let env = &mut environment;
+            env.diagnostics = enabled.then(crate::diagnostics::Recorder::new);
+            env.mem.object_history =
+                enabled.then(|| Box::new(crate::mem::object_history::ObjectHistory::new()));
+            let f = env
+                .dyld
+                .create_proc_address(&mut env.mem, &mut env.cpu, "_free")
+                .unwrap();
+            let stack = env.mem.alloc(16);
+            let object: id = msg_class![env; NSObject new];
+            let isa = objc::ObjC::read_isa(object, &env.mem);
+            let svc: u32 = env
+                .mem
+                .read(mem::ConstPtr::from_bits(f.addr_without_thumb_bit()));
+            env.cpu.regs_mut()[0] = object.to_bits();
+            env.cpu.regs_mut()[cpu::Cpu::SP] = stack.to_bits();
+            env.cpu.regs_mut()[cpu::Cpu::LR] = 0x1235;
+            env.cpu.regs_mut()[cpu::Cpu::PC] = f.addr_without_thumb_bit() + 4;
+            // Deliberately reproduce the invariant violation, not game code:
+            // free guest storage without removing its Objective-C registration.
+            env.handle_cpu_state(cpu::CpuState::Svc(svc & 0x00ff_ffff));
+            assert!(env.objc.get_host_object(object).is_some());
+            let error = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                env.objc
+                    .alloc_object(isa, Box::new(TrivialHostObject), &mut env.mem);
+            }))
+            .expect_err("collision must still fail with diagnostics on or off");
+            let message = error.downcast_ref::<String>().unwrap();
+            assert!(message.contains("Object allocation collision"), "{message}");
+            if let Some(history) = &env.mem.object_history {
+                let record = history.get(object.to_bits()).unwrap();
+                assert_eq!(record.origin.class, isa.to_bits());
+                assert_eq!(record.removed.sequence, 0);
+                assert_eq!(record.freed.action, "heap-free-completed");
+                assert_eq!(record.freed.context.api, "_free");
+                assert_eq!(record.freed.context.lr, 0x1235);
+                assert!(record.events().any(|e| e.action == "object-table-collision"));
+                history.dump(object.to_bits());
+            }
+            // The collision must not write a replacement object header.
+            assert_eq!(env.mem.read::<u32>(object.cast()), 0);
+        }
+    }
 
     #[test]
     fn flight_recorder_preserves_real_sysctl_failure_through_svc() {

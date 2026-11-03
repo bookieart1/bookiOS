@@ -124,3 +124,26 @@ jobs:
           path: build/iDared32bit-dev-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
+
+      - name: Preserve native crash symbol identity
+        run: |
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/iDared32bit.xcarchive"
+          mkdir -p build/native-symbols
+          cp -R "$ARCHIVE/dSYMs" build/native-symbols/
+          test -n "$(find build/native-symbols/dSYMs -name '*.dSYM' -print -quit)"
+          {
+            echo "commit=$GITHUB_SHA"
+            echo "workflow=https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            dwarfdump --uuid "$ARCHIVE/Products/Applications/iDared 32bit.app/iDared 32bit"
+            find build/native-symbols/dSYMs -name '*.dSYM' -exec dwarfdump --uuid {} \;
+          } > build/native-symbols/identity.txt
+          cat build/native-symbols/identity.txt
+
+      - name: Upload native crash symbols
+        uses: actions/upload-artifact@v7
+        with:
+          name: iDared32bit-native-symbols-${{ github.sha }}
+          path: build/native-symbols/
+          if-no-files-found: error
+          retention-days: 90

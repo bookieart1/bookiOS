@@ -194,8 +194,19 @@ impl super::ObjC {
         assert!(instance_size >= guest_size_of::<objc_object>());
 
         let ptr: MutPtr<objc_object> = mem.alloc(instance_size).cast();
+        // Keep the strict failure, but do not overwrite the conflicting isa
+        // before reporting it. The history does not control allocation policy.
+        if self.objects.contains_key(&ptr) {
+            if let Some(history) = &mut mem.object_history {
+                history.event(ptr.to_bits(), "object-table-collision", 0, isa.to_bits());
+                history.dump(ptr.to_bits());
+            }
+            panic!("Object allocation collision at {ptr:?}: address still registered, requested class {isa:?}");
+        }
         mem.write(ptr, guest_object);
-        assert!(!self.objects.contains_key(&ptr));
+        if let Some(history) = &mut mem.object_history {
+            history.allocated(ptr.to_bits(), isa.to_bits(), instance_size);
+        }
         self.objects.insert(
             ptr,
             HostObjectEntry {
@@ -465,6 +476,9 @@ impl super::ObjC {
 
         std::mem::drop(host_object);
 
+        if let Some(history) = &mut mem.object_history {
+            history.event(object.to_bits(), "host-object-removed", 0, 0);
+        }
         mem.free(object.cast());
     }
 }

@@ -1001,6 +1001,16 @@ impl Environment {
     pub fn diagnostic_api_begin(&mut self, name: &'static str) -> Option<Call> {
         let recorder = self.diagnostics.as_mut()?;
         recorder.api += 1;
+        if let Some(history) = &mut self.mem.object_history {
+            let regs = self.cpu.regs();
+            history.context(crate::mem::object_history::Context {
+                thread: self.current_thread,
+                pc: regs[15],
+                lr: regs[14],
+                api: name,
+                ..Default::default()
+            });
+        }
         // ObjC is recorded at its decoded dispatch boundary. Count high-volume
         // graphics/allocator/memory primitives without erasing other history.
         if name.starts_with("_objc_msgSend")
@@ -1065,6 +1075,17 @@ impl Environment {
     ) -> Option<Call> {
         let recorder = self.diagnostics.as_mut()?;
         recorder.objc += 1;
+        if let Some(history) = &mut self.mem.object_history {
+            let regs = self.cpu.regs();
+            history.context(crate::mem::object_history::Context {
+                thread: self.current_thread,
+                pc: regs[15],
+                lr: regs[14],
+                api: if host_internal { "ObjC(host)" } else { "ObjC" },
+                receiver,
+                selector,
+            });
+        }
         let name = Text::guest(&self.mem, selector);
         if matches!(
             name.bytes(),
@@ -1293,6 +1314,9 @@ impl Environment {
         after: u32,
     ) {
         let address = object.to_bits();
+        if let Some(history) = &mut self.mem.object_history {
+            history.event(address, action, before, after);
+        }
         if !self
             .diagnostics
             .as_ref()
@@ -1366,6 +1390,46 @@ impl Environment {
     }
     pub fn diagnostic_dump(&mut self, reason: &str) {
         if let Some(recorder) = &mut self.diagnostics {
+            if !recorder.dumped {
+                if let Some(history) = &self.mem.object_history {
+                    echo_no_panic!("object history enabled: 2048 address slots, 8 recent events/address, evictions={}; heap/ObjC boundaries only, no guest-store tracing", history.evictions);
+                    if matches!(reason, "panic" | "scheduler-panic") {
+                        // Prefer the final boundary's consumed values over
+                        // arbitrary registers. At most eight retained records.
+                        let mut candidates = [0; 64];
+                        let mut n = 0;
+                        for event in recorder.recent.iter().rev().take(8) {
+                            for address in [
+                                event.call.receiver,
+                                event.call.args[2],
+                                event.call.args[3],
+                            ] {
+                                if address != 0 && !candidates[..n].contains(&address) {
+                                    candidates[n] = address;
+                                    n += 1;
+                                }
+                            }
+                        }
+                        for &address in &self.cpu.regs()[..13] {
+                            if address != 0 && !candidates[..n].contains(&address) {
+                                candidates[n] = address;
+                                n += 1;
+                            }
+                        }
+                        let mut shown = 0;
+                        for &address in &candidates[..n] {
+                            if history.dump(address) {
+                                echo_no_panic!("object current address={address:#010x} readable-isa={:?} registered={} (readable bytes do not establish a live object)", read_word(&self.mem, address), self.objc.get_host_object(id::from_bits(address)).is_some());
+                                shown += 1;
+                                if shown == 8 {
+                                    break;
+                                }
+                            }
+                        }
+                        echo_no_panic!("object history lookup: {shown} retained candidate records shown; absent/evicted records cannot exclude earlier lifetime faults");
+                    }
+                }
+            }
             if !recorder.dumped && matches!(reason, "panic" | "scheduler-panic") {
                 let callers = recorder.crash_callers(self.current_thread);
                 echo_no_panic!("flight crash caller code: up to {CRASH_CALLERS} distinct recent LR values on the failing thread; raw bytes, not a call stack; Thumb mode comes from LR bit 0");

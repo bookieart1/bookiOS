@@ -16,6 +16,7 @@
 
 mod allocator;
 mod host;
+pub(crate) mod object_history;
 
 pub use allocator::{HeapAllocator, VMAllocError};
 
@@ -260,6 +261,8 @@ pub struct Mem {
     /// A few games set this to `false` via a game-specific hack. See
     /// [crate::Environment] for more info.
     pub(super) zero_memory_on_free: bool,
+    /// Diagnostic copies only; never consulted to allow or reject memory access.
+    pub(crate) object_history: Option<Box<object_history::ObjectHistory>>,
 }
 
 impl Drop for Mem {
@@ -312,6 +315,7 @@ impl Mem {
             vm_allocator,
             heap_allocator: None,
             zero_memory_on_free: true,
+            object_history: None,
         }
     }
 
@@ -557,6 +561,10 @@ impl Mem {
         };
         let ptr = Ptr::from_bits(alloc.base);
 
+        if let Some(history) = &mut self.object_history {
+            history.event(alloc.base, "heap-address-reused", 0, size);
+        }
+
         if !self.zero_memory_on_free && alloc.size.get() <= HeapAllocator::HEAP_ALLOCATION_THRESHOLD
         {
             self.bytes_at_mut(ptr.cast(), size).fill(0);
@@ -665,6 +673,10 @@ impl Mem {
         let (vm, heap) = self.allocators_mut(heap);
         let size = heap.free(vm, ptr.to_bits());
 
+        if let Some(history) = &mut self.object_history {
+            history.event(ptr.to_bits(), "heap-free-completed", 0, size);
+        }
+
         if size > HeapAllocator::HEAP_ALLOCATION_THRESHOLD {
             // VM allocations are always 0 initialized.
             // TODO: Can this be done with vm_advise/equivalents
@@ -680,6 +692,9 @@ impl Mem {
     /// within the provided range are freed.
     pub fn vm_free(&mut self, ptr: MutVoidPtr, size: GuestUSize) {
         let freed = self.vm_allocator.deallocate(ptr.to_bits(), size);
+        if let Some(history) = &mut self.object_history {
+            history.vm_freed(freed.base, freed.size.get());
+        }
         // VM allocations are always 0 initialized.
         // TODO: Can this be done with vm_advise/equivalents
         self.bytes_at_mut(Ptr::from_bits(freed.base), freed.size.get())

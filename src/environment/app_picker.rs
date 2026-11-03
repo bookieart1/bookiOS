@@ -213,16 +213,13 @@ fn enumerate_apps(
     // which it should be exercised. Everything else remains alphabetical.
     // Bundle identifiers avoid depending on localized or truncated names.
     const FOCUSED_TEST_BATCH: &[&str] = &[
-        "com.gamevil.advena",
-        "com.krome.BoomerangBlast",
-        "com.munkadoogames.bouncymouse",
-        "com.digitalprunes.BungeeBall2Pro",
-        "com.shauninman.flipsescape",
-        "com.whaleislandgames.junny",
-        "com.sandlotgames.locv",
+        "com.chillingo.anomalyhd",
+        "com.wooglie.crashdrive",
+        "com.sega.jacklumber",
         "com.popcap.Peggle",
-        "com.teotlstudios.unmechanical",
-        "com.gamevil.zenonia2",
+        "com.craneballs.stuntman",
+        "com.spokko.TikiTotems2",
+        "com.ngmoco.Topple2",
         "com.chillingo.spoing",
     ];
     apps.sort_by_key(|app| {
