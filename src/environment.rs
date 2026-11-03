@@ -623,6 +623,11 @@ impl Environment {
         mem.object_history = options
             .diagnostics
             .then(|| Box::new(crate::mem::object_history::ObjectHistory::new()));
+        if let Some(history) = &mut mem.object_history {
+            for &address in &options.diagnostic_watch_addresses {
+                history.watch_address(address);
+            }
+        }
         let mut dyld = dyld::Dyld::new();
         dyld.do_initial_linking(
             &bins,

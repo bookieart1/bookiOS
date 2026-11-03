@@ -314,6 +314,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (id)pathForResource:(id)name // NSString*
                ofType:(id)extension // NSString*
           inDirectory:(id)directory { // NSString*
+    if let Some(history) = &mut env.mem.object_history {
+        history.watch_resource(name.to_bits());
+    }
     let is_empty = |env: &mut Environment, s: id| {
         s == nil || ns_string::to_rust_string(env, s).is_empty()
     };

@@ -298,7 +298,11 @@ fn strncat(env: &mut Environment, s1: MutPtr<u8>, s2: ConstPtr<u8>, n: GuestUSiz
     GenericChar::<u8>::strncat(env, s1, s2, n)
 }
 fn strstr(env: &mut Environment, string: ConstPtr<u8>, substring: ConstPtr<u8>) -> ConstPtr<u8> {
-    GenericChar::<u8>::strstr(env, string, substring)
+    let result = GenericChar::<u8>::strstr(env, string, substring);
+    if result.is_null() {
+        env.diagnostic_string_search_miss(string.to_bits(), substring.to_bits());
+    }
+    result
 }
 fn strcasestr(
     env: &mut Environment,
@@ -382,6 +386,25 @@ pub const FUNCTIONS: FunctionExports = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strstr_diagnostic_preserves_found_empty_missing_and_fault_behavior() {
+        for enabled in [false, true] {
+            let mut env = Environment::new_fake_for_test_with_null_segment(0x1000);
+            env.diagnostics = enabled.then(crate::diagnostics::Recorder::new);
+            let text = env.mem.alloc_and_write_cstr(b"name.xml").cast_const();
+            let found = env.mem.alloc_and_write_cstr(b".xml").cast_const();
+            let absent = env.mem.alloc_and_write_cstr(b".png").cast_const();
+            let empty = env.mem.alloc_and_write_cstr(b"").cast_const();
+            assert_eq!(strstr(&mut env, text, found), text + 4);
+            assert_eq!(strstr(&mut env, text, empty), text);
+            assert!(strstr(&mut env, text, absent).is_null());
+            let fault = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                strstr(&mut env, ConstPtr::null(), found)
+            }));
+            assert!(fault.is_err(), "diagnostics must not tolerate null input");
+        }
+    }
 
     #[test]
     fn strcasestr_finds_case_insensitive_offsets_and_edges() {

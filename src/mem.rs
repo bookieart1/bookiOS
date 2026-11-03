@@ -562,6 +562,7 @@ impl Mem {
         let ptr = Ptr::from_bits(alloc.base);
 
         if let Some(history) = &mut self.object_history {
+            history.heap_event(alloc.base, size, "heap-allocated");
             history.event(alloc.base, "heap-address-reused", 0, size);
         }
 
@@ -674,6 +675,7 @@ impl Mem {
         let size = heap.free(vm, ptr.to_bits());
 
         if let Some(history) = &mut self.object_history {
+            history.heap_event(ptr.to_bits(), size, "heap-freed");
             history.event(ptr.to_bits(), "heap-free-completed", 0, size);
         }
 

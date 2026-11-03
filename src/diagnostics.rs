@@ -33,6 +33,7 @@ const WATCHED_OBJECTS: usize = 16;
 const OBJECT_LIFETIME_EVENTS: usize = 64;
 const DICTIONARY_ORIGINS: usize = 1024;
 const UNRESOLVED_RELOCATIONS: usize = 32;
+const STRING_SEARCH_FAILURES: usize = 16;
 const HEALTHY_PRESENT_INTERVAL: Duration = Duration::from_millis(100);
 const SLOW_PRESENT_INTERVAL: Duration = Duration::from_millis(180);
 const HEALTHY_PRESENT_STREAK: u16 = 30;
@@ -384,6 +385,17 @@ struct UnresolvedRelocation {
     count: usize,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct StringSearchFailure {
+    thread: usize,
+    pc: u32,
+    lr: u32,
+    haystack: u32,
+    needle: u32,
+    text: Text,
+    pattern: Text,
+}
+
 pub struct Recorder {
     recent: Ring<Event, RECENT>,
     signals: Ring<Event, SIGNALS>,
@@ -411,6 +423,7 @@ pub struct Recorder {
     /// this preserves evidence for a one-off jank transition.
     worst_present_gap: Option<SlowCapture>,
     unresolved_relocations: Ring<UnresolvedRelocation, UNRESOLVED_RELOCATIONS>,
+    string_search_failures: Ring<StringSearchFailure, STRING_SEARCH_FAILURES>,
     sequence: u64,
     api: u64,
     objc: u64,
@@ -451,6 +464,7 @@ impl Recorder {
             pending_slow_capture: None,
             worst_present_gap: None,
             unresolved_relocations: Ring::default(),
+            string_search_failures: Ring::default(),
             sequence: 0,
             api: 0,
             objc: 0,
@@ -926,6 +940,10 @@ impl Recorder {
         for entry in self.bundle_directory_entries.iter() {
             echo_no_panic!("flight bundle directory entry name=\"{}\"", entry);
         }
+        echo_no_panic!("flight failed strstr searches: newest {STRING_SEARCH_FAILURES}; total={} (80-byte prefixes, ordinary misses are not errors)", self.string_search_failures.written);
+        for entry in self.string_search_failures.iter() {
+            echo_no_panic!("flight strstr miss tid={} pc={:#x} lr={:#x} haystack={:#x} needle={:#x} text=\"{}\" pattern=\"{}\"", entry.thread, entry.pc, entry.lr, entry.haystack, entry.needle, entry.text, entry.pattern);
+        }
         echo_no_panic!(
             "flight collection ownership events: newest {COLLECTION_EVENTS}; total={} (bounded observations, not proof of ownership correctness)",
             self.collection_events.written
@@ -1067,6 +1085,21 @@ fn describe_object(objc: &ObjC, mem: &Mem, address: u32, include_string: bool) -
 }
 
 impl Environment {
+    pub fn diagnostic_string_search_miss(&mut self, haystack: u32, needle: u32) {
+        let Some(recorder) = &mut self.diagnostics else {
+            return;
+        };
+        recorder.string_search_failures.push(StringSearchFailure {
+            thread: self.current_thread,
+            pc: self.cpu.regs()[15],
+            lr: self.cpu.regs()[14],
+            haystack,
+            needle,
+            text: Text::guest(&self.mem, haystack),
+            pattern: Text::guest(&self.mem, needle),
+        });
+    }
+
     /// Observe existing guest/host boundaries without ownership changes.
     pub fn diagnostic_api_begin(&mut self, name: &'static str) -> Option<Call> {
         let recorder = self.diagnostics.as_mut()?;
@@ -1492,6 +1525,7 @@ impl Environment {
             if !recorder.dumped {
                 if let Some(history) = &self.mem.object_history {
                     echo_no_panic!("object history enabled: 8192 address slots, 8 recent events/address, evictions={}; heap/ObjC boundaries only, no guest-store tracing", history.evictions);
+                    history.dump_coverage();
                     if matches!(reason, "panic" | "scheduler-panic") {
                         // Prefer the final boundary's consumed values over
                         // arbitrary registers. At most eight retained records.
@@ -1590,6 +1624,19 @@ impl Environment {
                             }
                         }
                         echo_no_panic!("object history lookup: {shown} retained candidate records shown; absent/evicted records cannot exclude earlier lifetime faults");
+                        let mut heap_shown = 0;
+                        for &address in &candidates[..consumed_count] {
+                            if history.dump_heap(address) {
+                                let bytes = self
+                                    .mem
+                                    .get_bytes_fallible(ConstVoidPtr::from_bits(address), 16);
+                                echo_no_panic!("heap candidate current bytes at {address:#010x}: {bytes:02x?}; registered-object={}", self.objc.get_host_object(id::from_bits(address)).is_some());
+                                heap_shown += 1;
+                                if heap_shown == 8 {
+                                    break;
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -2003,6 +2050,29 @@ mod tests {
             SLOW_RECENT.min(HEALTHY_PRESENT_STREAK as usize)
         );
         assert!(capture.had_healthy_baseline);
+    }
+
+    #[test]
+    fn string_search_capture_is_bounded_and_reads_without_guest_messages() {
+        let mut env = Environment::new_fake_for_test();
+        env.diagnostics = Some(Recorder::new());
+        let haystack = env.mem.alloc_and_write_cstr(&[b'x'; 100]);
+        let needle = env.mem.alloc_and_write_cstr(b".xml");
+        let registers = *env.cpu.regs();
+        for _ in 0..100 {
+            env.diagnostic_string_search_miss(haystack.to_bits(), needle.to_bits());
+        }
+        assert_eq!(*env.cpu.regs(), registers);
+        let recorder = env.diagnostics.as_ref().unwrap();
+        assert_eq!(
+            recorder.string_search_failures.iter().count(),
+            STRING_SEARCH_FAILURES
+        );
+        let last = recorder.string_search_failures.iter().last().unwrap();
+        assert_eq!(last.text.bytes(), &[b'x'; 80]);
+        assert_eq!(last.pattern.bytes(), b".xml");
+        assert_eq!(recorder.objc, 0);
+        assert!(std::mem::size_of::<Recorder>() < MAX_RECORDER_BYTES);
     }
 
     #[test]

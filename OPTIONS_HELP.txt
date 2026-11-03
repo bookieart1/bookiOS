@@ -316,3 +316,11 @@ Other options:
         no API responses or memory checks are changed. A zero raw return is
         not necessarily an error. Options.txt can override this per app with
         --diagnostics=off for controlled performance or behavior comparisons.
+
+    --diagnostic-watch-addresses=<hex-addresses>
+        Optional, diagnostic-only, comma-separated list of up to eight guest
+        addresses from a previous failure. Keep their allocation/ownership
+        history from startup without retaining objects or changing validity.
+        These share a 64-address cap with automatic resource-name watches.
+        Addresses can move between launches/builds; a missing record does not
+        rule out a lifetime bug. Has no effect with --diagnostics=off.

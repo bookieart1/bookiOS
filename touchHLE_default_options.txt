@@ -39,6 +39,10 @@ com.majesticsoftware.blot: --device-family=ipad --force-composition --diagnostic
 # Dev 1.67 focused retest cohort. Recording remains bounded and supports the
 # Blot slow-transition capture plus B'Blast/Addicus follow-on failure evidence.
 com.krome.BoomerangBlast: --diagnostics=flight
+# Diagnostic-only probes: the three fault addresses seen in SUPERFALL's
+# Dev 2.11-2.15 logs. These never change allocation, ownership or validity.
+# Address drift can miss them; resource-name watches also operate generically.
+com.craneballs.stuntman: --diagnostic-watch-addresses=0x3646ddf0,0x3646de20,0x3646de50
 com.getsetgames.addicus: --diagnostics=flight
 com.chillingo.spoing: --diagnostics=flight
 

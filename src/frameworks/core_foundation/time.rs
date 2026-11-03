@@ -6,7 +6,7 @@
 //! Time things including `CFAbsoluteTime`.
 
 use crate::abi::GuestArg;
-use crate::dyld::{export_c_func, FunctionExports};
+use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
 use crate::frameworks::core_foundation::CFTypeRef;
 use crate::frameworks::foundation::NSTimeInterval;
 use crate::libc::time::{time_t, timestamp_to_calendar_date};
@@ -26,6 +26,29 @@ pub fn apple_epoch() -> SystemTime {
 
 pub type CFTimeInterval = NSTimeInterval;
 pub type CFAbsoluteTime = CFTimeInterval;
+
+// These are exported double values, not pointers to NSNumber or NSString.
+// Apple CFDate.c defines the same offsets from the 2001 reference epoch.
+pub const CONSTANTS: ConstantExports = &[
+    (
+        "_kCFAbsoluteTimeIntervalSince1970",
+        HostConstant::Custom(|env| {
+            env.mem
+                .alloc_and_write(SECS_FROM_UNIX_TO_APPLE_EPOCHS as f64)
+                .cast_void()
+                .cast_const()
+        }),
+    ),
+    (
+        "_kCFAbsoluteTimeIntervalSince1904",
+        HostConstant::Custom(|env| {
+            env.mem
+                .alloc_and_write(3_061_152_000.0f64)
+                .cast_void()
+                .cast_const()
+        }),
+    ),
+];
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(C, packed)]
@@ -209,6 +232,43 @@ pub const FUNCTIONS: FunctionExports = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn absolute_time_constants_are_guest_doubles() {
+        let mut env = Environment::new_fake_for_test();
+        for ((_, constant), expected) in CONSTANTS.iter().zip([978_307_200.0f64, 3_061_152_000.0]) {
+            let HostConstant::Custom(export) = constant else {
+                panic!("expected data export")
+            };
+            let address = export(&mut env);
+            assert_ne!(address.to_bits(), 0);
+            assert_eq!(env.mem.read::<f64>(address.cast()), expected);
+            assert_eq!(
+                env.mem.get_bytes_fallible(address, 8).unwrap(),
+                expected.to_le_bytes()
+            );
+            // Execute a guest load of both ABI words; this catches accidentally
+            // exporting a pointer-to-value instead of the double itself.
+            let code = env.mem.alloc(12).cast::<u32>();
+            env.mem.write(code, 0xe592_0000u32); // ldr r0, [r2]
+            env.mem.write(code + 1, 0xe592_1004u32); // ldr r1, [r2, #4]
+            env.mem.write(code + 2, 0xef12_3456u32); // svc #0x123456
+            env.cpu.regs_mut()[2] = address.to_bits();
+            env.cpu
+                .branch(crate::abi::GuestFunction::from_addr_with_thumb_bit(
+                    code.to_bits(),
+                ));
+            let mut ticks = 16;
+            assert!(matches!(
+                env.cpu.run_or_step(&mut env.mem, Some(&mut ticks)),
+                crate::cpu::CpuState::Svc(0x123456)
+            ));
+            let bits = u64::from(env.cpu.regs()[0]) | (u64::from(env.cpu.regs()[1]) << 32);
+            assert_eq!(f64::from_bits(bits), expected);
+        }
+        assert_eq!(at(1970, 1, 1), -978_307_200.0);
+        assert_eq!(at(1904, 1, 1), -3_061_152_000.0);
+    }
 
     fn at(year: i64, month: i64, day: i64) -> CFAbsoluteTime {
         days_from_date(year, month, day) as f64 * DAY_SECONDS

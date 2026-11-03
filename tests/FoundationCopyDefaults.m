@@ -178,6 +178,22 @@ int main(void) {
     [suppliedHeaders setObject:@"two" forKey:@"X-Second"];
     assert(headerRequest.allHTTPHeaderFields.count == 1);
     assert([[headerRequest.allHTTPHeaderFields objectForKey:@"X-First"] isEqual:@"one"]);
+
+    // Observe, rather than assume, the undocumented nil-add case seen in
+    // Topple 2. This is a current macOS reference, not historical iOS proof.
+    for (int populated = 0; populated < 2; populated++) {
+        NSMutableURLRequest *probe = [NSMutableURLRequest requestWithURL:
+            [NSURL URLWithString:@"https://example.invalid/"]];
+        if (populated) [probe setValue:@"old" forHTTPHeaderField:@"If-None-Match"];
+        @try {
+            [probe addValue:nil forHTTPHeaderField:@"If-None-Match"];
+            NSLog(@"nil-header-add populated=%d result=%@ fields=%@", populated,
+                  [probe valueForHTTPHeaderField:@"If-None-Match"], probe.allHTTPHeaderFields);
+        } @catch (NSException *exception) {
+            NSLog(@"nil-header-add populated=%d exception=%@ reason=%@", populated,
+                  exception.name, exception.reason);
+        }
+    }
     assert([headerRequest.allHTTPHeaderFields objectForKey:@"X-Second"] == nil);
     headerRequest.allHTTPHeaderFields = nil;
     assert(headerRequest.allHTTPHeaderFields.count == 1);

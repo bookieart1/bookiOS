@@ -291,31 +291,16 @@ fn enumerate_apps(
     // so a full round can be exercised without repeatedly paging through the
     // library. Everything else remains alphabetical.
     // Bundle identifiers avoid depending on localized or truncated names.
-    const DEV_216_TEST_BATCH: &[&str] = &[
-        "com.gamevil.advena",
+    const DEV_217_TEST_BATCH: &[&str] = &[
         "com.krome.BoomerangBlast",
-        "com.digitalprunes.BungeeBall2Pro",
-        "com.wooglie.crashdrive",
-        "eu.ukando.decoloroiphone",
-        "com.uppercut-games.epoch",
-        "com.shauninman.flipsescape",
-        "com.sega.jacklumber",
         "com.disney.JellyCar3",
-        "com.whaleislandgames.junny",
-        "com.sandlotgames.locv",
-        "com.popcap.Peggle",
-        "com.crescentmoongames.slingshotracing",
-        "com.tractiongames.StickSkater",
+        "com.chillingo.spoing",
         "com.craneballs.stuntman",
         "com.spokko.TikiTotems2",
         "com.ngmoco.Topple2",
-        "com.teotlstudios.unmechanical",
-        "com.robotinvader.knightmare",
-        "com.gamevil.zenonia2",
-        "com.chillingo.spoing",
     ];
     apps.sort_by_key(|app| {
-        let focus_index = DEV_216_TEST_BATCH
+        let focus_index = DEV_217_TEST_BATCH
             .iter()
             .position(|identifier| *identifier == app.bundle_identifier.as_str())
             .map(|idx| (0, idx));

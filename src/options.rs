@@ -35,6 +35,7 @@ pub enum Button {
 #[derive(Clone)]
 pub struct Options {
     pub diagnostics: bool,
+    pub diagnostic_watch_addresses: Vec<u32>,
     pub fullscreen: bool,
     pub device_family: Option<DeviceFamily>,
     pub initial_orientation: DeviceOrientation,
@@ -99,6 +100,7 @@ impl Default for Options {
             // Keep the bounded survey recorder for every app. An explicit
             // --diagnostics=off remains available for controlled comparisons.
             diagnostics: true,
+            diagnostic_watch_addresses: Vec::new(),
         }
     }
 }
@@ -225,6 +227,20 @@ impl Options {
                 "flight" => true,
                 _ => return Err("Expected --diagnostics=off or --diagnostics=flight".into()),
             };
+        } else if let Some(value) = arg.strip_prefix("--diagnostic-watch-addresses=") {
+            let addresses = value
+                .split(',')
+                .take(9)
+                .map(|value| {
+                    u32::from_str_radix(value.strip_prefix("0x").unwrap_or(value), 16).map_err(|_| {
+                        "Expected comma-separated hexadecimal guest addresses".to_string()
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if addresses.is_empty() || addresses.len() > 8 || addresses.contains(&0) {
+                return Err("Expected one to eight nonzero diagnostic addresses".into());
+            }
+            self.diagnostic_watch_addresses = addresses;
         } else if let Some(address) = arg.strip_prefix("--gdb=") {
             let addrs = address
                 .to_socket_addrs()
@@ -358,5 +374,15 @@ mod tests {
         assert_eq!(options.parse_argument("--diagnostics=flight"), Ok(true));
         assert!(options.diagnostics);
         assert!(options.parse_argument("--diagnostics=unknown").is_err());
+        assert!(options
+            .parse_argument("--diagnostic-watch-addresses=0x1230,4560")
+            .is_ok());
+        assert_eq!(options.diagnostic_watch_addresses, [0x1230, 0x4560]);
+        for invalid in ["", "0", "xyz", "1,2,3,4,5,6,7,8,9"] {
+            assert!(options
+                .parse_argument(&format!("--diagnostic-watch-addresses={invalid}"))
+                .is_err());
+        }
+        assert_eq!(options.diagnostic_watch_addresses, [0x1230, 0x4560]);
     }
 }
