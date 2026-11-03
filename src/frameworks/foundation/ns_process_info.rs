@@ -130,13 +130,14 @@ mod tests {
     #[test]
     fn environment_reports_emulated_variables_without_host_leakage() {
         let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
         let home = env.mem.alloc_and_write_cstr(b"/guest/home");
         env.env_vars.insert(b"HOME".to_vec(), home);
-        let process: id = msg_class![&mut env; NSProcessInfo processInfo];
-        let dictionary: id = msg![&mut env; process environment];
-        let key = ns_string::from_rust_string(&mut env, "HOME".to_owned());
-        let value: id = msg![&mut env; dictionary objectForKey:key];
-        assert_eq!(ns_string::to_rust_string(&mut env, value), "/guest/home");
-        release(&mut env, key);
+        let process: id = msg_class![env; NSProcessInfo processInfo];
+        let dictionary: id = msg![env; process environment];
+        let key = ns_string::from_rust_string(env, "HOME".to_owned());
+        let value: id = msg![env; dictionary objectForKey:key];
+        assert_eq!(ns_string::to_rust_string(env, value), "/guest/home");
+        release(env, key);
     }
 }

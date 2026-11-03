@@ -426,8 +426,9 @@ mod tests {
     #[should_panic(expected = "Guest raised NSException \"FixtureException\": \"fixture reason\"")]
     fn class_raise_format_constructs_the_exception_reason() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let name = ns_string::from_rust_string(&mut env, "FixtureException".to_owned());
-        let format = ns_string::from_rust_string(&mut env, "fixture reason".to_owned());
-        () = msg_class![&mut env; NSException raise:name format:format];
+        let env = &mut env;
+        let name = ns_string::from_rust_string(env, "FixtureException".to_owned());
+        let format = ns_string::from_rust_string(env, "fixture reason".to_owned());
+        () = msg_class![env; NSException raise:name format:format];
     }
 }
