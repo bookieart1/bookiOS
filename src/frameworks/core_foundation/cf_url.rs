@@ -96,7 +96,8 @@ fn CFURLCreatePropertyFromResource(
 
     let path: id = msg![env; url path];
     let manager: id = msg_class![env; NSFileManager defaultManager];
-    let attributes: id = msg![env; manager attributesOfItemAtPath:path error:(Ptr::null())];
+    let no_error: MutPtr<id> = Ptr::null();
+    let attributes: id = msg![env; manager attributesOfItemAtPath:path error:no_error];
     if attributes == nil {
         if !error_code.is_null() {
             env.mem.write(error_code, -4); // kCFURLResourceNotFoundError
