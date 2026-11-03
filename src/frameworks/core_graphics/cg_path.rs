@@ -159,6 +159,16 @@ pub fn CGPathCloseSubpath(env: &mut Environment, path: CGMutablePathRef) {
     }
 }
 
+pub fn CGPathGetCurrentPoint(env: &mut Environment, path: CGMutablePathRef) -> CGPoint {
+    current_and_subpath_start(
+        &env.objc
+            .borrow::<CGMutablePathHostObject>(path)
+            .path_elements,
+    )
+    .0
+    .unwrap_or_default()
+}
+
 /// Add a line followed by the circular arc tangent to the lines from the
 /// current point to `point1` and from `point1` to `point2`.
 ///
@@ -345,6 +355,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGPathMoveToPoint(_, _, _, _)),
     export_c_func!(CGPathAddLineToPoint(_, _, _, _)),
     export_c_func!(CGPathCloseSubpath(_)),
+    export_c_func!(CGPathGetCurrentPoint(_)),
     export_c_func!(CGPathAddArcToPoint(_, _, _, _, _, _, _)),
     export_c_func!(CGPathAddLines(_, _, _, _)),
 ];
@@ -407,5 +418,28 @@ mod tests {
                 Some(CGPoint { x: 2.0, y: 3.0 })
             )
         );
+    }
+
+    #[test]
+    fn current_point_tracks_moves_lines_and_closed_subpaths() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let path = CGPathCreateMutable(&mut env);
+        assert_eq!(CGPathGetCurrentPoint(&mut env, path), CGPoint::default());
+        CGPathMoveToPoint(&mut env, path, ConstPtr::null(), 2.0, 3.0);
+        assert_eq!(
+            CGPathGetCurrentPoint(&mut env, path),
+            CGPoint { x: 2.0, y: 3.0 }
+        );
+        CGPathAddLineToPoint(&mut env, path, ConstPtr::null(), 5.0, 7.0);
+        assert_eq!(
+            CGPathGetCurrentPoint(&mut env, path),
+            CGPoint { x: 5.0, y: 7.0 }
+        );
+        CGPathCloseSubpath(&mut env, path);
+        assert_eq!(
+            CGPathGetCurrentPoint(&mut env, path),
+            CGPoint { x: 2.0, y: 3.0 }
+        );
+        CGPathRelease(&mut env, path);
     }
 }

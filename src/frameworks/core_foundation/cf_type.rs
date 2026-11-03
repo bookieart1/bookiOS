@@ -64,6 +64,13 @@ pub fn CFRelease(env: &mut Environment, object: CFTypeRef) {
     objc::release(env, object);
 }
 
+/// Garbage collection was unavailable to iPhone applications. In the
+/// reference-counted runtime this historical compatibility function returns
+/// the same object without changing its retain count or ownership.
+pub fn CFMakeCollectable(_env: &mut Environment, object: CFTypeRef) -> CFTypeRef {
+    object
+}
+
 pub fn CFGetRetainCount(env: &mut Environment, object: CFTypeRef) -> CFIndex {
     let count: NSUInteger = msg![env; object retainCount];
     count as CFIndex
@@ -91,7 +98,27 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFGetTypeID(_)),
     export_c_func!(CFRetain(_)),
     export_c_func!(CFRelease(_)),
+    export_c_func!(CFMakeCollectable(_)),
     export_c_func!(CFGetRetainCount(_)),
     export_c_func!(CFEqual(_, _)),
     export_c_func!(CFHash(_)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objc::{id, msg, msg_class, nil, release};
+
+    #[test]
+    fn make_collectable_is_an_ownership_neutral_identity_operation() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let object: id = msg_class![env; NSObject new];
+        let before: NSUInteger = msg![env; object retainCount];
+        assert_eq!(CFMakeCollectable(env, object), object);
+        let after: NSUInteger = msg![env; object retainCount];
+        assert_eq!(after, before);
+        assert_eq!(CFMakeCollectable(env, nil), nil);
+        release(env, object);
+    }
+}

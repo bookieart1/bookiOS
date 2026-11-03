@@ -293,11 +293,17 @@ fn enumerate_apps(
     // Bundle identifiers avoid depending on localized or truncated names.
     const DEV_217_TEST_BATCH: &[&str] = &[
         "com.krome.BoomerangBlast",
+        "com.uppercut-games.epoch",
         "com.disney.JellyCar3",
+        "com.whaleislandgames.junny",
+        "com.backflipstudios.ragdollblaster3",
+        "com.ngmoco.rolando",
         "com.chillingo.spoing",
         "com.craneballs.stuntman",
         "com.spokko.TikiTotems2",
         "com.ngmoco.Topple2",
+        "com.teotlstudios.unmechanical",
+        "com.robotinvader.knightmare",
     ];
     apps.sort_by_key(|app| {
         let focus_index = DEV_217_TEST_BATCH
