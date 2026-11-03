@@ -19,7 +19,7 @@ mod tests {
 
     #[test]
     fn pushed_controller_observes_container_and_stable_navigation_bar() {
-        let mut env = Environment::new_fake_for_test();
+        let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
         let root: id = msg_class![env; UIViewController new];
         let nav: id = msg_class![env; UINavigationController alloc];
