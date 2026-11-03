@@ -2664,7 +2664,8 @@ mod memory_fault_diagnostic_tests {
                 history.dump(object.to_bits());
             }
             // The collision must not write a replacement object header.
-            assert_eq!(env.mem.read::<u32>(object.cast()), 0);
+            let current_isa: u32 = env.mem.read(object.cast());
+            assert_eq!(current_isa, 0);
         }
     }
 
