@@ -237,7 +237,7 @@ impl ObjectHistory {
         let record = &mut self.records[index];
         record.address = address;
         // ObjC registration promotes the immediately preceding raw allocation;
-        // do not lose the older object's class when the watched address is reused.
+        // Preserve the older class when the watched address is reused.
         if record.origin.event.action != "heap-allocated" {
             record.previous_origin = record.origin;
         }

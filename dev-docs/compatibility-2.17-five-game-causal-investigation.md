@@ -9,6 +9,10 @@ Its label does not supersede the 2.15 observations. The two archived 2.15 logs,
 earlier loose device logs, 1.71 survey, longitudinal audits, source history, and
 current ledger were cross-checked. `outputs/five-217-launch-evidence.json`
 indexes matching launches, embedded identities, final panics, and segment hashes.
+The expanded index includes original attachments and all three survey ZIPs:
+134 launch entries across 72 sources, 66 distinct normalized segments. Archive
+copies are not additional independent tests. Earlier session-wide virtual-memory
+reservation failures are separate from the later runtime failures below.
 Earlier surveys and conclusions remain intact; corrections below supersede
 specific interpretations, not the evidence itself.
 
@@ -177,6 +181,14 @@ local validation is limited to source review, Python evidence indexing, and
 `git diff --check`. Hosted results and artifact identity will be appended after
 completion. Green badges alone are not accepted; skipped and allowed-to-fail
 steps are checked separately. Unrelated dirty files are excluded from commits.
+
+The first hosted compile found a test-only type-annotation error, corrected in
+`d59409ef`. Its Windows suite passes 244 tests and its IPA compiles successfully.
+Mac validation was cancelled before runner assignment with an explicit ARM64
+capacity annotation. A retry is also queued. An optional `native_reference_only`
+workflow-dispatch input now runs the native comparison alone on `macos-15-intel`;
+normal push validation is unchanged. This avoids making a small disputed API
+contract wait for another full emulator compilation. No local compiler is used.
 
 ## Priority and device predictions
 

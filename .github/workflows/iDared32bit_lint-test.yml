@@ -10,12 +10,29 @@ on:
   pull_request:
     branches: [ "idared32bit" ]
   workflow_dispatch:
+    inputs:
+      native_reference_only:
+        description: Run only the native Foundation contract reference
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  native-reference-only:
+    if: ${{ inputs.native_reference_only }}
+    runs-on: macos-15-intel
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Native Foundation contract reference
+        run: |
+          cc tests/FoundationCopyDefaults.m -framework Foundation -o "$RUNNER_TEMP/foundation-contracts"
+          "$RUNNER_TEMP/foundation-contracts"
+
   lint-and-test-macos:
+    if: ${{ !inputs.native_reference_only }}
 
     runs-on: macos-15
 
@@ -96,6 +113,7 @@ jobs:
         run: cc tests/TestApp_source/cli_tests.m tests/TestApp_source/CGAffineTransform.c tests/TestApp_source/SyncTester.m tests/TestApp_source/RespondsToSelector.m tests/TestApp_source/AutoReleasePoolTest.m tests/TestApp_source/Initialize.m -framework CoreFoundation -framework Foundation -framework CoreGraphics -DDEFINE_ME_WHEN_BUILDING_ON_MACOS -DTestApp_cli_tests_main=main -ObjC && ./a.out
 
   lint-and-test-win:
+    if: ${{ !inputs.native_reference_only }}
 
     runs-on: windows-2022
 
@@ -156,6 +174,7 @@ jobs:
         CMAKE: ${{ github.workspace }}\vendor\cmake\bin\cmake
 
   lint-android:
+    if: ${{ !inputs.native_reference_only }}
 
     runs-on: ubuntu-latest
 
