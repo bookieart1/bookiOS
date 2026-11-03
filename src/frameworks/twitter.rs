@@ -41,9 +41,10 @@ mod tests {
     #[test]
     fn unavailable_twitter_service_reports_false() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let class: id = msg_class![&mut env; TWTweetComposeViewController class];
+        let env = &mut env;
+        let class: id = msg_class![env; TWTweetComposeViewController class];
         assert!(!class.is_null());
-        let available: bool = msg_class![&mut env; TWTweetComposeViewController canSendTweet];
+        let available: bool = msg_class![env; TWTweetComposeViewController canSendTweet];
         assert!(!available);
     }
 }

@@ -9,7 +9,7 @@ use crate::dyld::{export_c_func, FunctionExports};
 use crate::frameworks::core_foundation::cf_allocator::{kCFAllocatorDefault, CFAllocatorRef};
 use crate::frameworks::core_foundation::CFIndex;
 use crate::frameworks::foundation::ns_string::to_rust_string;
-use crate::frameworks::foundation::{NSInteger, NSUInteger};
+use crate::frameworks::foundation::NSUInteger;
 use crate::mem::{MutPtr, MutVoidPtr};
 use crate::objc::{id, msg, msg_class, nil};
 use crate::Environment;
@@ -129,22 +129,23 @@ mod tests {
     #[test]
     fn file_stream_creation_is_owned_and_rejects_non_file_urls() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let path = from_rust_string(&mut env, "/var/mobile/test-stream".to_string());
-        let file_url: id = msg_class![&mut env; NSURL fileURLWithPath:path];
-        let stream = CFReadStreamCreateWithFile(&mut env, kCFAllocatorDefault, file_url);
+        let env = &mut env;
+        let path = from_rust_string(env, "/var/mobile/test-stream".to_string());
+        let file_url: id = msg_class![env; NSURL fileURLWithPath:path];
+        let stream = CFReadStreamCreateWithFile(env, kCFAllocatorDefault, file_url);
         assert_ne!(stream, nil);
-        assert_eq!(CFReadStreamGetStatus(&mut env, stream), 0);
-        CFRelease(&mut env, stream);
+        assert_eq!(CFReadStreamGetStatus(env, stream), 0);
+        CFRelease(env, stream);
 
-        let remote = from_rust_string(&mut env, "https://example.com/file".to_string());
-        let remote_url: id = msg_class![&mut env; NSURL URLWithString:remote];
+        let remote = from_rust_string(env, "https://example.com/file".to_string());
+        let remote_url: id = msg_class![env; NSURL URLWithString:remote];
         assert_eq!(
-            CFReadStreamCreateWithFile(&mut env, kCFAllocatorDefault, remote_url),
+            CFReadStreamCreateWithFile(env, kCFAllocatorDefault, remote_url),
             nil
         );
         // Balance the Create Rule of from_rust_string. The URL convenience
         // results are autoreleased by NSURL itself.
-        release(&mut env, path);
-        release(&mut env, remote);
+        release(env, path);
+        release(env, remote);
     }
 }
