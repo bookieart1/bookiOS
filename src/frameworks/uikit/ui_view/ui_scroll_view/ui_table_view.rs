@@ -180,13 +180,14 @@ pub const CLASSES: ClassExports = objc_classes! {
     let mut flat_row: NSInteger = 0;
     const MAX_EAGER_CELLS: usize = 512;
     'sections: for (section, row_count) in section_row_counts.iter().copied().enumerate() {
+        let section = section as NSInteger;
         for row in 0..row_count {
             if cells.len() == MAX_EAGER_CELLS {
                 log!("UITableView {:?}: bounded eager cell limit reached", this);
                 break 'sections;
             }
             let index_path: id =
-                msg_class![env; NSIndexPath indexPathForRow:row inSection:section as NSInteger];
+                msg_class![env; NSIndexPath indexPathForRow:row inSection:section];
             let cell: id = msg![env; data_source tableView:this cellForRowAtIndexPath:index_path];
             assert_ne!(cell, nil, "UITableView data source returned a nil cell");
             let frame = CGRect {
