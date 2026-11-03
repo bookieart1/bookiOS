@@ -413,6 +413,21 @@ fn all_keys_common(env: &mut Environment, this: id) -> id {
     autorelease(env, res)
 }
 
+fn escape_strings_file_component(component: &str) -> String {
+    let mut escaped = String::with_capacity(component.len());
+    for character in component.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
 pub const CLASSES: ClassExports = objc_classes! {
 
 (env, this, _cmd);
@@ -589,6 +604,32 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
     let immutable_values: id = msg![env; values copy];
     autorelease(env, immutable_values)
+}
+
+- (id)descriptionInStringsFileFormat {
+    let string_class: Class = msg_class![env; NSString class];
+    let keys: id = msg![env; this allKeys];
+    let count: NSUInteger = msg![env; keys count];
+    let mut output = String::new();
+    for index in 0..count {
+        let key: id = msg![env; keys objectAtIndex:index];
+        let value: id = msg![env; this objectForKey:key];
+        assert!(
+            key != nil && value != nil
+                && msg![env; key isKindOfClass:string_class]
+                && msg![env; value isKindOfClass:string_class],
+            "descriptionInStringsFileFormat requires NSString keys and values"
+        );
+        let key = escape_strings_file_component(&to_rust_string(env, key));
+        let value = escape_strings_file_component(&to_rust_string(env, value));
+        output.push('"');
+        output.push_str(&key);
+        output.push_str("\" = \"");
+        output.push_str(&value);
+        output.push_str("\";\n");
+    }
+    let description = from_rust_string(env, output);
+    autorelease(env, description)
 }
 
 - (id)keysSortedByValueUsingSelector:(SEL)comparator {
@@ -1482,5 +1523,21 @@ mod tests {
         let remaining: id = msg![env; dictionary objectForKey:two];
         assert_eq!(removed, nil);
         assert_eq!(remaining, value);
+    }
+
+    #[test]
+    fn strings_file_description_quotes_and_escapes_entries() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let key = from_rust_string(&mut env, "a\"key".to_string());
+        let value = from_rust_string(&mut env, "line 1\nline 2\\tail".to_string());
+        let dictionary = dict_from_keys_and_objects(&mut env, &[(key, value)]);
+        let description: id = msg![&mut env; dictionary descriptionInStringsFileFormat];
+        assert_eq!(
+            to_rust_string(&mut env, description),
+            "\"a\\\"key\" = \"line 1\\nline 2\\\\tail\";\n"
+        );
+        release(&mut env, dictionary);
+        release(&mut env, key);
+        release(&mut env, value);
     }
 }

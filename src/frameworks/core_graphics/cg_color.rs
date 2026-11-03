@@ -13,7 +13,7 @@ use crate::frameworks::core_graphics::cg_color_space::{
     get_static_color_space, kCGColorSpaceGenericRGB, CGColorSpaceHostObject, CGColorSpaceRef,
 };
 use crate::frameworks::core_graphics::CGFloat;
-use crate::mem::MutPtr;
+use crate::mem::{guest_size_of, ConstPtr, MutPtr, Ptr};
 use crate::objc::{objc_classes, ClassExports, HostObject, ObjC};
 use crate::Environment;
 
@@ -25,6 +25,15 @@ pub const CLASSES: ClassExports = objc_classes! {
 // those are just Objective-C types, so we need a class for it, but its name is
 // not visible anywhere.
 @implementation _touchHLE_CGColor: NSObject
+
+- (())dealloc {
+    let components = env.objc.borrow::<CGColorHostObject>(this).components;
+    if !components.is_null() {
+        env.mem.free(components.cast());
+    }
+    env.objc.dealloc_object(this, &mut env.mem)
+}
+
 @end
 
 };
@@ -38,6 +47,9 @@ pub struct CGColorHostObject {
     pub g: CGFloat,
     pub b: CGFloat,
     pub a: CGFloat,
+    /// Stable guest-visible storage returned by CGColorGetComponents. Copies
+    /// used only for host-side animation interpolation leave this null.
+    pub components: MutPtr<CGFloat>,
 }
 impl HostObject for CGColorHostObject {}
 // Implemented to aid animation code.
@@ -52,6 +64,7 @@ impl Mul<f32> for CGColorHostObject {
             g: self.g * rhs,
             b: self.b * rhs,
             a: self.a * rhs,
+            components: Ptr::null(),
         }
     }
 }
@@ -65,6 +78,7 @@ impl Add<CGColorHostObject> for CGColorHostObject {
             g: self.g + rhs.g,
             b: self.b + rhs.b,
             a: self.a + rhs.a,
+            components: Ptr::null(),
         }
     }
 }
@@ -78,6 +92,7 @@ impl Sub<CGColorHostObject> for CGColorHostObject {
             g: self.g - rhs.g,
             b: self.b - rhs.b,
             a: self.a - rhs.a,
+            components: Ptr::null(),
         }
     }
 }
@@ -135,6 +150,13 @@ fn CGColorGetColorSpace(env: &mut Environment, color: CGColorRef) -> CGColorSpac
     get_static_color_space(env, color_space_name)
 }
 
+fn CGColorGetComponents(env: &mut Environment, color: CGColorRef) -> ConstPtr<CGFloat> {
+    env.objc
+        .borrow::<CGColorHostObject>(color)
+        .components
+        .cast_const()
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGColorRetain(_)),
     export_c_func!(CGColorRelease(_)),
@@ -142,18 +164,25 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGColorCreateGenericRGB(_, _, _, _)),
     export_c_func!(CGColorEqualToColor(_, _)),
     export_c_func!(CGColorGetColorSpace(_)),
+    export_c_func!(CGColorGetComponents(_)),
 ];
 
 /// Shortcut for use by `UIColor`: directly construct a `CGColor` instance from
 /// an rgba tuple of CGFloats.
 pub fn from_rgba(env: &mut Environment, rgba: (CGFloat, CGFloat, CGFloat, CGFloat)) -> CGColorRef {
     let (r, g, b, a) = rgba;
+    let components: MutPtr<CGFloat> = env.mem.alloc(4 * guest_size_of::<CGFloat>()).cast();
+    env.mem.write(components, r);
+    env.mem.write(components + 1, g);
+    env.mem.write(components + 2, b);
+    env.mem.write(components + 3, a);
     let host_obj = Box::new(CGColorHostObject {
         color_space_name: kCGColorSpaceGenericRGB,
         r,
         g,
         b,
         a,
+        components,
     });
     let class = env.objc.get_known_class("_touchHLE_CGColor", &mut env.mem);
     env.objc.alloc_object(class, host_obj, &mut env.mem)
@@ -177,7 +206,7 @@ pub fn to_rgba(objc: &ObjC, color: CGColorRef) -> (CGFloat, CGFloat, CGFloat, CG
 mod tests {
     use super::*;
     use crate::frameworks::core_graphics::cg_color_space::{
-        CGColorSpaceGetModel, kCGColorSpaceModelRGB,
+        kCGColorSpaceModelRGB, CGColorSpaceGetModel,
     };
 
     #[test]
@@ -193,5 +222,19 @@ mod tests {
         // Get-rule results are not owned by the caller, but this canonical
         // associated space remains valid after the source color is released.
         assert_eq!(CGColorSpaceGetModel(&mut env, first), kCGColorSpaceModelRGB);
+    }
+
+    #[test]
+    fn component_getter_returns_stable_guest_rgba_storage() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let color = from_rgba(&mut env, (0.125, 0.25, 0.5, 0.75));
+        let first = CGColorGetComponents(&mut env, color);
+        let second = CGColorGetComponents(&mut env, color);
+        assert_eq!(first, second);
+        assert_eq!(env.mem.read(first), 0.125);
+        assert_eq!(env.mem.read(first + 1), 0.25);
+        assert_eq!(env.mem.read(first + 2), 0.5);
+        assert_eq!(env.mem.read(first + 3), 0.75);
+        CGColorRelease(&mut env, color);
     }
 }

@@ -256,8 +256,24 @@ fn fchmod(env: &mut Environment, fd: FileDescriptor, mode: mode_t) -> i32 {
     }
 }
 
+fn chmod(env: &mut Environment, path: ConstPtr<u8>, mode: mode_t) -> i32 {
+    set_errno(env, 0);
+    // Reuse descriptor validation, read-only bundle handling, and host Unix
+    // permission behavior from fchmod so the path and descriptor APIs cannot
+    // drift apart.
+    let fd = open_direct(env, path, super::O_RDONLY);
+    if fd == -1 {
+        return -1;
+    }
+    let result = fchmod(env, fd, mode);
+    let close_result = close(env, fd);
+    assert_eq!(close_result, 0, "chmod's private descriptor must close");
+    result
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(mkdir(_, _)),
+    export_c_func!(chmod(_, _)),
     export_c_func!(fchmod(_, _)),
     export_c_func!(fstat(_, _)),
     export_c_func!(stat(_, _)),

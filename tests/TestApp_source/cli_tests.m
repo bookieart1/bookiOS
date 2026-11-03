@@ -4267,6 +4267,23 @@ int test_fchmod() {
   return 0;
 }
 
+int test_chmod() {
+  NSAutoreleasePool *pool = [NSAutoreleasePool new];
+  NSString *path = [NSTemporaryDirectory()
+      stringByAppendingPathComponent:@"touchhle-posix-chmod-test.bin"];
+  int fd = open([path UTF8String], O_WRONLY | O_CREAT | O_TRUNC, 0600);
+  if (fd == -1) {
+    [pool drain];
+    return -1;
+  }
+  close(fd);
+
+  int result = chmod([path UTF8String], 0600);
+  remove([path UTF8String]);
+  [pool drain];
+  return result == 0 ? 0 : -2;
+}
+
 int test_close() {
   if (close(0) != 0)
     return -1;
@@ -8934,6 +8951,7 @@ struct {
     FUNC_DEF(test_open),
     FUNC_DEF(test_creat),
     FUNC_DEF(test_sync),
+    FUNC_DEF(test_chmod),
     FUNC_DEF(test_fchmod),
     FUNC_DEF(test_close),
     FUNC_DEF(test_cond_var),
