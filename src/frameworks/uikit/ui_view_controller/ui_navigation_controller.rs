@@ -20,31 +20,32 @@ mod tests {
     #[test]
     fn pushed_controller_observes_container_and_stable_navigation_bar() {
         let mut env = Environment::new_fake_for_test();
-        let root: id = msg_class![&mut env; UIViewController new];
-        let nav: id = msg_class![&mut env; UINavigationController alloc];
-        let nav: id = msg![&mut env; nav initWithRootViewController:root];
-        let observed: id = msg![&mut env; root navigationController];
+        let env = &mut env;
+        let root: id = msg_class![env; UIViewController new];
+        let nav: id = msg_class![env; UINavigationController alloc];
+        let nav: id = msg![env; nav initWithRootViewController:root];
+        let observed: id = msg![env; root navigationController];
         assert_eq!(observed, nav);
 
-        let first_bar: id = msg![&mut env; nav navigationBar];
-        let second_bar: id = msg![&mut env; nav navigationBar];
+        let first_bar: id = msg![env; nav navigationBar];
+        let second_bar: id = msg![env; nav navigationBar];
         assert_eq!(first_bar, second_bar);
-        let root_item: id = msg![&mut env; root navigationItem];
-        let top_item: id = msg![&mut env; first_bar topItem];
+        let root_item: id = msg![env; root navigationItem];
+        let top_item: id = msg![env; first_bar topItem];
         assert_eq!(top_item, root_item);
 
-        let child: id = msg_class![&mut env; UIViewController new];
-        () = msg![&mut env; nav pushViewController:child animated:false];
-        let observed: id = msg![&mut env; child navigationController];
+        let child: id = msg_class![env; UIViewController new];
+        () = msg![env; nav pushViewController:child animated:false];
+        let observed: id = msg![env; child navigationController];
         assert_eq!(observed, nav);
-        let popped: id = msg![&mut env; nav popViewControllerAnimated:false];
+        let popped: id = msg![env; nav popViewControllerAnimated:false];
         assert_eq!(popped, child);
-        let observed: id = msg![&mut env; child navigationController];
+        let observed: id = msg![env; child navigationController];
         assert_eq!(observed, nil);
 
-        release(&mut env, child);
-        release(&mut env, nav);
-        release(&mut env, root);
+        release(env, child);
+        release(env, nav);
+        release(env, root);
     }
 }
 
