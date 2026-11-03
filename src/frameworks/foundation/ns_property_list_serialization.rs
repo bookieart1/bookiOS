@@ -41,13 +41,37 @@ pub const CLASSES: ClassExports = objc_classes! {
 + (id)dataFromPropertyList:(id)plist
                     format:(NSPropertyListFormat)format
                 errorDescription:(MutPtr<id>)error_string { // NSString **
-    assert_eq!(format, NSPropertyListBinaryFormat_v1_0); // TODO
     clear_error_description(env, error_string);
 
     let value = serialize_plist(env, plist);
     log_dbg!("dataFromPropertyList value {:?}", value);
     let mut buf = Vec::new();
-    value.to_writer_binary(&mut buf).unwrap();
+    let result = match format {
+        NSPropertyListXMLFormat_v1_0 => value.to_writer_xml(&mut buf),
+        NSPropertyListBinaryFormat_v1_0 => value.to_writer_binary(&mut buf),
+        _ => {
+            if !error_string.is_null() {
+                let error_message = ns_string::from_rust_string(
+                    env,
+                    format!("Unsupported property-list format {format}"),
+                );
+                env.mem.write(error_string, error_message);
+                autorelease(env, error_message);
+            }
+            return nil;
+        }
+    };
+    if let Err(error) = result {
+        if !error_string.is_null() {
+            let error_message = ns_string::from_rust_string(
+                env,
+                format!("Failed to serialize property list: {error}"),
+            );
+            env.mem.write(error_string, error_message);
+            autorelease(env, error_message);
+        }
+        return nil;
+    }
     let len: u32 = buf.len().try_into().unwrap();
     log_dbg!("dataFromPropertyList buf len {}", len);
     let ptr = env.mem.alloc(len);
@@ -345,6 +369,28 @@ mod tests {
         clear_error_description(&mut env, error_string);
         assert_eq!(env.mem.read(error_string), nil);
         clear_error_description(&mut env, MutPtr::null());
+        env.mem.free(error_string.cast());
+    }
+
+    #[test]
+    fn xml_serialization_emits_xml_and_reports_no_error() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let value = ns_string::get_static_str(env, "value");
+        let array: id = msg_class![env; NSMutableArray new];
+        () = msg![env; array addObject:value];
+        let error_string: MutPtr<id> = env.mem.alloc(guest_size_of::<id>()).cast();
+        env.mem.write(error_string, id::from_bits(0x1234));
+        let data: id = msg_class![env; NSPropertyListSerialization
+            dataFromPropertyList:array
+            format:NSPropertyListXMLFormat_v1_0
+            errorDescription:error_string];
+        assert_ne!(data, nil);
+        assert_eq!(env.mem.read(error_string), nil);
+        assert!(ns_data::to_rust_slice(env, data).starts_with(b"<?xml"));
+        release(env, array);
+        release(env, pool);
         env.mem.free(error_string.cast());
     }
 }

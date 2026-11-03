@@ -304,9 +304,7 @@ fn strncat(env: &mut Environment, s1: MutPtr<u8>, s2: ConstPtr<u8>, n: GuestUSiz
 }
 fn strstr(env: &mut Environment, string: ConstPtr<u8>, substring: ConstPtr<u8>) -> ConstPtr<u8> {
     let result = GenericChar::<u8>::strstr(env, string, substring);
-    if result.is_null() {
-        env.diagnostic_string_search_miss(string.to_bits(), substring.to_bits());
-    }
+    env.diagnostic_string_search(string.to_bits(), substring.to_bits(), result.to_bits());
     result
 }
 fn strcasestr(

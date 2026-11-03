@@ -18,6 +18,8 @@ import UIKit
 struct PickerInput: Decodable {
     struct App: Decodable {
         let name: String
+        /// Stable key used only for the user's picker classification override.
+        let identifier: String
         let iconWidth: Int
         let iconHeight: Int
         let hasIcon: Bool
@@ -395,6 +397,8 @@ final class PickerModel: ObservableObject {
         }
     }
     @Published var pressedApp: Int?
+    @Published var classificationApp: Int?
+    var suppressNextPick = false
     @Published var showingSettings = false
     @Published var showingCopyright = false
     @Published var copyrightPage = 0
@@ -409,15 +413,41 @@ final class PickerModel: ObservableObject {
         }
     }
 
+    @Published var compatibilityOverrides: [String: String] {
+        didSet {
+            UserDefaults.standard.set(
+                compatibilityOverrides,
+                forKey: appPickerCompatibilityOverridesKey
+            )
+            page = 0
+            pressedApp = nil
+        }
+    }
+
+    func compatibility(for index: Int) -> String {
+        let app = input.apps[index]
+        return compatibilityOverrides[app.identifier] ?? app.compatibility
+    }
+
+    func setCompatibility(_ compatibility: String?, for index: Int) {
+        let key = input.apps[index].identifier
+        if let compatibility {
+            compatibilityOverrides[key] = compatibility
+        } else {
+            compatibilityOverrides.removeValue(forKey: key)
+        }
+        classificationApp = nil
+    }
+
     var filteredAppIndices: [Int] {
         input.apps.indices.filter { index in
             switch appFilter {
             case .all:
                 return true
             case .playable:
-                return input.apps[index].compatibility == "playable"
+                return compatibility(for: index) == "playable"
             case .needsWork:
-                return input.apps[index].compatibility != "playable"
+                return compatibility(for: index) != "playable"
             }
         }
     }
@@ -467,6 +497,9 @@ final class PickerModel: ObservableObject {
     init(input: PickerInput, icons: [UIImage]) {
         self.input = input
         self.icons = icons
+        compatibilityOverrides = UserDefaults.standard.dictionary(
+            forKey: appPickerCompatibilityOverridesKey
+        ) as? [String: String] ?? [:]
         quickOptionValues = input.quickOptions.map(\.defaultValue)
         showingStartError = input.startError != nil
         wallpaper = input.wallpaperPath.flatMap { UIImage(contentsOfFile: $0) }
@@ -762,6 +795,7 @@ let logoYellow = Color(red: 253 / 255, green: 224 / 255, blue: 22 / 255)
 
 private let headerColorKey = "AppPickerHeaderColor"
 private let appPickerPageKey = "AppPickerPage"
+private let appPickerCompatibilityOverridesKey = "AppPickerCompatibilityOverrides"
 private let appPickerFilterKey = "AppPickerFilter"
 private let hideHeaderLogoKey = "AppPickerHideHeaderLogo"
 private let hideIconLabelsKey = "AppPickerHideIconLabels"
@@ -1035,6 +1069,33 @@ struct PickerView: View {
             } message: {
                 Text(model.importConflicts.joined(separator: "\n"))
             }
+            .confirmationDialog(
+                classificationTitle,
+                isPresented: Binding(
+                    get: { model.classificationApp != nil },
+                    set: { if !$0 { model.classificationApp = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if let app = model.classificationApp {
+                    Button("Mark as Playable") {
+                        model.setCompatibility("playable", for: app)
+                    }
+                    Button("Mark as Not Playable") {
+                        model.setCompatibility("needsWork", for: app)
+                    }
+                    if model.compatibilityOverrides[model.input.apps[app].identifier] != nil {
+                        Button("Use Built-in Status") {
+                            model.setCompatibility(nil, for: app)
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    model.classificationApp = nil
+                }
+            } message: {
+                Text("This only changes where the game appears in your picker filters.")
+            }
             .alert(
                 "Couldn't Import",
                 isPresented: Binding(
@@ -1063,6 +1124,13 @@ struct PickerView: View {
         model.importConflicts.count == 1
             ? "This game is already in Games"
             : "These games are already in Games"
+    }
+
+    private var classificationTitle: String {
+        guard let app = model.classificationApp else {
+            return "Game Status"
+        }
+        return model.input.apps[app].name
     }
 
     private var content: some View {
@@ -1414,6 +1482,14 @@ struct IconGrid: View {
                     .opacity(model.pressedApp == app ? 0.5 : 1)
                     .shadow(color: .black.opacity(0.35), radius: 3, y: 2)
                     .place(iconFrame)
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.55, maximumDistance: 12)
+                            .onEnded { _ in
+                                model.suppressNextPick = true
+                                model.pressedApp = nil
+                                model.classificationApp = app
+                            }
+                    )
                 if !model.hideIconLabels {
                     Text(labels[slot].text)
                         .font(.system(size: labelFontSize, weight: .medium))
@@ -1496,6 +1572,12 @@ struct IconGrid: View {
     private func touchEnded(_ value: DragGesture.Value) {
         defer {
             dragStart = nil
+        }
+        if model.suppressNextPick {
+            model.suppressNextPick = false
+            model.pressedApp = nil
+            dragOffset = 0
+            return
         }
         guard pageCount > 0, dragStart != nil else {
             return

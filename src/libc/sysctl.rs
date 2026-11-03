@@ -87,7 +87,7 @@ enum SysCtlNamePath {
 // Clippy complains about the type.
 // Below values corresponds to the original iPhone.
 // Reference https://www.mail-archive.com/misc@openbsd.org/msg80988.html
-static SYSCTL_VALUES: [(SysCtlNamePath, &str, SysInfoType); 21] = [
+static SYSCTL_VALUES: [(SysCtlNamePath, &str, SysInfoType); 22] = [
     // Generic CPU, I/O
     (SysCtlNamePath::Length2(CTL_HW, HW_MACHINE), "hw.machine", SysInfoType::String(b"iPhone1,1")),
     (SysCtlNamePath::Length2(CTL_HW, HW_MODEL), "hw.model", SysInfoType::String(b"M68AP")),
@@ -99,6 +99,9 @@ static SYSCTL_VALUES: [(SysCtlNamePath, &str, SysInfoType); 21] = [
     // ARM1176JZF-S, used by the original iPhone model reported above, has a
     // 32-byte L1 cache line. Darwin exposes this value as an int.
     (SysCtlNamePath::Undefined, "hw.cachelinesize", SysInfoType::Int32(32)),
+    // The original iPhone's S5L8900/ARM1176 has a 16 KiB L1 data cache.
+    // Darwin exposes cache byte counts as 64-bit values.
+    (SysCtlNamePath::Undefined, "hw.l1dcachesize", SysInfoType::Int64(16 * 1024)),
     (SysCtlNamePath::Undefined, "hw.cputype", SysInfoType::Int32(12)),
     (SysCtlNamePath::Undefined, "hw.cpusubtype", SysInfoType::Int32(6)),
     (SysCtlNamePath::Length2(CTL_HW, HW_CPU_FREQ), "hw.cpufrequency", SysInfoType::Int64(412000000)),
@@ -611,6 +614,27 @@ mod tests {
         );
         assert_eq!(env.mem.read(output_len), guest_size_of::<i32>());
         assert_eq!(env.mem.read(output.cast::<i32>()), 32);
+    }
+
+    #[test]
+    fn l1_data_cache_size_matches_the_reported_original_iphone_cpu() {
+        let mut env = Environment::new_fake_for_test();
+        let name = env.mem.alloc_and_write_cstr(b"hw.l1dcachesize");
+        let output = env.mem.alloc(guest_size_of::<i64>());
+        let output_len = env.mem.alloc_and_write(guest_size_of::<i64>());
+        assert_eq!(
+            sysctlbyname(
+                &mut env,
+                name.cast_const(),
+                output,
+                output_len,
+                Ptr::null(),
+                0,
+            ),
+            0
+        );
+        assert_eq!(env.mem.read(output_len), guest_size_of::<i64>());
+        assert_eq!(env.mem.read(output.cast::<i64>()), 16 * 1024);
     }
 
     #[test]

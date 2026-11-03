@@ -58,6 +58,32 @@ mod tests {
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);
     }
+
+    #[test]
+    fn historical_initializer_accepts_one_other_button_title() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack_size = 0x1000;
+        let stack = env.mem.alloc(stack_size);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + stack_size;
+        let title = ns_string::get_static_str(env, "Title");
+        let other = ns_string::get_static_str(env, "Later");
+        let alert: id = msg_class![env; UIAlertView alloc];
+        let alert: id = msg![env; alert initWithTitle:title
+                                             message:nil
+                                            delegate:nil
+                                       defaultButton:nil
+                                        cancelButton:nil
+                                        otherButtons:other];
+        let count: NSInteger = msg![env; alert numberOfButtons];
+        let returned: id = msg![env; alert buttonTitleAtIndex:0i32];
+        assert_eq!(count, 1);
+        let equal: bool = msg![env; returned isEqual:other];
+        assert!(equal);
+        release(env, alert);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
 }
 
 type NativeTextAlertFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
@@ -249,9 +275,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 // Historical private UIKit initializer used by early Apple/ngmoco code. The
-// first two button arguments are title strings and otherButtons is an NSArray
-// of title strings. Keep the public alert model and ownership rules rather
-// than inventing a second presentation path.
+// The first two button arguments are title strings. Early UIKit callers use
+// either one final title or an NSArray of titles for otherButtons. Keep the
+// public alert model and ownership rules rather than inventing a second path.
 - (id)initWithTitle:(id)title
                       message:(id)message
                      delegate:(id)delegate
@@ -271,11 +297,17 @@ pub const CLASSES: ClassExports = objc_classes! {
         env.objc.borrow_mut::<UIAlertViewHostObject>(this).cancel_button_index = index;
     }
     if other_buttons != nil {
-        let count: NSUInteger = msg![env; other_buttons count];
-        for index in 0..count {
-            let title: id = msg![env; other_buttons objectAtIndex:index];
-            assert_ne!(title, nil, "UIAlertView otherButtons contains nil");
-            add_button(env, this, title);
+        let array_class = env.objc.get_known_class("NSArray", &mut env.mem);
+        let is_array: bool = msg![env; other_buttons isKindOfClass:array_class];
+        if is_array {
+            let count: NSUInteger = msg![env; other_buttons count];
+            for index in 0..count {
+                let title: id = msg![env; other_buttons objectAtIndex:index];
+                assert_ne!(title, nil, "UIAlertView otherButtons contains nil");
+                add_button(env, this, title);
+            }
+        } else {
+            add_button(env, this, other_buttons);
         }
     }
     this

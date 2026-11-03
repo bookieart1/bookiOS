@@ -291,23 +291,40 @@ fn enumerate_apps(
     // so a full round can be exercised without repeatedly paging through the
     // library. Everything else remains alphabetical.
     // Bundle identifiers avoid depending on localized or truncated names.
-    const DEV_218_TEST_BATCH: &[&str] = &[
-        "com.gamevil.advena",
-        "com.digitalprunes.BungeeBall2Pro",
-        "com.uppercut-games.epoch",
-        "com.whaleislandgames.junny",
-        "com.backflipstudios.ragdollblaster3",
-        "com.ngmoco.rolando",
-        "com.chillingo.spoing",
-        "com.ngmoco.Topple2",
-        "com.teotlstudios.unmechanical",
-        "com.robotinvader.knightmare",
-        "com.gamevil.zenonia2",
+    const DEV_219_TEST_BATCH: &[&str] = &[
+        "ADVENA",
+        "BBLAST",
+        "BUNGEEBALL",
+        "DECOLORO",
+        "EPOCH",
+        "FLIPSESCAPE",
+        "JELLYCAR3",
+        "JUNNY",
+        "PARACHUTENINJA",
+        "PEGGLE",
+        "RAGDOLL3",
+        "ROLANDO",
+        "SPLODE",
+        "SPOING",
+        "SUPERFALL",
+        "TIKITOTEMS2",
+        "TOPPLE2",
+        "TOYBOT2",
+        "TRENCHESVS",
+        "UNMECHANICAL",
+        "WINDUPKNIGHT",
+        "ZENONIA2",
     ];
     apps.sort_by_key(|app| {
-        let focus_index = DEV_218_TEST_BATCH
+        let normalized_name: String = app
+            .display_name
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric())
+            .flat_map(char::to_uppercase)
+            .collect();
+        let focus_index = DEV_219_TEST_BATCH
             .iter()
-            .position(|identifier| *identifier == app.bundle_identifier.as_str())
+            .position(|name| normalized_name == *name || normalized_name.starts_with(*name))
             .map(|idx| (0, idx));
         let priority = focus_index.unwrap_or((1, 0));
         (priority, app.display_name.to_uppercase())
@@ -818,7 +835,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.18",
+            "iDared 32bit {}{}{} · Dev 2.19",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""

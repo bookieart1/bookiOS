@@ -287,6 +287,14 @@ fn handle_touches_down(env: &mut Environment, map: HashMap<FingerId, Coords>) {
             let view_has_other_new_touches = view_touches.contains_key(&view);
             let view_has_existing_touches = views_with_existing_touches.contains(&view);
             if view_has_other_new_touches || view_has_existing_touches {
+                env.diagnostic_touch_event(
+                    "began-rejected-existing",
+                    touch,
+                    view,
+                    env.framework_state.uikit.ui_touch.current_touches.len(),
+                    location.x,
+                    location.y,
+                );
                 log!(
                     "Ignoring new touch {:?} for view {:?}, !isMultipleTouchEnabled",
                     touch,
@@ -320,6 +328,14 @@ fn handle_touches_down(env: &mut Environment, map: HashMap<FingerId, Coords>) {
             new_touch.view = view;
             new_touch.window = window;
         }
+        env.diagnostic_touch_event(
+            "began-delivered",
+            touch,
+            view,
+            env.framework_state.uikit.ui_touch.current_touches.len(),
+            location.x,
+            location.y,
+        );
     }
 
     for (view, touches) in view_touches {
@@ -389,8 +405,25 @@ fn handle_touches_move(env: &mut Environment, map: HashMap<FingerId, Coords>) {
         // A touch that hit no view remains tracked until it ends, but UIKit
         // has no responder or gesture recognizer to deliver it to.
         if view == nil {
+            env.diagnostic_touch_event(
+                "moved-without-view",
+                touch,
+                nil,
+                env.framework_state.uikit.ui_touch.current_touches.len(),
+                location.x,
+                location.y,
+            );
             continue;
         }
+
+        env.diagnostic_touch_event(
+            "moved-delivered",
+            touch,
+            view,
+            env.framework_state.uikit.ui_touch.current_touches.len(),
+            location.x,
+            location.y,
+        );
 
         if let Entry::Vacant(e) = view_touches.entry(view) {
             let touches: id = msg_class![env; NSMutableSet allocWithZone:(MutVoidPtr::null())];
@@ -503,6 +536,14 @@ fn handle_touches_up(env: &mut Environment, map: HashMap<FingerId, Coords>) {
             .ui_touch
             .current_touches
             .remove(&finger_id);
+        env.diagnostic_touch_event(
+            if view == nil { "ended-without-view" } else { "ended-delivered" },
+            touch,
+            view,
+            env.framework_state.uikit.ui_touch.current_touches.len(),
+            location.x,
+            location.y,
+        );
         release(env, touch); // only owner now should be the NSSet
     }
 

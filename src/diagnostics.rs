@@ -33,7 +33,9 @@ const WATCHED_OBJECTS: usize = 16;
 const OBJECT_LIFETIME_EVENTS: usize = 64;
 const DICTIONARY_ORIGINS: usize = 1024;
 const UNRESOLVED_RELOCATIONS: usize = 32;
-const STRING_SEARCH_FAILURES: usize = 16;
+const STRING_SEARCHES: usize = 32;
+const TOUCH_EVENTS: usize = 64;
+const SELECTOR_EVENTS: usize = 64;
 const HEALTHY_PRESENT_INTERVAL: Duration = Duration::from_millis(100);
 const SLOW_PRESENT_INTERVAL: Duration = Duration::from_millis(180);
 const HEALTHY_PRESENT_STREAK: u16 = 30;
@@ -264,6 +266,9 @@ struct CollectionEvent {
     key_release: u32,
     value_retain: u32,
     value_release: u32,
+    value_class: Text,
+    raw_words: [u32; 3],
+    raw_word_count: u8,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -277,6 +282,7 @@ struct ObjectLifetimeEvent {
     after: u32,
     pc: u32,
     lr: u32,
+    context: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -321,6 +327,22 @@ struct ArrayEvent {
     lr: u32,
     caller_code: [u8; 16],
     caller_code_len: u8,
+    array_class: Text,
+    object_class: Text,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct SelectorEvent {
+    sequence: u64,
+    thread: usize,
+    action: &'static str,
+    run_loop: u32,
+    target: u32,
+    selector: Text,
+    argument: u32,
+    delay_ms: i64,
+    pc: u32,
+    lr: u32,
 }
 
 struct Ring<T: Copy + Default, const N: usize> {
@@ -386,14 +408,29 @@ struct UnresolvedRelocation {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-struct StringSearchFailure {
+struct StringSearch {
     thread: usize,
     pc: u32,
     lr: u32,
     haystack: u32,
     needle: u32,
+    result: u32,
     text: Text,
     pattern: Text,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct TouchEvent {
+    sequence: u64,
+    thread: usize,
+    action: &'static str,
+    touch: u32,
+    view: u32,
+    active: usize,
+    x: f32,
+    y: f32,
+    pc: u32,
+    lr: u32,
 }
 
 pub struct Recorder {
@@ -423,7 +460,9 @@ pub struct Recorder {
     /// this preserves evidence for a one-off jank transition.
     worst_present_gap: Option<SlowCapture>,
     unresolved_relocations: Ring<UnresolvedRelocation, UNRESOLVED_RELOCATIONS>,
-    string_search_failures: Ring<StringSearchFailure, STRING_SEARCH_FAILURES>,
+    string_searches: Ring<StringSearch, STRING_SEARCHES>,
+    touch_events: Ring<TouchEvent, TOUCH_EVENTS>,
+    selector_events: Ring<SelectorEvent, SELECTOR_EVENTS>,
     sequence: u64,
     api: u64,
     objc: u64,
@@ -464,7 +503,9 @@ impl Recorder {
             pending_slow_capture: None,
             worst_present_gap: None,
             unresolved_relocations: Ring::default(),
-            string_search_failures: Ring::default(),
+            string_searches: Ring::default(),
+            touch_events: Ring::default(),
+            selector_events: Ring::default(),
             sequence: 0,
             api: 0,
             objc: 0,
@@ -940,17 +981,36 @@ impl Recorder {
         for entry in self.bundle_directory_entries.iter() {
             echo_no_panic!("flight bundle directory entry name=\"{}\"", entry);
         }
-        echo_no_panic!("flight failed strstr searches: newest {STRING_SEARCH_FAILURES}; total={} (80-byte prefixes, ordinary misses are not errors)", self.string_search_failures.written);
-        for entry in self.string_search_failures.iter() {
-            echo_no_panic!("flight strstr miss tid={} pc={:#x} lr={:#x} haystack={:#x} needle={:#x} text=\"{}\" pattern=\"{}\"", entry.thread, entry.pc, entry.lr, entry.haystack, entry.needle, entry.text, entry.pattern);
+        echo_no_panic!("flight strstr searches: newest {STRING_SEARCHES}; total={} (80-byte prefixes; misses are not errors)", self.string_searches.written);
+        for entry in self.string_searches.iter() {
+            echo_no_panic!("flight strstr tid={} pc={:#x} lr={:#x} haystack={:#x} needle={:#x} result={:#x} text=\"{}\" pattern=\"{}\"", entry.thread, entry.pc, entry.lr, entry.haystack, entry.needle, entry.result, entry.text, entry.pattern);
+        }
+        echo_no_panic!(
+            "flight touch lifecycle: newest {TOUCH_EVENTS}; total={} (bounded host-to-UIKit delivery; no input behavior changes)",
+            self.touch_events.written
+        );
+        for event in self.touch_events.iter() {
+            echo_no_panic!("flight touch #{} tid={} action={} touch={:#x} view={:#x} active={} point=({:.2},{:.2}) pc={:#x} lr={:#x}",
+                event.sequence, event.thread, event.action, event.touch, event.view,
+                event.active, event.x, event.y, event.pc, event.lr);
+        }
+        echo_no_panic!(
+            "flight delayed-selector lifecycle: newest {SELECTOR_EVENTS}; total={} (bounded schedule/delivery evidence; no scheduling changes)",
+            self.selector_events.written
+        );
+        for event in self.selector_events.iter() {
+            echo_no_panic!("flight selector #{} tid={} action={} run-loop={:#x} target={:#x} selector=\"{}\" argument={:#x} delay-ms={} pc={:#x} lr={:#x}",
+                event.sequence, event.thread, event.action, event.run_loop, event.target,
+                event.selector, event.argument, event.delay_ms, event.pc, event.lr);
         }
         echo_no_panic!(
             "flight collection ownership events: newest {COLLECTION_EVENTS}; total={} (bounded observations, not proof of ownership correctness)",
             self.collection_events.written
         );
         for event in self.collection_events.iter() {
-            echo_no_panic!("flight collection #{} tid={} action={} dictionary={:#x} key={:#x} value={:#x} callbacks[key-retain={:#x},key-release={:#x},value-retain={:#x},value-release={:#x}]",
+            echo_no_panic!("flight collection #{} tid={} action={} dictionary={:#x} key={:#x} value={:#x} value-class=\"{}\" raw-words={:08x?}/{} callbacks[key-retain={:#x},key-release={:#x},value-retain={:#x},value-release={:#x}]",
                 event.sequence, event.thread, event.action, event.dictionary, event.key, event.value,
+                event.value_class, event.raw_words, event.raw_word_count,
                 event.key_retain, event.key_release, event.value_retain, event.value_release);
         }
         echo_no_panic!(
@@ -958,9 +1018,9 @@ impl Recorder {
             self.object_lifetime_events.written
         );
         for event in self.object_lifetime_events.iter() {
-            echo_no_panic!("flight lifetime #{} tid={} action={} object={:#x} class=\"{}\" refcount={}->{} pc={:#x} lr={:#x}",
+            echo_no_panic!("flight lifetime #{} tid={} action={} object={:#x} class=\"{}\" refcount={}->{} context={:#x} pc={:#x} lr={:#x}",
                 event.sequence, event.thread, event.action, event.object, event.class,
-                event.before, event.after, event.pc, event.lr);
+                event.before, event.after, event.context, event.pc, event.lr);
         }
         echo_no_panic!(
             "flight invocation lifecycle events: newest {INVOCATION_EVENTS}; total={} (bounded creation/configuration/invoke snapshots)",
@@ -977,9 +1037,10 @@ impl Recorder {
             self.array_events.written
         );
         for event in self.array_events.iter() {
-            echo_no_panic!("flight array #{} tid={} action={} array={:#x} index={} object={:#x} count={}->{} pc={:#x} lr={:#x} caller-bytes={:02x?}",
+            echo_no_panic!("flight array #{} tid={} action={} array={:#x} array-class=\"{}\" index={} object={:#x} object-class=\"{}\" count={}->{} pc={:#x} lr={:#x} caller-bytes={:02x?}",
                 event.sequence, event.thread, event.action, event.array,
-                event.index, event.object, event.before, event.after,
+                event.array_class, event.index, event.object, event.object_class,
+                event.before, event.after,
                 event.pc, event.lr,
                 &event.caller_code[..usize::from(event.caller_code_len)]);
         }
@@ -1085,18 +1146,74 @@ fn describe_object(objc: &ObjC, mem: &Mem, address: u32, include_string: bool) -
 }
 
 impl Environment {
-    pub fn diagnostic_string_search_miss(&mut self, haystack: u32, needle: u32) {
+    pub fn diagnostic_string_search(&mut self, haystack: u32, needle: u32, result: u32) {
         let Some(recorder) = &mut self.diagnostics else {
             return;
         };
-        recorder.string_search_failures.push(StringSearchFailure {
+        recorder.string_searches.push(StringSearch {
             thread: self.current_thread,
             pc: self.cpu.regs()[15],
             lr: self.cpu.regs()[14],
             haystack,
             needle,
+            result,
             text: Text::guest(&self.mem, haystack),
             pattern: Text::guest(&self.mem, needle),
+        });
+    }
+
+    pub fn diagnostic_touch_event(
+        &mut self,
+        action: &'static str,
+        touch: id,
+        view: id,
+        active: usize,
+        x: f32,
+        y: f32,
+    ) {
+        let Some(recorder) = &mut self.diagnostics else {
+            return;
+        };
+        let regs = self.cpu.regs();
+        recorder.touch_events.push(TouchEvent {
+            sequence: recorder.touch_events.written.saturating_add(1),
+            thread: self.current_thread,
+            action,
+            touch: touch.to_bits(),
+            view: view.to_bits(),
+            active,
+            x,
+            y,
+            pc: regs[15],
+            lr: regs[14],
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn diagnostic_selector_event(
+        &mut self,
+        action: &'static str,
+        run_loop: id,
+        target: id,
+        selector_name: &str,
+        argument: id,
+        delay: Option<f64>,
+    ) {
+        let Some(recorder) = &mut self.diagnostics else {
+            return;
+        };
+        let regs = self.cpu.regs();
+        recorder.selector_events.push(SelectorEvent {
+            sequence: recorder.selector_events.written.saturating_add(1),
+            thread: self.current_thread,
+            action,
+            run_loop: run_loop.to_bits(),
+            target: target.to_bits(),
+            selector: Text::from_bytes(selector_name.as_bytes()),
+            argument: argument.to_bits(),
+            delay_ms: delay.map_or(-1, |seconds| (seconds * 1000.0) as i64),
+            pc: regs[15],
+            lr: regs[14],
         });
     }
 
@@ -1350,6 +1467,18 @@ impl Environment {
         } else {
             Text::default()
         };
+        let array_class = ObjC::try_read_isa(id::from_bits(array), &self.mem)
+            .and_then(|class| self.objc.try_get_class_name(class))
+            .map(|name| Text::from_bytes(name.as_bytes()))
+            .unwrap_or_default();
+        let object_class = if object == 0 {
+            Text::default()
+        } else {
+            ObjC::try_read_isa(id::from_bits(object), &self.mem)
+                .and_then(|class| self.objc.try_get_class_name(class))
+                .map(|name| Text::from_bytes(name.as_bytes()))
+                .unwrap_or_else(|| Text::from_bytes(b"<invalid>"))
+        };
         let mut caller_code = [0; 16];
         let caller_address = (regs[14] & !1).saturating_sub(8);
         let caller_code_len = self
@@ -1374,6 +1503,8 @@ impl Environment {
                 lr: regs[14],
                 caller_code,
                 caller_code_len,
+                array_class,
+                object_class,
             });
             // Preserve retain/release/deallocation provenance for only the
             // most recently transferred array values. The recorder does not
@@ -1390,6 +1521,7 @@ impl Environment {
                     after: refcount.unwrap_or(0),
                     pc: regs[15],
                     lr: regs[14],
+                    context: 0,
                 });
             }
         }
@@ -1408,6 +1540,25 @@ impl Environment {
         let refcount = self.objc.refcount_for_diagnostics(id::from_bits(value));
         let regs = self.cpu.regs();
         let (pc, lr) = (regs[15], regs[14]);
+        let value_class = if value == 0 {
+            Text::default()
+        } else {
+            ObjC::try_read_isa(id::from_bits(value), &self.mem)
+                .and_then(|class| self.objc.try_get_class_name(class))
+                .map(|name| Text::from_bytes(name.as_bytes()))
+                .unwrap_or_else(|| Text::from_bytes(b"<not-a-live-object>"))
+        };
+        let mut raw_words = [0; 3];
+        let raw_word_count = self
+            .mem
+            .get_bytes_fallible(ConstVoidPtr::from_bits(value), 12)
+            .map(|bytes| {
+                for (word, chunk) in raw_words.iter_mut().zip(bytes.chunks_exact(4)) {
+                    *word = u32::from_le_bytes(chunk.try_into().unwrap());
+                }
+                (bytes.len() / 4) as u8
+            })
+            .unwrap_or(0);
         if let Some(recorder) = &mut self.diagnostics {
             let sequence = recorder.collection_events.written.saturating_add(1);
             recorder.collection_events.push(CollectionEvent {
@@ -1421,6 +1572,9 @@ impl Environment {
                 key_release: callbacks[1],
                 value_retain: callbacks[2],
                 value_release: callbacks[3],
+                value_class,
+                raw_words,
+                raw_word_count,
             });
             if action == "insert-callback-dictionary" && callbacks == [0; 4] && value != 0 {
                 recorder.watch_object(value);
@@ -1434,6 +1588,7 @@ impl Environment {
                     after: refcount.unwrap_or(0),
                     pc,
                     lr,
+                    context: 0,
                 });
             }
         }
@@ -1472,6 +1627,41 @@ impl Environment {
                 after,
                 pc: regs[15],
                 lr: regs[14],
+                context: 0,
+            });
+        }
+    }
+
+    /// Correlate a watched object's final autorelease-pool consumption with
+    /// the exact pool that releases it. Objects are neither retained nor
+    /// messaged by this diagnostic.
+    pub fn diagnostic_autorelease_pool_release(&mut self, pool: id, object: id) {
+        let address = object.to_bits();
+        if !self
+            .diagnostics
+            .as_ref()
+            .is_some_and(|recorder| recorder.watches_object(address))
+        {
+            return;
+        }
+        let class = ObjC::try_read_isa(object, &self.mem)
+            .and_then(|class| self.objc.try_get_class_name(class))
+            .map(|name| Text::from_bytes(name.as_bytes()))
+            .unwrap_or_else(|| Text::from_bytes(b"<deallocated-or-invalid>"));
+        let refcount = self.objc.refcount_for_diagnostics(object).unwrap_or(0);
+        let regs = self.cpu.regs();
+        if let Some(recorder) = &mut self.diagnostics {
+            recorder.object_lifetime_events.push(ObjectLifetimeEvent {
+                sequence: recorder.object_lifetime_events.written.saturating_add(1),
+                thread: self.current_thread,
+                action: "autorelease-pool-release",
+                object: address,
+                class,
+                before: refcount,
+                after: refcount.saturating_sub(1),
+                pc: regs[15],
+                lr: regs[14],
+                context: pool.to_bits(),
             });
         }
     }
@@ -1641,6 +1831,29 @@ impl Environment {
                 }
             }
             if !recorder.dumped && matches!(reason, "panic" | "scheduler-panic") {
+                let pc = self.cpu.regs()[crate::cpu::Cpu::PC];
+                let instruction_address = pc & !1;
+                if let Some(binary) = self.bins.iter().find(|binary| {
+                    binary.text_segment_base.is_some_and(|base| {
+                        base <= instruction_address && instruction_address < binary.last_segment_end
+                    })
+                }) {
+                    let start = instruction_address
+                        .saturating_sub(16)
+                        .max(binary.text_segment_base.unwrap());
+                    let end = instruction_address.saturating_add(16).min(binary.last_segment_end);
+                    let bytes = self
+                        .mem
+                        .get_bytes_fallible(ConstVoidPtr::from_bits(start), end - start);
+                    echo_no_panic!(
+                        "flight fault instruction context: pc={pc:#010x} image={} bytes at {start:#010x}: {bytes:02x?}; raw bounded code, not a decoded root cause",
+                        binary.name
+                    );
+                } else {
+                    echo_no_panic!(
+                        "flight fault instruction context: pc={pc:#010x} image=<unknown>; code unavailable"
+                    );
+                }
                 let callers = recorder.crash_callers(self.current_thread);
                 echo_no_panic!("flight crash caller code: up to {CRASH_CALLERS} distinct recent LR values on the failing thread; raw bytes, not a call stack; Thumb mode comes from LR bit 0");
                 for lr in callers.into_iter().filter(|&lr| lr != 0) {
@@ -2059,19 +2272,71 @@ mod tests {
         let haystack = env.mem.alloc_and_write_cstr(&[b'x'; 100]);
         let needle = env.mem.alloc_and_write_cstr(b".xml");
         let registers = *env.cpu.regs();
-        for _ in 0..100 {
-            env.diagnostic_string_search_miss(haystack.to_bits(), needle.to_bits());
+        for index in 0..100 {
+            env.diagnostic_string_search(
+                haystack.to_bits(),
+                needle.to_bits(),
+                if index % 2 == 0 { 0 } else { haystack.to_bits() + 4 },
+            );
         }
         assert_eq!(*env.cpu.regs(), registers);
         let recorder = env.diagnostics.as_ref().unwrap();
         assert_eq!(
-            recorder.string_search_failures.iter().count(),
-            STRING_SEARCH_FAILURES
+            recorder.string_searches.iter().count(),
+            STRING_SEARCHES
         );
-        let last = recorder.string_search_failures.iter().last().unwrap();
+        let last = recorder.string_searches.iter().last().unwrap();
         assert_eq!(last.text.bytes(), &[b'x'; 80]);
         assert_eq!(last.pattern.bytes(), b".xml");
+        assert_eq!(last.result, haystack.to_bits() + 4);
         assert_eq!(recorder.objc, 0);
+        assert!(std::mem::size_of::<Recorder>() < MAX_RECORDER_BYTES);
+    }
+
+    #[test]
+    fn touch_selector_and_raw_collection_evidence_are_bounded_and_observational() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        env.diagnostics = Some(Recorder::new());
+        let raw = env.mem.alloc(12);
+        env.mem.bytes_at_mut(raw.cast(), 12).copy_from_slice(&[
+            0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc,
+        ]);
+        for index in 0..(TOUCH_EVENTS * 2) {
+            env.diagnostic_touch_event(
+                "began-delivered",
+                id::from_bits(0x3000 + index as u32),
+                id::from_bits(0x4000),
+                1,
+                index as f32,
+                2.0,
+            );
+        }
+        for index in 0..(SELECTOR_EVENTS * 2) {
+            env.diagnostic_selector_event(
+                "scheduled",
+                id::from_bits(0x5000),
+                id::from_bits(0x6000),
+                "callback:",
+                id::from_bits(index as u32),
+                Some(0.25),
+            );
+        }
+        env.diagnostic_collection_event(
+            "insert-callback-dictionary",
+            0x7000,
+            0x7100,
+            raw.to_bits(),
+            [0; 4],
+        );
+        let recorder = env.diagnostics.as_ref().unwrap();
+        assert_eq!(recorder.touch_events.iter().count(), TOUCH_EVENTS);
+        assert_eq!(recorder.selector_events.iter().count(), SELECTOR_EVENTS);
+        let selector = recorder.selector_events.iter().last().unwrap();
+        assert_eq!(selector.selector.bytes(), b"callback:");
+        assert_eq!(selector.delay_ms, 250);
+        let collection = recorder.collection_events.iter().last().unwrap();
+        assert_eq!(collection.raw_word_count, 3);
+        assert_eq!(collection.raw_words, [0x4433_2211, 0x8877_6655, 0xccbb_aa99]);
         assert!(std::mem::size_of::<Recorder>() < MAX_RECORDER_BYTES);
     }
 

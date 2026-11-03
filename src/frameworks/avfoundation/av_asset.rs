@@ -9,9 +9,13 @@
 //! duration, metadata or playback support. It only implements the historical
 //! construction contract needed before those later operations can be seen.
 
+use crate::frameworks::foundation::NSInteger;
 use crate::objc::{
     autorelease, id, msg, nil, objc_classes, release, retain, ClassExports, HostObject, NSZonePtr,
 };
+
+pub type AVPlayerItemStatus = NSInteger;
+pub const AVPLAYER_ITEM_STATUS_UNKNOWN: AVPlayerItemStatus = 0;
 
 struct AVURLAssetHostObject {
     url: id,
@@ -104,6 +108,17 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.borrow::<AVPlayerItemHostObject>(this).asset
 }
 
+// A newly constructed item begins in Unknown. Media inspection/loading is not
+// implemented, so this partial contract deliberately never claims Ready or
+// Failed and never fabricates an NSError.
+- (AVPlayerItemStatus)status {
+    AVPLAYER_ITEM_STATUS_UNKNOWN
+}
+
+- (id)error {
+    nil
+}
+
 - (())dealloc {
     let asset = env.objc.borrow::<AVPlayerItemHostObject>(this).asset;
     release(env, asset);
@@ -178,7 +193,11 @@ mod tests {
         let item: id = msg_class![env; AVPlayerItem alloc];
         let item: id = msg![env; item initWithAsset:asset];
         let returned: id = msg![env; item asset];
+        let status: AVPlayerItemStatus = msg![env; item status];
+        let error: id = msg![env; item error];
         assert_eq!(returned, asset);
+        assert_eq!(status, AVPLAYER_ITEM_STATUS_UNKNOWN);
+        assert_eq!(error, nil);
         let count_during: NSUInteger = msg![env; asset retainCount];
         assert_eq!(count_during, count_before + 1);
         release(env, item);

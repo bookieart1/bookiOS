@@ -4057,3 +4057,34 @@ build or push was performed for this review.
   recorded in `compatibility-2.18-later-contracts.md`.
 - Physical-device status remains pending. Passing one boundary is not yet a
   menu, gameplay, save/relaunch, or functional-compatibility result.
+
+## Dev 2.18 device result and Dev 2.19 candidate — 2026-11-03
+
+The supplied Dev 2.18 log verifies implementation `9566691` and workflow
+`41703580910`. ADVENA reached gameplay but later requested XML property-list
+serialization during exit; Bungee Ball displayed level content over the wrong
+yellow presentation and failed after selecting a level; EPOCH and Unmechanical
+advanced to `AVPlayerItem.status`; Ragdoll 3 advanced to
+`hw.l1dcachesize`; Topple 2 exposed a string in the historical alert
+initializer's final argument. Junny, Rolando, Wind-up Knight and ZENONIA 2
+remained strict later-stage failures. Spoing failed once and then ran normally,
+so first-launch state remains an intermittent comparison rather than a passed
+single-run regression.
+
+Dev 2.19 implements the four exact general corrections above and adds bounded
+causal provenance for the eleven Dev 2.18 omissions: complete `strstr` result
+sequence (B'Blast), touch lifecycle (Decoloro/Toy Bot 2), delayed-selector
+schedule/delivery (Parachute Ninja), raw dictionary payload words (Tiki Totems
+2), autorelease-pool identity (SUPERFALL), array/object classes (Trenches VS),
+and symbolizable fault-instruction bytes (JellyCar 3/Splode and strict terminal
+failures). Flip's Escape and Peggle receive correlation evidence, not a
+speculative graphics correction. No invalid memory, invalid object, missing
+resource, media readiness, networking success, or collection index is
+fabricated.
+
+The picker now exposes a persistent user-controlled classification: long-press
+an icon to mark it Playable or Not Playable, or restore the built-in status.
+This changes only the picker filters and remains deliberately separate from
+the evidence ledger. Full boundaries and predictions are in
+`compatibility-2.19-contracts-provenance-and-picker-status.md`. Physical-device
+status is pending.

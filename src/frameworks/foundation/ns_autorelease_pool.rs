@@ -128,6 +128,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         let objects = std::mem::take(&mut host_obj.objects);
         env.objc.dealloc_object(pool, &mut env.mem);
         for object in objects {
+            env.diagnostic_autorelease_pool_release(pool, object);
             release(env, object);
         }
     }

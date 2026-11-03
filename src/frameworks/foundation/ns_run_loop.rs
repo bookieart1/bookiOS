@@ -327,6 +327,14 @@ pub(super) fn add_perform_request(
         "Adding object selector request {target:?} {:?} {argument:?} on run loop {run_loop:?}",
         selector.as_str(env.mem.as_mut())
     );
+    env.diagnostic_selector_event(
+        "scheduled",
+        run_loop,
+        target,
+        selector.as_str(&env.mem),
+        argument,
+        delay,
+    );
     let semaphore = if should_sync {
         host_create_semaphore(env, 0)
     } else {
@@ -578,6 +586,14 @@ pub fn run_run_loop(
                         semaphore,
                     } = selector_objects.remove(index).unwrap();
                     log_dbg!("Running object selector request {target:?} {:?} {argument:?} on run loop {run_loop:?}", selector.as_str(env.mem.as_mut()));
+                    env.diagnostic_selector_event(
+                        "delivered",
+                        run_loop,
+                        target,
+                        selector.as_str(&env.mem),
+                        argument,
+                        None,
+                    );
 
                     if selector.as_str(&env.mem).ends_with(':') {
                         // The method may take a non-object argument.
