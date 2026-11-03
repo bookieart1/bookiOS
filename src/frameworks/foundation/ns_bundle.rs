@@ -87,7 +87,9 @@ fn paths_in_directory(env: &mut Environment, extension: id, directory: id) -> id
                 }
             }
         }
-        Err(_) => log!("Failed to read guest directory {:?}", dir_path),
+        Err(_) => {
+            log!("Failed to read guest directory {:?}", dir_path);
+        }
     }
     let array: id = msg_class![env; NSMutableArray new];
     for path in found_paths {
