@@ -161,6 +161,7 @@ pub struct State {
     ns_bundle: ns_bundle::State,
     ns_calendar: ns_calendar::State,
     ns_date: ns_date::State,
+    ns_exception: ns_exception::State,
     ns_file_manager: ns_file_manager::State,
     ns_http_cookie_storage: ns_http_cookie_storage::State,
     ns_key_value_observing: ns_key_value_observing::State,

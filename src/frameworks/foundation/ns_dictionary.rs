@@ -11,8 +11,8 @@ use super::ns_property_list_serialization::{
 };
 use super::ns_string::{from_rust_string, get_static_str, to_rust_string};
 use super::{
-    _nib_archive_decoder, ns_array, ns_keyed_unarchiver, ns_string, ns_url,
-    NSComparisonResult, NSUInteger,
+    _nib_archive_decoder, ns_array, ns_keyed_unarchiver, ns_string, ns_url, NSComparisonResult,
+    NSUInteger,
 };
 use crate::abi::{CallFromHost, GuestFunction, VaList};
 use crate::cpu::Cpu;
@@ -31,7 +31,7 @@ use crate::libc::stdlib::qsort::qsort_generic;
 use crate::mem::{ConstPtr, MutPtr, Ptr, SafeRead};
 use crate::objc::{
     autorelease, id, msg, msg_class, msg_send, nil, objc_classes, release, retain, Class,
-    ClassExports, HostObject, NSZonePtr, SEL, TrivialHostObject,
+    ClassExports, HostObject, NSZonePtr, TrivialHostObject, SEL,
 };
 use crate::{impl_HostObject_with_superclass, Environment};
 use std::collections::hash_map::Entry;
@@ -735,6 +735,17 @@ pub const CLASSES: ClassExports = objc_classes! {
         () = msg![env; this removeObjectForKey:key];
     } else {
         () = msg![env; this setObject:value forKey:key];
+    }
+}
+
+- (())removeObjectsForKeys:(id)keys { // NSArray *
+    if keys == nil {
+        return;
+    }
+    let count: NSUInteger = msg![env; keys count];
+    for index in 0..count {
+        let key: id = msg![env; keys objectAtIndex:index];
+        () = msg![env; this removeObjectForKey:key];
     }
 }
 
@@ -1451,5 +1462,25 @@ mod tests {
 
         release(env, dictionary);
         release(env, pool);
+    }
+
+    #[test]
+    fn mutable_dictionary_removes_each_requested_key() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let one = get_static_str(env, "one");
+        let two = get_static_str(env, "two");
+        let value = get_static_str(env, "value");
+        let dictionary: id =
+            msg_class![env; NSMutableDictionary dictionaryWithObject:value forKey:one];
+        () = msg![env; dictionary setObject:value forKey:two];
+        let keys: id = msg_class![env; NSArray arrayWithObject:one];
+        () = msg![env; dictionary removeObjectsForKeys:keys];
+        let count: NSUInteger = msg![env; dictionary count];
+        assert_eq!(count, 1);
+        let removed: id = msg![env; dictionary objectForKey:one];
+        let remaining: id = msg![env; dictionary objectForKey:two];
+        assert_eq!(removed, nil);
+        assert_eq!(remaining, value);
     }
 }

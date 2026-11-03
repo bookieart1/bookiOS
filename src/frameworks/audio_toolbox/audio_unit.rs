@@ -64,6 +64,7 @@ const kAudioUnitProperty_SetRenderCallback: AudioUnitPropertyID = 23;
 const kAudioUnitProperty_MaximumFramesPerSlice: AudioUnitPropertyID = 14;
 const kAudioUnitProperty_StreamFormat: AudioUnitPropertyID = 8;
 const kAudioUnitProperty_MakeConnection: AudioUnitPropertyID = 9;
+const kAudioUnitProperty_ElementCount: AudioUnitPropertyID = 11;
 
 const kAudioUnitProperty_ShouldAllocateBuffer: AudioUnitPropertyID = 51;
 
@@ -247,6 +248,31 @@ fn AudioUnitSetProperty(
             result = 0;
             log_dbg!("AudioUnitSetProperty({:?}, kAudioUnitProperty_SetRenderCallback, {:?}, {:?}, {:?}, {:?}) -> {:?}", in_unit, in_scope, in_element, render_callback, in_data_size, result);
         }
+        kAudioUnitProperty_ElementCount => {
+            if host_object.kind != audio_components::AudioComponentKind::Mixer3D
+                || in_scope != kAudioUnitScope_Input
+                || in_element != OUTPUT_ELEMENT
+                || in_data_size != guest_size_of::<u32>()
+            {
+                result = paramErr;
+            } else {
+                let count = env.mem.read(in_data.cast::<u32>());
+                if count == 0 {
+                    result = paramErr;
+                } else {
+                    host_object.input_element_count = count;
+                    result = 0;
+                }
+            }
+            log_dbg!(
+                "AudioUnitSetProperty({:?}, kAudioUnitProperty_ElementCount, {:?}, {:?}, ..., {:?}) -> {:?}",
+                in_unit,
+                in_scope,
+                in_element,
+                in_data_size,
+                result
+            );
+        }
         kAudioUnitProperty_StreamFormat if in_element == INPUT_ELEMENT => {
             // The format the app wants microphone input in.
             result = 0;
@@ -334,6 +360,18 @@ fn AudioUnitGetProperty(
     );
 
     match in_id {
+        kAudioUnitProperty_ElementCount => {
+            assert_eq!(env.mem.read(io_data_size), guest_size_of::<u32>());
+            let count = match (host_object.kind, in_scope) {
+                (audio_components::AudioComponentKind::Mixer3D, kAudioUnitScope_Input) => {
+                    host_object.input_element_count
+                }
+                (_, kAudioUnitScope_Global | kAudioUnitScope_Output) => 1,
+                _ => return paramErr,
+            };
+            env.mem.write(out_data.cast(), count);
+            env.mem.write(io_data_size, guest_size_of::<u32>());
+        }
         kAudioUnitProperty_MaximumFramesPerSlice => {
             assert_eq!(env.mem.read(io_data_size), guest_size_of::<u32>());
             let max_frames: u32 = host_object.maximum_frames_per_slice;
@@ -793,5 +831,46 @@ mod tests {
             render_sample_rate(None, None, &global_stream_format, 48_000.0),
             expected_sample_rate
         );
+    }
+
+    #[test]
+    fn mixer_input_element_count_round_trips() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let unit = AudioUnit::from_bits(0x1234);
+        let host = audio_components::AudioComponentInstanceHostObject {
+            kind: audio_components::AudioComponentKind::Mixer3D,
+            ..Default::default()
+        };
+        audio_components::State::get(&mut env.framework_state)
+            .audio_component_instances
+            .insert(unit, host);
+        let value = env.mem.alloc_and_write(32u32);
+        assert_eq!(
+            AudioUnitSetProperty(
+                &mut env,
+                unit,
+                kAudioUnitProperty_ElementCount,
+                kAudioUnitScope_Input,
+                OUTPUT_ELEMENT,
+                value.cast_const().cast_void(),
+                guest_size_of::<u32>(),
+            ),
+            0
+        );
+        let out = env.mem.alloc(guest_size_of::<u32>()).cast::<u32>();
+        let size = env.mem.alloc_and_write(guest_size_of::<u32>());
+        assert_eq!(
+            AudioUnitGetProperty(
+                &mut env,
+                unit,
+                kAudioUnitProperty_ElementCount,
+                kAudioUnitScope_Input,
+                OUTPUT_ELEMENT,
+                out.cast_void(),
+                size,
+            ),
+            0
+        );
+        assert_eq!(env.mem.read(out), 32);
     }
 }

@@ -19,7 +19,10 @@ pub const NSURLErrorDomain: &str = "NSURLErrorDomain";
 pub const NSErrorFailingURLStringKey: &str = "NSErrorFailingURLStringKey";
 
 pub const CONSTANTS: ConstantExports = &[
-    ("_NSURLErrorDomain", HostConstant::NSString(NSURLErrorDomain)),
+    (
+        "_NSURLErrorDomain",
+        HostConstant::NSString(NSURLErrorDomain),
+    ),
     (
         "_NSErrorFailingURLStringKey",
         HostConstant::NSString(NSErrorFailingURLStringKey),
@@ -142,6 +145,13 @@ expectedContentLength:(NSInteger)expected_content_length
 
 
 @implementation NSURLConnection: NSObject
+
++ (bool)canHandleRequest:(id)request { // NSURLRequest *
+    // This is a preflight for whether a connection can actually be created and
+    // started. The current transport implements local files only, so report
+    // that boundary truthfully instead of claiming unavailable network I/O.
+    local_file_url_from_request(env, request).is_some()
+}
 
 + (id)allocWithZone:(NSZonePtr)_zone {
     let host_object = Box::new(NSURLConnectionHostObject {
@@ -324,10 +334,8 @@ fn make_file_response(env: &mut Environment, url: id, expected_content_length: N
 }
 
 fn local_start_selector(env: &mut Environment) -> SEL {
-    env.objc.register_host_selector(
-        "_touchHLEStartLocalFileRequest".to_string(),
-        &mut env.mem,
-    )
+    env.objc
+        .register_host_selector("_touchHLEStartLocalFileRequest".to_string(), &mut env.mem)
 }
 
 fn schedule_connection(env: &mut Environment, connection: id) {
@@ -340,26 +348,25 @@ fn schedule_connection(env: &mut Environment, connection: id) {
         host.run_loop
     };
     let selector = local_start_selector(env);
-    ns_run_loop::add_perform_request(
-        env,
-        run_loop,
-        connection,
-        selector,
-        nil,
-        Some(0.0),
-        false,
-    );
+    ns_run_loop::add_perform_request(env, run_loop, connection, selector, nil, Some(0.0), false);
 }
 
 fn cancel_connection(env: &mut Environment, connection: id) {
     let (state, run_loop, delegate) = {
         let host = env.objc.borrow_mut::<NSURLConnectionHostObject>(connection);
-        if matches!(host.state, ConnectionState::Finished | ConnectionState::Cancelled) {
+        if matches!(
+            host.state,
+            ConnectionState::Finished | ConnectionState::Cancelled
+        ) {
             return;
         }
         let state = host.state;
         host.state = ConnectionState::Cancelled;
-        (state, host.run_loop, std::mem::replace(&mut host.delegate, nil))
+        (
+            state,
+            host.run_loop,
+            std::mem::replace(&mut host.delegate, nil),
+        )
     };
     if state == ConnectionState::Scheduled {
         let selector = local_start_selector(env);
@@ -420,10 +427,9 @@ fn fail_local_file_connection(env: &mut Environment, connection: id) {
         .request;
     let delegate = finish_connection(env, connection);
     if delegate != nil {
-        let selector = env.objc.register_host_selector(
-            "connection:didFailWithError:".to_string(),
-            &mut env.mem,
-        );
+        let selector = env
+            .objc
+            .register_host_selector("connection:didFailWithError:".to_string(), &mut env.mem);
         if msg![env; delegate respondsToSelector:selector] {
             let error = make_url_error(env, request, NSURLErrorFileDoesNotExist);
             () = msg_send(env, (delegate, selector, connection, error));
@@ -505,5 +511,38 @@ fn url_string_from_request(env: &mut Environment, request: id) -> Cow<'static, s
             return Cow::from("(null)");
         }
         ns_string::to_rust_string(env, ns_string)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capability_query_matches_available_local_file_transport() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        // NSURLRequest's convenience factory delegates to an initializer with
+        // a fifth ARM argument, so this fixture needs synthetic stack space.
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+
+        let path = ns_string::from_rust_string(env, "/tmp/idared-local-request".to_owned());
+        let file_url: id = msg_class![env; NSURL fileURLWithPath:path];
+        let file_request: id = msg_class![env; NSURLRequest requestWithURL:file_url];
+        assert!(msg_class![env; NSURLConnection canHandleRequest:file_request]);
+
+        let string = ns_string::from_rust_string(env, "https://example.invalid/".to_owned());
+        let network_url: id = msg_class![env; NSURL URLWithString:string];
+        let network_request: id = msg_class![env; NSURLRequest requestWithURL:network_url];
+        assert!(!msg_class![env; NSURLConnection canHandleRequest:network_request]);
+        assert!(!msg_class![env; NSURLConnection canHandleRequest:nil]);
+
+        release(env, path);
+        release(env, string);
+        release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

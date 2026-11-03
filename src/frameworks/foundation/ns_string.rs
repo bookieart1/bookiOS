@@ -10,6 +10,7 @@
 
 mod path_algorithms;
 
+use super::ns_error::{NSCocoaErrorDomain, NSFilePathErrorKey, NSFileReadNoSuchFileError};
 use super::ns_keyed_archiver::set_value_to_encode_for_current_key;
 use super::{ns_array, ns_keyed_unarchiver};
 use super::{
@@ -30,7 +31,7 @@ use crate::objc::{
     HostObject, NSZonePtr, ObjC,
 };
 use crate::{fs, Environment};
-use encoding_rs::{SHIFT_JIS, WINDOWS_1252};
+use encoding_rs::{EUC_KR, SHIFT_JIS, WINDOWS_1252};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Write;
@@ -40,8 +41,7 @@ use std::string::FromUtf16Error;
 pub type NSStringEncoding = NSUInteger;
 pub type NSStringEncodingConversionOptions = NSUInteger;
 pub const NSStringEncodingConversionAllowLossy: NSStringEncodingConversionOptions = 1;
-pub const NSStringEncodingConversionExternalRepresentation: NSStringEncodingConversionOptions =
-    2;
+pub const NSStringEncodingConversionExternalRepresentation: NSStringEncodingConversionOptions = 2;
 pub const NSASCIIStringEncoding: NSUInteger = 1;
 pub const NSUTF8StringEncoding: NSUInteger = 4;
 pub const NSISOLatin1StringEncoding: NSUInteger = 5;
@@ -49,6 +49,8 @@ pub const NSShiftJISStringEncoding: NSUInteger = 8;
 pub const NSUnicodeStringEncoding: NSUInteger = 10;
 pub const NSWindowsCP1252StringEncoding: NSUInteger = 12;
 pub const NSMacOSRomanStringEncoding: NSUInteger = 30;
+/// NSString representation of Core Foundation's DOS Korean encoding (CP949).
+pub const NSDOSKoreanStringEncoding: NSUInteger = 0x80000422;
 pub const NSUTF16StringEncoding: NSUInteger = NSUnicodeStringEncoding;
 pub const NSUTF16BigEndianStringEncoding: NSUInteger = 0x90000100;
 pub const NSUTF16LittleEndianStringEncoding: NSUInteger = 0x94000100;
@@ -70,6 +72,7 @@ const C_STRING_FRIENDLY_ENCODINGS: &[NSStringEncoding] = &[
     NSWindowsCP1252StringEncoding,
     NSMacOSRomanStringEncoding,
     NSISOLatin1StringEncoding,
+    NSDOSKoreanStringEncoding,
 ];
 
 pub const NSMaximumStringLength: NSUInteger = (i32::MAX - 1) as _;
@@ -82,6 +85,23 @@ impl State {
     fn get(env: &mut Environment) -> &mut Self {
         &mut env.framework_state.foundation.ns_string
     }
+}
+
+fn populate_file_read_error(env: &mut Environment, path: id, out_error: MutPtr<id>) {
+    if out_error.is_null() {
+        return;
+    }
+    let user_info = if path == nil {
+        nil
+    } else {
+        let key = get_static_str(env, NSFilePathErrorKey);
+        msg_class![env; NSDictionary dictionaryWithObject:path forKey:key]
+    };
+    let domain = get_static_str(env, NSCocoaErrorDomain);
+    let error: id = msg_class![env; NSError errorWithDomain:domain
+                                                 code:NSFileReadNoSuchFileError
+                                             userInfo:user_info];
+    env.mem.write(out_error, error);
 }
 
 /// Constant strings embedded in the app binary use this struct. The name is
@@ -158,6 +178,14 @@ impl StringHostObject {
                 assert!(!had_errors);
                 log_dbg!("ShiftJIS decoded {:?}", cow);
                 StringHostObject::Utf8(Cow::Owned(cow.to_string()))
+            }
+            NSDOSKoreanStringEncoding => {
+                // encoding_rs' EUC_KR implementation includes the Windows-949
+                // extension used by Apple's historical DOS Korean encoding.
+                let (cow, encoding_used, had_errors) = EUC_KR.decode(&bytes);
+                assert_eq!(encoding_used, EUC_KR);
+                assert!(!had_errors);
+                StringHostObject::Utf8(Cow::Owned(cow.into_owned()))
             }
             NSUTF16StringEncoding
             | NSUTF16BigEndianStringEncoding
@@ -674,6 +702,15 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (NSUInteger)lengthOfBytesUsingEncoding:(NSStringEncoding)encoding {
+    if encoding == NSDOSKoreanStringEncoding {
+        let length: NSUInteger = msg![env; this length];
+        let units: Vec<u16> = (0..length)
+            .map(|index| msg![env; this characterAtIndex:index])
+            .collect();
+        return encode_utf16_units(&units, encoding, false, false)
+            .map(|bytes| bytes.len().try_into().unwrap())
+            .unwrap_or(0);
+    }
     if C_STRING_FRIENDLY_ENCODINGS.contains(&encoding) {
         let string = to_rust_string(env, this);
         assert!(string.as_bytes().iter().all(|byte| byte.is_ascii())); // TODO
@@ -1439,6 +1476,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     st[..cutoff].parse().unwrap_or(0)
 }
 
+- (i64)longLongValue {
+    parse_signed_decimal_prefix_i64(&to_rust_string(env, this))
+}
+
 - (id)lowercaseString {
     // TODO: check if rust methods are consistent with ObjC one
     let str = to_rust_string(env, this).to_lowercase();
@@ -1733,9 +1774,9 @@ pub const CLASSES: ClassExports = objc_classes! {
                     encoding:(NSStringEncoding)encoding
                        error:(MutPtr<id>)error { // NSError**
     // TODO: avoid copy?
-    let path = to_rust_string(env, path);
-    let Ok(bytes) = env.fs.read(GuestPath::new(&path)) else {
-        assert!(error.is_null()); // TODO: error handling
+    let path_string = to_rust_string(env, path);
+    let Ok(bytes) = env.fs.read(GuestPath::new(&path_string)) else {
+        populate_file_read_error(env, path, error);
         release(env, this);
         return nil;
     };
@@ -2019,40 +2060,12 @@ fn data_using_encoding_lossy_inner(
     encoding: NSStringEncoding,
     lossy: bool,
 ) -> id {
-    assert!(
-        encoding == NSUTF8StringEncoding
-            || encoding == NSASCIIStringEncoding
-            || encoding == NSISOLatin1StringEncoding
-    );
-
-    let string = to_rust_string(env, this);
-    let bytes = match encoding {
-        NSUTF8StringEncoding => string.as_bytes().to_vec(),
-        NSASCIIStringEncoding => {
-            if !lossy && !string.is_ascii() {
-                return nil;
-            }
-            string
-                .chars()
-                .map(|character| {
-                    if character.is_ascii() {
-                        character as u8
-                    } else {
-                        b'?'
-                    }
-                })
-                .collect()
-        }
-        NSISOLatin1StringEncoding => {
-            if !lossy && string.chars().any(|character| character as u32 > 0xff) {
-                return nil;
-            }
-            string
-                .chars()
-                .map(|character| u8::try_from(character as u32).unwrap_or(b'?'))
-                .collect()
-        }
-        _ => unreachable!(),
+    let length: NSUInteger = msg![env; this length];
+    let units: Vec<u16> = (0..length)
+        .map(|index| msg![env; this characterAtIndex:index])
+        .collect();
+    let Some(bytes) = encode_utf16_units(&units, encoding, lossy, false) else {
+        return nil;
     };
     let c_string = env.mem.alloc_and_write_cstr(&bytes);
     let length: NSUInteger = bytes.len().try_into().unwrap();
@@ -2168,11 +2181,7 @@ pub fn to_rust_string(env: &mut Environment, string: id) -> Cow<'static, str> {
 
 /// Copy an NSString's contents for bounded diagnostics without guest calls,
 /// allocation, mutation or a panic for an unrelated/invalid object.
-pub(crate) fn copy_diagnostic_utf8(
-    objc: &ObjC,
-    string: id,
-    output: &mut [u8],
-) -> Option<usize> {
+pub(crate) fn copy_diagnostic_utf8(objc: &ObjC, string: id, output: &mut [u8]) -> Option<usize> {
     let mut host_object = objc.get_host_object(string)?;
     loop {
         if let Some(string) = host_object.as_any().downcast_ref::<StringHostObject>() {
@@ -2230,7 +2239,10 @@ fn range_of_character_from_set(
     options: NSStringCompareOptions,
     range: NSRange,
 ) -> NSRange {
-    assert!(set != nil, "rangeOfCharacterFromSet requires a character set");
+    assert!(
+        set != nil,
+        "rangeOfCharacterFromSet requires a character set"
+    );
     let length: NSUInteger = msg![env; string length];
     let range_end = range.location.checked_add(range.length).unwrap();
     assert!(
@@ -2324,13 +2336,19 @@ fn range_of_string(
     assert!(range_end <= len, "rangeOfString range is out of bounds");
     let len_search: NSUInteger = msg![env; search_string length];
     if len_search == 0 || len_search > range.length {
-        return NSRange { location: NSNotFound as NSUInteger, length: 0 };
+        return NSRange {
+            location: NSNotFound as NSUInteger,
+            length: 0,
+        };
     }
 
     let unsupported = options
         & !(NSCaseInsensitiveSearch | NSLiteralSearch | NSBackwardsSearch | NSAnchoredSearch);
     if unsupported != 0 {
-        log!("Warning: ignoring unsupported NSString search option bits {:#x}", unsupported);
+        log!(
+            "Warning: ignoring unsupported NSString search option bits {:#x}",
+            unsupported
+        );
     }
     let case_insensitive = options & NSCaseInsensitiveSearch != 0;
     let backwards = options & NSBackwardsSearch != 0;
@@ -2338,36 +2356,61 @@ fn range_of_string(
     let last_start = range_end - len_search;
 
     let matches = |env: &mut Environment, i| {
-        is_match_at_position(env, string, search_string, i, range_end, len_search, |a, b| {
-            if !case_insensitive {
-                return a == b;
-            }
-            let (Some(a), Some(b)) = (char::from_u32(a as u32), char::from_u32(b as u32)) else {
-                return a == b;
-            };
-            a.to_lowercase().eq(b.to_lowercase())
-        })
+        is_match_at_position(
+            env,
+            string,
+            search_string,
+            i,
+            range_end,
+            len_search,
+            |a, b| {
+                if !case_insensitive {
+                    return a == b;
+                }
+                let (Some(a), Some(b)) = (char::from_u32(a as u32), char::from_u32(b as u32))
+                else {
+                    return a == b;
+                };
+                a.to_lowercase().eq(b.to_lowercase())
+            },
+        )
     };
 
     if anchored {
-        let i = if backwards { last_start } else { range.location };
+        let i = if backwards {
+            last_start
+        } else {
+            range.location
+        };
         if matches(env, i) {
-            return NSRange { location: i, length: len_search };
+            return NSRange {
+                location: i,
+                length: len_search,
+            };
         }
     } else if backwards {
         for i in (range.location..=last_start).rev() {
             if matches(env, i) {
-                return NSRange { location: i, length: len_search };
+                return NSRange {
+                    location: i,
+                    length: len_search,
+                };
             }
         }
     } else {
         for i in range.location..=last_start {
             if matches(env, i) {
-                return NSRange { location: i, length: len_search };
+                return NSRange {
+                    location: i,
+                    length: len_search,
+                };
             }
         }
     }
-    NSRange { location: NSNotFound as NSUInteger, length: 0 }
+    NSRange {
+        location: NSNotFound as NSUInteger,
+        length: 0,
+    }
 }
 
 /// Helper function for shared `doubleValue` and `floatValue` implementations.
@@ -2383,6 +2426,53 @@ fn float_value_common<F: std::str::FromStr + Default>(env: &mut Environment, str
     }
     // TODO: handle over/underflow properly
     st[..cutoff].parse().unwrap_or(Default::default())
+}
+
+/// Decimal-prefix parsing used by NSString's historical `longLongValue`.
+/// Overflow follows the strtoll-style contract and clamps to the signed bound.
+fn parse_signed_decimal_prefix_i64(input: &str) -> i64 {
+    let input = input.trim_start();
+    let mut bytes = input.as_bytes().iter().copied().peekable();
+    let negative = match bytes.peek() {
+        Some(b'-') => {
+            bytes.next();
+            true
+        }
+        Some(b'+') => {
+            bytes.next();
+            false
+        }
+        _ => false,
+    };
+    let mut saw_digit = false;
+    let mut magnitude: u64 = 0;
+    let limit = if negative {
+        i64::MAX as u64 + 1
+    } else {
+        i64::MAX as u64
+    };
+    for byte in bytes {
+        if !byte.is_ascii_digit() {
+            break;
+        }
+        saw_digit = true;
+        magnitude = magnitude
+            .saturating_mul(10)
+            .saturating_add(u64::from(byte - b'0'))
+            .min(limit);
+    }
+    if !saw_digit {
+        return 0;
+    }
+    if negative {
+        if magnitude == i64::MAX as u64 + 1 {
+            i64::MIN
+        } else {
+            -(magnitude as i64)
+        }
+    } else {
+        magnitude as i64
+    }
 }
 
 /// Helper function for lineRangeForRange: and
@@ -2509,11 +2599,77 @@ mod ns_string_tests {
 
     #[test]
     fn invalid_utf8_is_a_failed_decode() {
-        assert!(StringHostObject::try_decode(
-            Cow::Borrowed(b"bplist00\xdf"),
-            NSUTF8StringEncoding,
-        )
-        .is_none());
+        assert!(
+            StringHostObject::try_decode(Cow::Borrowed(b"bplist00\xdf"), NSUTF8StringEncoding,)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn dos_korean_uses_cp949_and_round_trips() {
+        let decoded =
+            StringHostObject::try_decode(Cow::Borrowed(&[0xb0, 0xa1]), NSDOSKoreanStringEncoding)
+                .unwrap();
+        assert_eq!(decoded.to_utf8().unwrap(), "가");
+        assert_eq!(
+            encode_utf16_units(
+                &"가".encode_utf16().collect::<Vec<_>>(),
+                NSDOSKoreanStringEncoding,
+                false,
+                false,
+            ),
+            Some(vec![0xb0, 0xa1])
+        );
+    }
+
+    #[test]
+    fn signed_long_long_parses_prefix_and_clamps_overflow() {
+        assert_eq!(parse_signed_decimal_prefix_i64("  -42px"), -42);
+        assert_eq!(parse_signed_decimal_prefix_i64("+17"), 17);
+        assert_eq!(parse_signed_decimal_prefix_i64("no digits"), 0);
+        assert_eq!(
+            parse_signed_decimal_prefix_i64("999999999999999999999"),
+            i64::MAX
+        );
+        assert_eq!(
+            parse_signed_decimal_prefix_i64("-999999999999999999999"),
+            i64::MIN
+        );
+    }
+
+    #[test]
+    fn missing_file_initializer_populates_requested_error() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        // The initializer and NSError factory use a fifth ARM argument, so
+        // host-to-guest dispatch needs synthetic stack space in this fixture.
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let path = from_rust_string(env, "/definitely-missing/idared-string.txt".to_owned());
+        let out_error = env.mem.alloc_and_write(nil);
+        let string: id = msg_class![env; NSString alloc];
+        let result: id = msg![env; string initWithContentsOfFile:path
+                                                  encoding:NSUTF8StringEncoding
+                                                     error:out_error];
+        assert_eq!(result, nil);
+
+        let error = env.mem.read(out_error);
+        assert_ne!(error, nil);
+        let code: NSInteger = msg![env; error code];
+        assert_eq!(code, NSFileReadNoSuchFileError);
+        let domain: id = msg![env; error domain];
+        assert_eq!(to_rust_string(env, domain), NSCocoaErrorDomain);
+        let user_info: id = msg![env; error userInfo];
+        let key = get_static_str(env, NSFilePathErrorKey);
+        let stored_path: id = msg![env; user_info objectForKey:key];
+        assert_eq!(to_rust_string(env, stored_path), "/definitely-missing/idared-string.txt");
+
+        env.mem.free(out_error.cast());
+        release(env, path);
+        release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 
     #[test]
@@ -2549,7 +2705,10 @@ mod ns_string_tests {
         release(env, initial);
 
         let snowman = from_rust_string(env, "☃".to_owned());
-        let rocket_range = NSRange { location: 1, length: 2 };
+        let rocket_range = NSRange {
+            location: 1,
+            length: 2,
+        };
         () = msg![env; string replaceCharactersInRange:rocket_range withString:snowman];
         let exclamation = from_rust_string(env, "!".to_owned());
         () = msg![env; string insertString:exclamation atIndex:3u32];
@@ -2676,14 +2835,24 @@ pub fn get_bytes_buffer_inner(
     include_null_terminator: bool,
 ) -> bool {
     // TODO: other encodings
-    assert!(
-        encoding == NSUTF8StringEncoding
-            || encoding == NSASCIIStringEncoding
-            || encoding == NSMacOSRomanStringEncoding
-            || encoding == NSISOLatin1StringEncoding
-    );
+    assert!(C_STRING_FRIENDLY_ENCODINGS.contains(&encoding));
 
     let src = to_rust_string(env, str);
+    if encoding == NSDOSKoreanStringEncoding {
+        let units: Vec<u16> = src.encode_utf16().collect();
+        let Some(mut encoded) = encode_utf16_units(&units, encoding, false, false) else {
+            return false;
+        };
+        if include_null_terminator {
+            encoded.push(0);
+        }
+        let dest = env.mem.bytes_at_mut(buffer, buffer_size);
+        if dest.len() < encoded.len() {
+            return false;
+        }
+        dest[..encoded.len()].copy_from_slice(&encoded);
+        return true;
+    }
     if encoding == NSASCIIStringEncoding
         || encoding == NSMacOSRomanStringEncoding
         || encoding == NSISOLatin1StringEncoding
@@ -2766,14 +2935,19 @@ fn encode_utf16_units(
             }
             encoded.into_owned()
         }
-        NSUTF16StringEncoding | NSUTF16LittleEndianStringEncoding => units
-            .iter()
-            .flat_map(|unit| unit.to_le_bytes())
-            .collect(),
-        NSUTF16BigEndianStringEncoding => units
-            .iter()
-            .flat_map(|unit| unit.to_be_bytes())
-            .collect(),
+        NSDOSKoreanStringEncoding => {
+            let (encoded, _, had_errors) = EUC_KR.encode(&string);
+            if had_errors && !lossy {
+                return None;
+            }
+            encoded.into_owned()
+        }
+        NSUTF16StringEncoding | NSUTF16LittleEndianStringEncoding => {
+            units.iter().flat_map(|unit| unit.to_le_bytes()).collect()
+        }
+        NSUTF16BigEndianStringEncoding => {
+            units.iter().flat_map(|unit| unit.to_be_bytes()).collect()
+        }
         NSUTF32StringEncoding | NSUTF32LittleEndianStringEncoding => string
             .chars()
             .flat_map(|character| (character as u32).to_le_bytes())
@@ -2844,12 +3018,9 @@ fn get_bytes_range_inner(
         {
             converted_units -= 1;
         }
-        if let Some(bytes) = encode_utf16_units(
-            &units[..converted_units],
-            encoding,
-            lossy,
-            external,
-        ) {
+        if let Some(bytes) =
+            encode_utf16_units(&units[..converted_units], encoding, lossy, external)
+        {
             if bytes.len() <= max_length {
                 break bytes;
             }

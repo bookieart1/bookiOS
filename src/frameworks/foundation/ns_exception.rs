@@ -6,11 +6,16 @@
 
 use crate::dyld::{ConstantExports, FunctionExports, HostConstant};
 use crate::frameworks::foundation::ns_string;
+use crate::mem::MutVoidPtr;
 use crate::objc::{
     autorelease, id, msg, nil, objc_classes, release, retain, ClassExports, HostObject, NSZonePtr,
 };
-use crate::mem::MutVoidPtr;
 use crate::{export_c_func, Environment};
+
+#[derive(Default)]
+pub struct State {
+    uncaught_exception_handler: MutVoidPtr,
+}
 
 struct NSExceptionHostObject {
     name: id,
@@ -366,13 +371,39 @@ pub const CONSTANTS: ConstantExports = &[
     ),
 ];
 
-/// This exception handler is supposed to do last-minute logging before the
-/// program terminates. For our purposes, it's completely safe to ignore that.
-fn NSSetUncaughtExceptionHandler(_env: &mut Environment, handler: MutVoidPtr) {
-    log!(
-        "TODO: Ignoring uncaught exception handler at address {:?}",
-        handler
-    );
+/// Store the process-wide handler exactly as Foundation's setter/getter pair
+/// does. Objective-C exception unwinding is still outside the emulator's
+/// current boundary, but SDKs legitimately use this pair to chain handlers.
+fn NSSetUncaughtExceptionHandler(env: &mut Environment, handler: MutVoidPtr) {
+    env.framework_state
+        .foundation
+        .ns_exception
+        .uncaught_exception_handler = handler;
 }
 
-pub const FUNCTIONS: FunctionExports = &[export_c_func!(NSSetUncaughtExceptionHandler(_))];
+fn NSGetUncaughtExceptionHandler(env: &mut Environment) -> MutVoidPtr {
+    env.framework_state
+        .foundation
+        .ns_exception
+        .uncaught_exception_handler
+}
+
+pub const FUNCTIONS: FunctionExports = &[
+    export_c_func!(NSSetUncaughtExceptionHandler(_)),
+    export_c_func!(NSGetUncaughtExceptionHandler()),
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn uncaught_exception_handler_round_trips() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let handler = MutVoidPtr::from_bits(0x1234_5679);
+        NSSetUncaughtExceptionHandler(&mut env, handler);
+        assert_eq!(NSGetUncaughtExceptionHandler(&mut env), handler);
+        NSSetUncaughtExceptionHandler(&mut env, MutVoidPtr::null());
+        assert!(NSGetUncaughtExceptionHandler(&mut env).is_null());
+    }
+}

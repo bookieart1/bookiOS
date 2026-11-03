@@ -55,12 +55,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 + (id)nibWithNibName:(id)nib_name // NSString *
               bundle:(id)bundle { //NSBundle *
-    let main_bundle = msg_class![env; NSBundle mainBundle];
     let bundle: id = if bundle == nil {
-        main_bundle
+        msg_class![env; NSBundle mainBundle]
     } else {
-        // TODO: non-main bundles
-        assert_eq!(bundle, main_bundle);
         bundle
     };
 

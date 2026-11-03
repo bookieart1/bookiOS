@@ -62,6 +62,9 @@ pub struct AudioComponentInstanceHostObject {
     pub al_source: Option<ALuint>,
     pub is_running_handler: bool,
     pub connected_source: Option<AudioComponentInstance>,
+    /// Number of input buses exposed by mixer units. Historical 3D Mixer
+    /// clients resize this before installing per-bus callbacks.
+    pub input_element_count: u32,
 }
 impl Default for AudioComponentInstanceHostObject {
     fn default() -> Self {
@@ -95,6 +98,7 @@ impl Default for AudioComponentInstanceHostObject {
             al_source: None,
             is_running_handler: false,
             connected_source: None,
+            input_element_count: 1,
         }
     }
 }

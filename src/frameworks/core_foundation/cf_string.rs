@@ -33,6 +33,7 @@ pub const kCFStringEncodingUTF16: CFStringEncoding = kCFStringEncodingUnicode;
 pub const kCFStringEncodingUTF16BE: CFStringEncoding = 0x10000100;
 pub const kCFStringEncodingUTF16LE: CFStringEncoding = 0x14000100;
 pub const kCFStringEncodingISOLatin1: CFStringEncoding = 0x0201;
+pub const kCFStringEncodingDOSKorean: CFStringEncoding = 0x0422;
 pub const kCFStringEncodingUTF32: CFStringEncoding = 0x0c000100;
 pub const kCFStringEncodingUTF32BE: CFStringEncoding = 0x18000100;
 pub const kCFStringEncodingUTF32LE: CFStringEncoding = 0x1c000100;
@@ -86,6 +87,7 @@ pub fn CFStringConvertEncodingToNSStringEncoding(
         kCFStringEncodingUTF16BE => ns_string::NSUTF16BigEndianStringEncoding,
         kCFStringEncodingUTF16LE => ns_string::NSUTF16LittleEndianStringEncoding,
         kCFStringEncodingISOLatin1 => ns_string::NSISOLatin1StringEncoding,
+        kCFStringEncodingDOSKorean => ns_string::NSDOSKoreanStringEncoding,
         kCFStringEncodingUTF32 => ns_string::NSUTF32StringEncoding,
         kCFStringEncodingUTF32BE => ns_string::NSUTF32BigEndianStringEncoding,
         kCFStringEncodingUTF32LE => ns_string::NSUTF32LittleEndianStringEncoding,
@@ -104,6 +106,7 @@ fn CFStringConvertNSStringEncodingToEncoding(
         ns_string::NSUTF16BigEndianStringEncoding => kCFStringEncodingUTF16BE,
         ns_string::NSUTF16LittleEndianStringEncoding => kCFStringEncodingUTF16LE,
         ns_string::NSISOLatin1StringEncoding => kCFStringEncodingISOLatin1,
+        ns_string::NSDOSKoreanStringEncoding => kCFStringEncodingDOSKorean,
         ns_string::NSUTF32StringEncoding => kCFStringEncodingUTF32,
         ns_string::NSUTF32BigEndianStringEncoding => kCFStringEncodingUTF32BE,
         ns_string::NSUTF32LittleEndianStringEncoding => kCFStringEncodingUTF32LE,
@@ -122,6 +125,7 @@ fn iana_charset_name(encoding: CFStringEncoding) -> Option<&'static str> {
         kCFStringEncodingUTF16BE => "utf-16be",
         kCFStringEncodingUTF16LE => "utf-16le",
         kCFStringEncodingISOLatin1 => "iso-8859-1",
+        kCFStringEncodingDOSKorean => "cp949",
         kCFStringEncodingUTF32 => "utf-32",
         kCFStringEncodingUTF32BE => "utf-32be",
         kCFStringEncodingUTF32LE => "utf-32le",
@@ -554,17 +558,31 @@ mod tests {
             iana_charset_name(kCFStringEncodingMacRoman),
             Some("macintosh")
         );
-        assert_eq!(
-            iana_charset_name(kCFStringEncodingASCII),
-            Some("us-ascii")
-        );
+        assert_eq!(iana_charset_name(kCFStringEncodingASCII), Some("us-ascii"));
         assert_eq!(iana_charset_name(kCFStringEncodingUTF8), Some("utf-8"));
         assert_eq!(iana_charset_name(kCFStringEncodingUTF16), Some("utf-16"));
         assert_eq!(
             iana_charset_name(kCFStringEncodingISOLatin1),
             Some("iso-8859-1")
         );
+        assert_eq!(iana_charset_name(kCFStringEncodingDOSKorean), Some("cp949"));
         assert_eq!(iana_charset_name(u32::MAX), None);
+    }
+
+    #[test]
+    fn dos_korean_bridges_to_nsstring_cp949_encoding() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        assert_eq!(
+            CFStringConvertEncodingToNSStringEncoding(&mut env, kCFStringEncodingDOSKorean,),
+            ns_string::NSDOSKoreanStringEncoding
+        );
+        assert_eq!(
+            CFStringConvertNSStringEncodingToEncoding(
+                &mut env,
+                ns_string::NSDOSKoreanStringEncoding,
+            ),
+            kCFStringEncodingDOSKorean
+        );
     }
 
     #[test]

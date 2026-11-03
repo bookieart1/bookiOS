@@ -348,6 +348,7 @@ struct SlowCapture {
     gap_ms: u128,
     boundary_delta: u64,
     presents: u64,
+    had_healthy_baseline: bool,
     recent: Ring<Event, SLOW_RECENT>,
 }
 
@@ -644,7 +645,9 @@ impl Recorder {
                                 .take()
                                 .map(|pending| pending.capture);
                         }
-                    } else if self.healthy_present_streak >= HEALTHY_PRESENT_STREAK {
+                    } else if self.healthy_present_streak >= HEALTHY_PRESENT_STREAK
+                        || self.presents > 1
+                    {
                         let mut recent = Ring::default();
                         let skip = self.recent.iter().count().saturating_sub(SLOW_RECENT);
                         for event in self.recent.iter().skip(skip) {
@@ -657,6 +660,8 @@ impl Recorder {
                                 boundary_delta: boundaries
                                     .saturating_sub(self.last_present_boundaries),
                                 presents: self.presents,
+                                had_healthy_baseline: self.healthy_present_streak
+                                    >= HEALTHY_PRESENT_STREAK,
                                 recent,
                             },
                             streak: 1,
@@ -749,9 +754,10 @@ impl Recorder {
             );
         }
         if let Some(capture) = &self.slow_capture {
-            echo_no_panic!("flight first sustained slow-present transition: elapsed-ms={} first-gap-ms={} boundaries-during-first-gap={} present={} (frozen after at least {} healthy intervals and {} consecutive slow intervals)",
+            echo_no_panic!("flight first sustained slow-present capture: mode={} elapsed-ms={} first-gap-ms={} boundaries-during-first-gap={} present={} (frozen after {} consecutive slow intervals; transition mode requires {} healthy intervals)",
+                if capture.had_healthy_baseline { "healthy-to-slow" } else { "slow-from-start" },
                 capture.ms, capture.gap_ms, capture.boundary_delta, capture.presents,
-                HEALTHY_PRESENT_STREAK, SLOW_PRESENT_STREAK);
+                SLOW_PRESENT_STREAK, HEALTHY_PRESENT_STREAK);
             echo_no_panic!(
                 "flight slow-transition boundaries: newest {SLOW_RECENT}; total={}",
                 capture.recent.written
@@ -760,7 +766,7 @@ impl Recorder {
                 self.print_event(event);
             }
         } else {
-            echo_no_panic!("flight first sustained slow-present transition: not observed");
+            echo_no_panic!("flight first sustained slow-present capture: not observed");
         }
         echo_no_panic!(
             "flight candidate signals: newest {SIGNALS}; total={} (not diagnoses)",
@@ -1668,5 +1674,35 @@ mod tests {
             capture.recent.iter().count(),
             SLOW_RECENT.min(HEALTHY_PRESENT_STREAK as usize)
         );
+        assert!(capture.had_healthy_baseline);
+    }
+
+    #[test]
+    fn sustained_slow_presents_from_start_freeze_once() {
+        let mut recorder = Recorder::new();
+        let start = recorder.started;
+        recorder.note_present_at(start);
+        recorder.recent.push(Event {
+            sequence: 1,
+            note: "slow-from-start",
+            ..Event::default()
+        });
+        recorder.api = 12;
+
+        recorder.note_present_at(start + Duration::from_millis(250));
+        assert!(recorder.slow_capture.is_none());
+        recorder.note_present_at(start + Duration::from_millis(500));
+        assert!(recorder.slow_capture.is_none());
+        recorder.note_present_at(start + Duration::from_millis(750));
+
+        let capture = recorder.slow_capture.as_ref().unwrap();
+        assert!(!capture.had_healthy_baseline);
+        assert_eq!(capture.gap_ms, 250);
+        assert_eq!(capture.boundary_delta, 12);
+        assert_eq!(capture.recent.iter().count(), 1);
+
+        recorder.api = 100;
+        recorder.note_present_at(start + Duration::from_millis(1_000));
+        assert_eq!(recorder.slow_capture.as_ref().unwrap().boundary_delta, 12);
     }
 }

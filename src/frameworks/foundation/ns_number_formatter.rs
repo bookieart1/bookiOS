@@ -29,6 +29,8 @@ struct NSNumberFormatterHostObject {
     lenient: bool,
     positive_format: id,
     negative_format: id,
+    grouping_separator: id,
+    currency_grouping_separator: id,
     locale: id,
 }
 impl HostObject for NSNumberFormatterHostObject {}
@@ -51,22 +53,29 @@ pub const CLASSES: ClassExports = objc_classes! {
         lenient: false,
         positive_format: nil,
         negative_format: nil,
+        grouping_separator: nil,
+        currency_grouping_separator: nil,
         locale: nil,
     });
     env.objc.alloc_object(this, host_object, &mut env.mem)
 }
 
 - (())dealloc {
-    let (positive_format, negative_format, locale) = {
+    let (positive_format, negative_format, grouping_separator,
+         currency_grouping_separator, locale) = {
         let state = env.objc.borrow_mut::<NSNumberFormatterHostObject>(this);
         (
             std::mem::replace(&mut state.positive_format, nil),
             std::mem::replace(&mut state.negative_format, nil),
+            std::mem::replace(&mut state.grouping_separator, nil),
+            std::mem::replace(&mut state.currency_grouping_separator, nil),
             std::mem::replace(&mut state.locale, nil),
         )
     };
     release(env, positive_format);
     release(env, negative_format);
+    release(env, grouping_separator);
+    release(env, currency_grouping_separator);
     release(env, locale);
     env.objc.dealloc_object(this, &mut env.mem)
 }
@@ -115,6 +124,18 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())setGroupingSize:(NSUInteger)size {
     env.objc.borrow_mut::<NSNumberFormatterHostObject>(this).grouping_size = size;
 }
+- (id)groupingSeparator {
+    env.objc.borrow::<NSNumberFormatterHostObject>(this).grouping_separator
+}
+- (())setGroupingSeparator:(id)separator {
+    set_owned_string(env, this, separator, false);
+}
+- (id)currencyGroupingSeparator {
+    env.objc.borrow::<NSNumberFormatterHostObject>(this).currency_grouping_separator
+}
+- (())setCurrencyGroupingSeparator:(id)separator {
+    set_owned_string(env, this, separator, true);
+}
 - (bool)isLenient {
     env.objc.borrow::<NSNumberFormatterHostObject>(this).lenient
 }
@@ -152,7 +173,8 @@ pub const CLASSES: ClassExports = objc_classes! {
         return nil;
     }
     let (style, min_fraction, max_fraction, min_integer, grouping_size, grouping,
-         positive_format, negative_format) = {
+         positive_format, negative_format, grouping_separator,
+         currency_grouping_separator) = {
         let state = env.objc.borrow::<NSNumberFormatterHostObject>(this);
         (
             state.style,
@@ -163,6 +185,8 @@ pub const CLASSES: ClassExports = objc_classes! {
             state.uses_grouping_separator,
             state.positive_format,
             state.negative_format,
+            state.grouping_separator,
+            state.currency_grouping_separator,
         )
     };
 
@@ -192,7 +216,16 @@ pub const CLASSES: ClassExports = objc_classes! {
         trim_fraction(&mut fixed, min_fraction);
         pad_integer(&mut fixed, min_integer);
         if grouping {
-            fixed = add_grouping(&fixed, grouping_size.max(1));
+            let separator = if style == NSNumberFormatterCurrencyStyle
+                && currency_grouping_separator != nil
+            {
+                ns_string::to_rust_string(env, currency_grouping_separator)
+            } else if grouping_separator != nil {
+                ns_string::to_rust_string(env, grouping_separator)
+            } else {
+                ",".into()
+            };
+            fixed = add_grouping(&fixed, grouping_size.max(1), &separator);
         }
         fixed
     };
@@ -213,11 +246,25 @@ pub const CLASSES: ClassExports = objc_classes! {
     if string == nil {
         return nil;
     }
-    let state = env.objc.borrow::<NSNumberFormatterHostObject>(this);
-    let style = state.style;
-    let lenient = state.lenient;
+    let (style, lenient, grouping_separator, currency_grouping_separator) = {
+        let state = env.objc.borrow::<NSNumberFormatterHostObject>(this);
+        (state.style, state.lenient, state.grouping_separator,
+         state.currency_grouping_separator)
+    };
     let mut value = ns_string::to_rust_string(env, string).trim().to_owned();
-    value.retain(|character| character != ',' && character != '$' && character != '%');
+    let separator = if style == NSNumberFormatterCurrencyStyle
+        && currency_grouping_separator != nil
+    {
+        ns_string::to_rust_string(env, currency_grouping_separator).into_owned()
+    } else if grouping_separator != nil {
+        ns_string::to_rust_string(env, grouping_separator).into_owned()
+    } else {
+        ",".to_owned()
+    };
+    if !separator.is_empty() {
+        value = value.replace(&separator, "");
+    }
+    value.retain(|character| character != '$' && character != '%');
     let parsed = if lenient {
         value.split_whitespace().next().unwrap_or("").parse::<f64>()
     } else {
@@ -250,6 +297,25 @@ fn set_format(env: &mut Environment, formatter: id, format: id, positive: bool) 
             std::mem::replace(&mut state.positive_format, copied)
         } else {
             std::mem::replace(&mut state.negative_format, copied)
+        }
+    };
+    release(env, old);
+}
+
+fn set_owned_string(env: &mut Environment, formatter: id, value: id, currency: bool) {
+    let copied: id = if value == nil {
+        nil
+    } else {
+        msg![env; value copy]
+    };
+    let old = {
+        let state = env
+            .objc
+            .borrow_mut::<NSNumberFormatterHostObject>(formatter);
+        if currency {
+            std::mem::replace(&mut state.currency_grouping_separator, copied)
+        } else {
+            std::mem::replace(&mut state.grouping_separator, copied)
         }
     };
     release(env, old);
@@ -303,7 +369,7 @@ fn format_with_pattern(value: f64, positive: &str, negative: Option<&str>) -> Op
     trim_fraction(&mut number, minimum_fraction);
     pad_integer(&mut number, minimum_integer);
     if let Some(grouping_size) = grouping_size {
-        number = add_grouping(&number, grouping_size);
+        number = add_grouping(&number, grouping_size, ",");
     }
 
     let mut output = String::new();
@@ -338,7 +404,7 @@ fn pad_integer(value: &mut String, minimum_digits: usize) {
     }
 }
 
-fn add_grouping(value: &str, grouping_size: usize) -> String {
+fn add_grouping(value: &str, grouping_size: usize, separator: &str) -> String {
     let negative = value.starts_with('-');
     let start = usize::from(negative);
     let integer_end = value.find('.').unwrap_or(value.len());
@@ -349,7 +415,7 @@ fn add_grouping(value: &str, grouping_size: usize) -> String {
     }
     for (idx, character) in integer.chars().enumerate() {
         if idx != 0 && (integer.len() - idx) % grouping_size == 0 {
-            grouped.push(',');
+            grouped.push_str(separator);
         }
         grouped.push(character);
     }
@@ -402,6 +468,25 @@ mod tests {
         () = msg![env; formatter setFormatterBehavior:1040u32];
         let behavior: NSUInteger = msg![env; formatter formatterBehavior];
         assert_eq!(behavior, 1040);
+        release(env, formatter);
+    }
+
+    #[test]
+    fn custom_grouping_separators_are_copied_and_applied() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let formatter: id = msg_class![env; NSNumberFormatter new];
+        () = msg![env; formatter setNumberStyle:NSNumberFormatterCurrencyStyle];
+        () = msg![env; formatter setUsesGroupingSeparator:true];
+        let separator = ns_string::from_rust_string(env, "_".to_owned());
+        () = msg![env; formatter setCurrencyGroupingSeparator:separator];
+        release(env, separator);
+        let number: id = msg_class![env; NSNumber numberWithDouble:1234.0f64];
+        let string: id = msg![env; formatter stringFromNumber:number];
+        assert_eq!(ns_string::to_rust_string(env, string), "$1_234");
+        let parsed: id = msg![env; formatter numberFromString:string];
+        let value: f64 = msg![env; parsed doubleValue];
+        assert_eq!(value, 1234.0);
         release(env, formatter);
     }
 
