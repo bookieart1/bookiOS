@@ -134,6 +134,29 @@ These establish contracts and investigative methods, not the unobserved cause of
 a particular game's failure. Exact guest binaries are still needed where captured
 instruction/literal windows cannot recover an import or field producer.
 
+Alternatives considered:
+
+- Existing GDB register/memory access and software breakpoints are immediately
+  useful once the exact executable and reproducible state are available. The
+  current `src/gdb.rs` does not implement the `Z` packet family and does not
+  advertise reverse execution; do not assume hardware watchpoints or rewind work.
+  [GDB's watchpoint documentation](https://sourceware.org/gdb/current/onlinedocs/gdb.html/Set-Watchpoints.html)
+  explains why falling back to instruction stepping can be expensive. This is an
+  engineer-controlled follow-up for one known address, not a universal iPhone mode.
+- [QEMU record/replay](https://www.qemu.org/docs/master/system/replay.html) records
+  nondeterministic inputs and uses instruction counting/checkpoints. Applying that
+  model here would also require control of host timers, audio, scheduling, resource
+  and graphics interactions. It is a substantial architecture project, not a flag
+  that turns the existing flight recorder into reverse debugging. Bounded causal
+  boundary records have a better first-step cost/risk ratio.
+- A native sanitizer build can investigate a classified native memory fault, but
+  cannot by itself explain a guest pointer that is invalid within the emulated
+  address space. Start with the matching .ips and build identity, then target the
+  implicated native component. No sanitizer or local build was run here.
+- Full GL call tracing/readback would produce much more data and could distort
+  timing. A marked state transition using tracked state is preferable; correct
+  framebuffer completeness still would not prove correct texture/vertex content.
+
 ## Ranked engineering queue
 
 Rank reflects expected information gain and defensible corrections, not a promise
@@ -217,8 +240,8 @@ Only source inspection, lightweight Python evidence extraction and `git diff
 Hosted library tests and iOS archive compilation are separate gates. The current
 development workflow skips the full compiled guest suite and formatting steps;
 lint is allowed to fail. Report their actual results independently of green badges.
-Build outcome and artifact verification are recorded in the workspace ledger and
-delivery record after CI, not assumed here.
+Actual hosted results and artifact identity are recorded below; no physical-device
+result is inferred from compilation or the synthetic reproducer.
 
 Device acceptance requires (a) recognizable origins/free/reuse evidence in at
 least one failing title, or an identified import slot/symbol in the five-game
@@ -277,3 +300,46 @@ APIs from encrypted execution. For 8-bit Ninja, first compare full archive resou
 names, integrity and exact failed path; replacement is warranted only if the
 required resource is actually absent/corrupt. A native run or legitimate alternate
 version is useful for Toy Bot 2's intro interaction and ambiguous legacy semantics.
+
+## Completed hosted validation and delivered artifact
+
+Final implementation/package commit:
+`d13d547c1427a62e11975ceac0313485fc6d7b36`. The subsequent documentation-only
+record commit does not identify a different executable. No local Rust, Cargo,
+CMake, preflight, or build helper was run.
+
+- Hosted test run [41586511224](https://github.com/bookieart1/iDared32bit/actions/runs/41586511224):
+  **217/217 library tests passed on both macOS and Windows**. macOS also passed
+  the native Foundation reference and all three focused diagnostic reproducer
+  invocations. The universal-recorder-default/explicit-override test passed.
+- The workflow as a whole was **not green**: Android NDK r28c extraction failed
+  before lint because the runner's 7-Zip rejected nested symlinks. macOS/Windows
+  lint was allowed to fail on two pre-existing overlong comments in `dlfcn.rs`
+  and `ns_dictionary.rs`. Formatting, the complete guest-executable suite, and
+  native sanity were branch-gated/skipped. These checks are not reported as passes.
+- The actual zone-free/SVC reproducer retained generation 2, class and allocation
+  origin for address `0xa8d0`, recorded `_malloc_zone_free` on thread 0 with LR
+  `0x1235`, heap reuse, and final object-table collision, with no intervening
+  host-object removal. It preserved the strict failure with tracing off and on.
+  This demonstrates additional causal evidence; it does **not** prove Peggle
+  takes that path. The initial ordinary-free fixture failed because ordinary
+  free already removes registration; the test was corrected, not the semantics.
+- Hosted IPA run [41586511172](https://github.com/bookieart1/iDared32bit/actions/runs/41586511172)
+  successfully built and packaged the arm64 iOS executable. The downloaded
+  `outputs/iDared-Dev-2.11.ipa` is **20,209,581 bytes**, SHA-256
+  `929e3d8a3a081a98b9b4ea4c6a2dea5b113f870152c1811b5ac59cdb19bffa09`.
+  Verified ZIP integrity, embedded commit/run, development identity
+  `com.bookieart1.idared32bit.dev`, minimum iOS 16.0, no provisioning profile,
+  no signature directory/load command, and binary markers for the universal
+  recorder, object history and A32 decoder. Downloaded artifact digest matches
+  GitHub's recorded digest.
+- Separate native-symbol artifact was downloaded and checked against the actual
+  IPA executable: both Mach-O UUIDs are
+  `4DF512A1-78B6-3CC3-A475-D1AAEA867485`. Preserve these with this exact package;
+  they cannot symbolize older builds. Full Rust DWARF source coverage is not
+  claimed. Verification details and job logs are archived in `outputs/`.
+
+Device acceptance is still pending. No standstill has been promoted to working.
+The next result must identify a useful origin/import or falsify the selected
+theory; merely producing a longer log is not acceptance. Spoing is the one
+working control for this diagnostic-only implementation.
