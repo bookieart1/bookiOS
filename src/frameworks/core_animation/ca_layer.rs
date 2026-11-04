@@ -841,12 +841,30 @@ fn add_default_implied_basic_animation(
 fn presentation_value(env: &mut Environment, layer: id, key_path: &str) -> id {
     let presentation = super::animation::State::default().create_presentation_layer(env, layer);
     match key_path {
-        "bounds" => msg_class![env; NSValue valueWithCGRect:presentation.bounds],
-        "position" => msg_class![env; NSValue valueWithCGPoint:presentation.position],
-        "anchorPoint" => msg_class![env; NSValue valueWithCGPoint:presentation.anchor_point],
-        "hidden" => msg_class![env; NSNumber numberWithBool:presentation.hidden],
-        "opacity" => msg_class![env; NSNumber numberWithFloat:presentation.opacity],
-        "cornerRadius" => msg_class![env; NSNumber numberWithFloat:presentation.corner_radius],
+        "bounds" => {
+            let value = presentation.bounds;
+            msg_class![env; NSValue valueWithCGRect:value]
+        }
+        "position" => {
+            let value = presentation.position;
+            msg_class![env; NSValue valueWithCGPoint:value]
+        }
+        "anchorPoint" => {
+            let value = presentation.anchor_point;
+            msg_class![env; NSValue valueWithCGPoint:value]
+        }
+        "hidden" => {
+            let value = presentation.hidden;
+            msg_class![env; NSNumber numberWithBool:value]
+        }
+        "opacity" => {
+            let value = presentation.opacity;
+            msg_class![env; NSNumber numberWithFloat:value]
+        }
+        "cornerRadius" => {
+            let value = presentation.corner_radius;
+            msg_class![env; NSNumber numberWithFloat:value]
+        }
         "backgroundColor" => presentation.background_color.map_or(nil, |color| {
             let class = env.objc.get_known_class("_touchHLE_CGColor", &mut env.mem);
             let object = env.objc.alloc_object(class, Box::new(color), &mut env.mem);

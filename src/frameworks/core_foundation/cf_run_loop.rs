@@ -194,7 +194,8 @@ fn CFRunLoopRemoveSource(
         .into_iter()
         .enumerate()
         .find(|(_, (candidate_loop, candidate_mode))| {
-            *candidate_loop == run_loop && msg![env; *candidate_mode isEqualToString:mode]
+            let candidate_mode = *candidate_mode;
+            *candidate_loop == run_loop && msg![env; candidate_mode isEqualToString:mode]
         })
         .map(|(index, _)| index);
     let removed_mode = remove_index.map(|index| {
