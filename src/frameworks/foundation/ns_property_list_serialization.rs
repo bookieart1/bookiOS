@@ -400,13 +400,15 @@ mod tests {
         let env = &mut env;
         let _pool: id = msg_class![env; NSAutoreleasePool new];
         let bytes = env.mem.alloc_and_write(&[0xdeu8, 0xad, 0xbe, 0xef]);
-        let leaf: id = msg_class![env; NSMutableData dataWithBytes:bytes.cast_const() length:4u32];
+        let bytes = bytes.cast_const();
+        let leaf: id = msg_class![env; NSMutableData dataWithBytes:bytes length:4u32];
         let array: id = msg_class![env; NSMutableArray new];
         () = msg![env; array addObject:leaf];
+        let error_description: MutPtr<id> = MutPtr::null();
         let data: id = msg_class![env; NSPropertyListSerialization
             dataFromPropertyList:array
             format:NSPropertyListBinaryFormat_v1_0
-            errorDescription:MutPtr::<id>::null()];
+            errorDescription:error_description];
         assert_ne!(data, nil);
         assert!(!ns_data::to_rust_slice(env, data).is_empty());
     }

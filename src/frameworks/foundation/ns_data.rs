@@ -747,8 +747,9 @@ mod tests {
     fn mutable_data_accepts_standard_byte_initializer() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let bytes = env.mem.alloc_and_write(&[1u8, 2, 3, 4]);
+        let bytes = bytes.cast_const();
         let data: id = msg_class![&mut env; NSMutableData alloc];
-        let data: id = msg![&mut env; data initWithBytes:bytes.cast_const() length:4u32];
+        let data: id = msg![&mut env; data initWithBytes:bytes length:4u32];
         let length: NSUInteger = msg![&mut env; data length];
         assert_eq!(length, 4);
         assert_eq!(to_rust_slice(&mut env, data), &[1, 2, 3, 4]);

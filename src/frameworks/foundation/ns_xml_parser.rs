@@ -363,8 +363,9 @@ mod tests {
         let mut env = Environment::new_fake_for_test_with_thread();
         let xml = b"<root />";
         let bytes = env.mem.alloc_and_write(xml);
-        let data: id = msg_class![&mut env; NSData dataWithBytes:bytes.cast_const()
-                                                        length:xml.len() as u32];
+        let bytes = bytes.cast_const();
+        let length = xml.len() as u32;
+        let data: id = msg_class![&mut env; NSData dataWithBytes:bytes length:length];
         let parser: id = msg_class![&mut env; NSXMLParser alloc];
         let parser: id = msg![&mut env; parser initWithData:data];
         () = msg![&mut env; parser abortParsing];
