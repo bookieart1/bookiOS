@@ -36,6 +36,9 @@ const UNRESOLVED_RELOCATIONS: usize = 32;
 const STRING_SEARCHES: usize = 32;
 const TOUCH_EVENTS: usize = 64;
 const SELECTOR_EVENTS: usize = 64;
+const FOCUSED_BOUNDARY_EVENTS: usize = 64;
+const KVO_EVENTS: usize = 64;
+const MEDIA_EVENTS: usize = 32;
 const HEALTHY_PRESENT_INTERVAL: Duration = Duration::from_millis(100);
 const SLOW_PRESENT_INTERVAL: Duration = Duration::from_millis(180);
 const HEALTHY_PRESENT_STREAK: u16 = 30;
@@ -426,9 +429,56 @@ struct TouchEvent {
     action: &'static str,
     touch: u32,
     view: u32,
+    view_class: Text,
+    superview: u32,
+    layer: u32,
+    controller: u32,
+    interactive: bool,
+    multiple_touch: bool,
+    gesture_count: usize,
     active: usize,
     x: f32,
     y: f32,
+    pc: u32,
+    lr: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct FocusedBoundaryEvent {
+    sequence: u64,
+    thread: usize,
+    category: &'static str,
+    selector: Text,
+    receiver: u32,
+    receiver_class: Text,
+    arguments: [u32; 2],
+    argument_classes: [Text; 2],
+    pc: u32,
+    lr: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct KvoEvent {
+    sequence: u64,
+    thread: usize,
+    action: &'static str,
+    object: u32,
+    observer: u32,
+    key_path: Text,
+    options: u32,
+    context: u32,
+    pc: u32,
+    lr: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct MediaEvent {
+    sequence: u64,
+    thread: usize,
+    action: &'static str,
+    object: u32,
+    related: u32,
+    detail: u32,
     pc: u32,
     lr: u32,
 }
@@ -463,6 +513,9 @@ pub struct Recorder {
     string_searches: Ring<StringSearch, STRING_SEARCHES>,
     touch_events: Ring<TouchEvent, TOUCH_EVENTS>,
     selector_events: Ring<SelectorEvent, SELECTOR_EVENTS>,
+    focused_boundary_events: Ring<FocusedBoundaryEvent, FOCUSED_BOUNDARY_EVENTS>,
+    kvo_events: Ring<KvoEvent, KVO_EVENTS>,
+    media_events: Ring<MediaEvent, MEDIA_EVENTS>,
     sequence: u64,
     api: u64,
     objc: u64,
@@ -510,6 +563,9 @@ impl Recorder {
             string_searches: Ring::default(),
             touch_events: Ring::default(),
             selector_events: Ring::default(),
+            focused_boundary_events: Ring::default(),
+            kvo_events: Ring::default(),
+            media_events: Ring::default(),
             sequence: 0,
             api: 0,
             objc: 0,
@@ -1007,8 +1063,10 @@ impl Recorder {
             self.touch_events.written
         );
         for event in self.touch_events.iter() {
-            echo_no_panic!("flight touch #{} tid={} action={} touch={:#x} view={:#x} active={} point=({:.2},{:.2}) pc={:#x} lr={:#x}",
+            echo_no_panic!("flight touch #{} tid={} action={} touch={:#x} view={:#x} class=\"{}\" superview={:#x} layer={:#x} controller={:#x} interactive={} multiple-touch={} gestures={} active={} point=({:.2},{:.2}) pc={:#x} lr={:#x}",
                 event.sequence, event.thread, event.action, event.touch, event.view,
+                event.view_class, event.superview, event.layer, event.controller,
+                event.interactive, event.multiple_touch, event.gesture_count,
                 event.active, event.x, event.y, event.pc, event.lr);
         }
         echo_no_panic!(
@@ -1019,6 +1077,34 @@ impl Recorder {
             echo_no_panic!("flight selector #{} tid={} action={} run-loop={:#x} target={:#x} selector=\"{}\" argument={:#x} delay-ms={} pc={:#x} lr={:#x}",
                 event.sequence, event.thread, event.action, event.run_loop, event.target,
                 event.selector, event.argument, event.delay_ms, event.pc, event.lr);
+        }
+        echo_no_panic!(
+            "flight focused Objective-C boundaries: newest {FOCUSED_BOUNDARY_EVENTS}; total={} (resource and callback argument snapshots; no guest messages or behavior changes)",
+            self.focused_boundary_events.written
+        );
+        for event in self.focused_boundary_events.iter() {
+            echo_no_panic!("flight focused #{} tid={} category={} selector=\"{}\" receiver={:#x} receiver-class=\"{}\" args={:08x?} arg-descriptions=[\"{}\",\"{}\"] pc={:#x} lr={:#x}",
+                event.sequence, event.thread, event.category, event.selector,
+                event.receiver, event.receiver_class, event.arguments,
+                event.argument_classes[0], event.argument_classes[1], event.pc, event.lr);
+        }
+        echo_no_panic!(
+            "flight KVO lifecycle: newest {KVO_EVENTS}; total={} (bounded registration/change/delivery evidence)",
+            self.kvo_events.written
+        );
+        for event in self.kvo_events.iter() {
+            echo_no_panic!("flight KVO #{} tid={} action={} object={:#x} observer={:#x} key=\"{}\" options={:#x} context={:#x} pc={:#x} lr={:#x}",
+                event.sequence, event.thread, event.action, event.object, event.observer,
+                event.key_path, event.options, event.context, event.pc, event.lr);
+        }
+        echo_no_panic!(
+            "flight AV media lifecycle: newest {MEDIA_EVENTS}; total={} (identity/status observations only; no fabricated media state)",
+            self.media_events.written
+        );
+        for event in self.media_events.iter() {
+            echo_no_panic!("flight AV media #{} tid={} action={} object={:#x} related={:#x} detail={:#x} pc={:#x} lr={:#x}",
+                event.sequence, event.thread, event.action, event.object, event.related,
+                event.detail, event.pc, event.lr);
         }
         echo_no_panic!(
             "flight collection ownership events: newest {COLLECTION_EVENTS}; total={} (bounded observations, not proof of ownership correctness)",
@@ -1131,6 +1217,14 @@ impl Recorder {
     }
 }
 
+fn selector_matches(selector: &[u8], needles: &[&[u8]]) -> bool {
+    needles.iter().any(|needle| {
+        selector
+            .windows(needle.len())
+            .any(|window| window == *needle)
+    })
+}
+
 fn read_word(mem: &Mem, addr: u32) -> Option<u32> {
     let bytes = mem.get_bytes_fallible(ConstVoidPtr::from_bits(addr), 4)?;
     Some(u32::from_le_bytes(bytes.try_into().ok()?))
@@ -1188,6 +1282,12 @@ impl Environment {
         x: f32,
         y: f32,
     ) {
+        let view_class = ObjC::try_read_isa(view, &self.mem)
+            .and_then(|class| self.objc.try_get_class_name(class))
+            .map(|name| Text::from_bytes(name.as_bytes()))
+            .unwrap_or_else(|| Text::from_bytes(b"<invalid-view>"));
+        let view_state = crate::frameworks::uikit::ui_view::diagnostic_state(&self.objc, view)
+            .unwrap_or_default();
         let Some(recorder) = &mut self.diagnostics else {
             return;
         };
@@ -1198,12 +1298,111 @@ impl Environment {
             action,
             touch: touch.to_bits(),
             view: view.to_bits(),
+            view_class,
+            superview: view_state.superview.to_bits(),
+            layer: view_state.layer.to_bits(),
+            controller: view_state.controller.to_bits(),
+            interactive: view_state.interactive,
+            multiple_touch: view_state.multiple_touch,
+            gesture_count: view_state.gesture_count,
             active,
             x,
             y,
             pc: regs[15],
             lr: regs[14],
         });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn diagnostic_kvo_event(
+        &mut self,
+        action: &'static str,
+        object: id,
+        observer: id,
+        key_path: &str,
+        options: u32,
+        context: u32,
+    ) {
+        let Some(recorder) = &mut self.diagnostics else {
+            return;
+        };
+        let regs = self.cpu.regs();
+        recorder.kvo_events.push(KvoEvent {
+            sequence: recorder.kvo_events.written.saturating_add(1),
+            thread: self.current_thread,
+            action,
+            object: object.to_bits(),
+            observer: observer.to_bits(),
+            key_path: Text::from_bytes(key_path.as_bytes()),
+            options,
+            context,
+            pc: regs[15],
+            lr: regs[14],
+        });
+    }
+
+    pub fn diagnostic_media_event(
+        &mut self,
+        action: &'static str,
+        object: id,
+        related: id,
+        detail: u32,
+    ) {
+        let Some(recorder) = &mut self.diagnostics else {
+            return;
+        };
+        let regs = self.cpu.regs();
+        recorder.media_events.push(MediaEvent {
+            sequence: recorder.media_events.written.saturating_add(1),
+            thread: self.current_thread,
+            action,
+            object: object.to_bits(),
+            related: related.to_bits(),
+            detail,
+            pc: regs[15],
+            lr: regs[14],
+        });
+    }
+
+    /// Emit retained producer/lifetime evidence at the exact failed dispatch
+    /// boundary. This is failure-only and does not alter receiver validation.
+    pub fn diagnostic_dispatch_failure(
+        &mut self,
+        receiver: id,
+        class: id,
+        selector: &str,
+    ) {
+        let address = receiver.to_bits();
+        echo_no_panic!(
+            "flight dispatch failure receiver={address:#010x} class={:#010x} selector=\"{}\" pc={:#010x} lr={:#010x}",
+            class.to_bits(),
+            selector,
+            self.cpu.regs()[15],
+            self.cpu.regs()[14]
+        );
+        if let Some(recorder) = &self.diagnostics {
+            if let Some(origin) = recorder.value_origin_for(address) {
+                echo_no_panic!(
+                    "flight dispatch retained producer sequence={} kind={} name={} receiver={:#010x} class={} pc={:#010x} lr={:#010x}",
+                    origin.sequence,
+                    origin.kind,
+                    origin.name,
+                    origin.receiver,
+                    origin.detail,
+                    origin.pc,
+                    origin.lr
+                );
+            } else {
+                echo_no_panic!("flight dispatch retained producer: none for {address:#010x}");
+            }
+        }
+        if let Some(history) = &self.mem.object_history {
+            if !history.dump(address) {
+                echo_no_panic!(
+                    "flight dispatch object history: no retained record for {address:#010x}"
+                );
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1337,6 +1536,60 @@ impl Environment {
             .objc
             .try_get_class_name(crate::objc::id::from_bits(isa))
             .unwrap_or("<unknown-class>");
+        let category = if selector_matches(
+            name.bytes(),
+            &[
+                b"target",
+                b"Target",
+                b"action",
+                b"Action",
+                b"response",
+                b"Response",
+                b"complete",
+                b"Complete",
+                b"notification",
+                b"Notification",
+                b"unpack",
+                b"Unpack",
+            ],
+        ) {
+            Some("callback")
+        } else if selector_matches(
+            name.bytes(),
+            &[
+                b"resource",
+                b"Resource",
+                b"path",
+                b"Path",
+                b"file",
+                b"File",
+                b"imageNamed",
+            ],
+        ) {
+            Some("resource")
+        } else {
+            None
+        };
+        if let Some(category) = category {
+            recorder.focused_boundary_events.push(FocusedBoundaryEvent {
+                sequence: recorder
+                    .focused_boundary_events
+                    .written
+                    .saturating_add(1),
+                thread: self.current_thread,
+                category,
+                selector: name,
+                receiver,
+                receiver_class: Text::from_bytes(class_name.as_bytes()),
+                arguments: [regs[2], regs[3]],
+                argument_classes: [
+                    describe_object(&self.objc, &self.mem, regs[2], true),
+                    describe_object(&self.objc, &self.mem, regs[3], true),
+                ],
+                pc: regs[15],
+                lr: regs[14],
+            });
+        }
         let call = recorder.begin(Call {
             thread: self.current_thread,
             kind: if host_internal { "ObjC(host)" } else { "ObjC" },
@@ -1728,6 +1981,11 @@ impl Environment {
         }
     }
     pub fn diagnostic_dump(&mut self, reason: &str) {
+        if self.diagnostics.is_some() {
+            self.framework_state
+                .opengles
+                .log_visual_history(reason);
+        }
         if let Some(recorder) = &mut self.diagnostics {
             if !recorder.dumped {
                 if let Some(history) = &self.mem.object_history {
@@ -1904,6 +2162,22 @@ impl Environment {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn focused_boundary_selector_filter_is_narrow() {
+        assert!(selector_matches(
+            b"pathForResource:ofType:",
+            &[b"resource", b"Resource", b"target"]
+        ));
+        assert!(selector_matches(
+            b"getAllGamesTarget:action:",
+            &[b"Target", b"Action"]
+        ));
+        assert!(!selector_matches(
+            b"setFrame:",
+            &[b"resource", b"Target", b"Action"]
+        ));
+    }
 
     #[test]
     fn bounded_history_correlates_a_consumed_value_with_its_last_return() {

@@ -53,6 +53,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (id)initWithURL:(id)url options:(id)options {
     assert!(url != nil, "AVURLAsset requires a non-nil URL");
+    env.diagnostic_media_event("asset-init", this, url, options.to_bits());
     let url = retain(env, url);
     let options = retain(env, options);
     let host_object = env.objc.borrow_mut::<AVURLAssetHostObject>(this);
@@ -72,6 +73,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         let host_object = env.objc.borrow::<AVURLAssetHostObject>(this);
         (host_object.url, host_object.options)
     };
+    env.diagnostic_media_event("asset-dealloc", this, url, options.to_bits());
     release(env, url);
     release(env, options);
     env.objc.dealloc_object(this, &mut env.mem)
@@ -97,6 +99,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (id)initWithAsset:(id)asset {
     assert_ne!(asset, nil, "AVPlayerItem requires a non-nil asset");
+    env.diagnostic_media_event("player-item-init", this, asset, 0);
     let asset = retain(env, asset);
     let host = env.objc.borrow_mut::<AVPlayerItemHostObject>(this);
     assert_eq!(host.asset, nil);
@@ -112,15 +115,25 @@ pub const CLASSES: ClassExports = objc_classes! {
 // implemented, so this partial contract deliberately never claims Ready or
 // Failed and never fabricates an NSError.
 - (AVPlayerItemStatus)status {
+    let asset = env.objc.borrow::<AVPlayerItemHostObject>(this).asset;
+    env.diagnostic_media_event(
+        "player-item-status",
+        this,
+        asset,
+        AVPLAYER_ITEM_STATUS_UNKNOWN as u32,
+    );
     AVPLAYER_ITEM_STATUS_UNKNOWN
 }
 
 - (id)error {
+    let asset = env.objc.borrow::<AVPlayerItemHostObject>(this).asset;
+    env.diagnostic_media_event("player-item-error", this, asset, 0);
     nil
 }
 
 - (())dealloc {
     let asset = env.objc.borrow::<AVPlayerItemHostObject>(this).asset;
+    env.diagnostic_media_event("player-item-dealloc", this, asset, 0);
     release(env, asset);
     env.objc.dealloc_object(this, &mut env.mem)
 }

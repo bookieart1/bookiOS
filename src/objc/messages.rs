@@ -174,14 +174,18 @@ pub fn lookup_imp_for_class(
         if class == nil {
             assert!(class != orig_class);
 
-            let class_host_object = env.objc.get_host_object(orig_class).unwrap();
-            let &super::ClassHostObject {
-                ref name,
-                is_metaclass,
-                ..
-            } = class_host_object.as_any().downcast_ref().unwrap();
+            let (name, is_metaclass) = {
+                let class_host_object = env.objc.get_host_object(orig_class).unwrap();
+                let class_host_object = class_host_object
+                    .as_any()
+                    .downcast_ref::<super::ClassHostObject>()
+                    .unwrap();
+                (class_host_object.name.clone(), class_host_object.is_metaclass)
+            };
+            let selector_name = selector.as_str(&env.mem).to_owned();
 
             if receiver != nil {
+                env.diagnostic_dispatch_failure(receiver, orig_class, &selector_name);
                 panic!(
                     "{} {:?} ({}class \"{}\", {:?}){} does not respond to selector \"{}\"!",
                     if is_metaclass { "Class" } else { "Object" },
@@ -190,7 +194,7 @@ pub fn lookup_imp_for_class(
                     name,
                     orig_class,
                     if is_super { "'s superclass" } else { "" },
-                    selector.as_str(&env.mem),
+                    selector_name,
                 );
             } else {
                 panic!(
@@ -199,7 +203,7 @@ pub fn lookup_imp_for_class(
                     name,
                     orig_class,
                     if is_super { "'s superclass" } else { "" },
-                    selector.as_str(&env.mem),
+                    selector_name,
                 );
             }
         }

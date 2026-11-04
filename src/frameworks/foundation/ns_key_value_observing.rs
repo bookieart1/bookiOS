@@ -90,6 +90,14 @@ pub fn add_observer(
     context: MutVoidPtr,
 ) {
     let key_path = ns_string::to_rust_string(env, key_path).into_owned();
+    env.diagnostic_kvo_event(
+        "add",
+        object,
+        observer,
+        &key_path,
+        options,
+        context.to_bits(),
+    );
     let ns_user_defaults_class = env.objc.get_known_class("NSUserDefaults", &mut env.mem);
     let class = msg![env; object class];
     if !env.objc.class_is_subclass_of(class, ns_user_defaults_class) {
@@ -133,6 +141,14 @@ pub fn remove_observer(
     context: Option<MutVoidPtr>,
 ) {
     let key_path = ns_string::to_rust_string(env, key_path).into_owned();
+    env.diagnostic_kvo_event(
+        "remove",
+        object,
+        observer,
+        &key_path,
+        0,
+        context.map_or(0, |value| value.to_bits()),
+    );
     let registrations = &mut State::get(env).registrations;
     // Like Apple's, remove only the most recent matching registration.
     if let Some(i) = registrations.iter().rposition(|r| {
@@ -175,6 +191,7 @@ fn matching(env: &mut Environment, object: id, key: &str) -> Vec<(id, NSUInteger
 /// `willChangeValueForKey:`
 pub fn will_change(env: &mut Environment, object: id, key: id) {
     let key_str = ns_string::to_rust_string(env, key).into_owned();
+    env.diagnostic_kvo_event("will-change", object, nil, &key_str, 0, 0);
     let observers = matching(env, object, &key_str);
     if observers.is_empty() {
         return;
@@ -200,6 +217,7 @@ pub fn will_change(env: &mut Environment, object: id, key: id) {
 /// `didChangeValueForKey:`
 pub fn did_change(env: &mut Environment, object: id, key: id) {
     let key_str = ns_string::to_rust_string(env, key).into_owned();
+    env.diagnostic_kvo_event("did-change", object, nil, &key_str, 0, 0);
     let state = State::get(env);
     let old = state
         .old_values
@@ -271,6 +289,14 @@ fn notify(
     change: id,
     context: MutVoidPtr,
 ) {
+    env.diagnostic_kvo_event(
+        "notify",
+        object,
+        observer,
+        key,
+        0,
+        context.to_bits(),
+    );
     let key_path = ns_string::from_rust_string(env, key.to_string());
     let key_path = autorelease(env, key_path);
     () = msg![env; observer observeValueForKeyPath:key_path

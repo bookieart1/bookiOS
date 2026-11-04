@@ -380,6 +380,10 @@ fn glShadeModel(env: &mut Environment, mode: GLenum) {
     with_ctx_and_mem(env, |gles, _mem| unsafe { gles.ShadeModel(mode) })
 }
 fn glScissor(env: &mut Environment, x: GLint, y: GLint, width: GLsizei, height: GLsizei) {
+    env.framework_state.opengles.note_visual_call(
+        "glScissor",
+        [x as u32, y as u32, width as u32, height as u32],
+    );
     // apply scale hack: assume framebuffer's size is larger than the app thinks
     // and scale scissor appropriately
     let factor = env.options.scale_hack.get() as GLsizei;
@@ -390,6 +394,10 @@ fn glScissor(env: &mut Environment, x: GLint, y: GLint, width: GLsizei, height: 
     })
 }
 fn glViewport(env: &mut Environment, x: GLint, y: GLint, width: GLsizei, height: GLsizei) {
+    env.framework_state.opengles.note_visual_call(
+        "glViewport",
+        [x as u32, y as u32, width as u32, height as u32],
+    );
     // apply scale hack: assume framebuffer's size is larger than the app thinks
     // and scale viewport appropriately
     let factor = env.options.scale_hack.get() as GLsizei;
@@ -725,6 +733,10 @@ fn glTexCoordPointer(
     stride: GLsizei,
     pointer: ConstVoidPtr,
 ) {
+    env.framework_state.opengles.note_visual_call(
+        "glTexCoordPointer",
+        [size as u32, type_, stride as u32, pointer.to_bits()],
+    );
     with_ctx_and_mem(env, |gles, mem| unsafe {
         let pointer =
             translate_pointer_or_offset_to_host(gles, mem, pointer, gles11::ARRAY_BUFFER_BINDING);
@@ -738,6 +750,10 @@ fn glVertexPointer(
     stride: GLsizei,
     pointer: ConstVoidPtr,
 ) {
+    env.framework_state.opengles.note_visual_call(
+        "glVertexPointer",
+        [size as u32, type_, stride as u32, pointer.to_bits()],
+    );
     with_ctx_and_mem(env, |gles, mem| unsafe {
         let pointer =
             translate_pointer_or_offset_to_host(gles, mem, pointer, gles11::ARRAY_BUFFER_BINDING);
@@ -833,6 +849,10 @@ unsafe fn log_input_draw_state(
 }
 
 fn glDrawArrays(env: &mut Environment, mode: GLenum, first: GLint, count: GLsizei) {
+    env.framework_state.opengles.note_visual_call(
+        "glDrawArrays",
+        [mode, first as u32, count as u32, 0],
+    );
     env.framework_state.opengles.note_gl_error_candidate(
         "glDrawArrays",
         [mode, first as u32, count as u32, 0],
@@ -857,6 +877,10 @@ fn glDrawElements(
     type_: GLenum,
     indices: ConstVoidPtr,
 ) {
+    env.framework_state.opengles.note_visual_call(
+        "glDrawElements",
+        [mode, count as u32, type_, indices.to_bits()],
+    );
     env.framework_state.opengles.note_gl_error_candidate(
         "glDrawElements",
         [mode, count as u32, type_, indices.to_bits()],
@@ -930,6 +954,9 @@ fn glClearStencil(env: &mut Environment, s: GLint) {
 
 // Matrix stack operations
 fn glMatrixMode(env: &mut Environment, mode: GLenum) {
+    env.framework_state
+        .opengles
+        .note_visual_call("glMatrixMode", [mode, 0, 0, 0]);
     with_ctx_and_mem(env, |gles, _mem| {
         unsafe { gles.MatrixMode(mode) };
     });
@@ -940,24 +967,36 @@ fn glLoadIdentity(env: &mut Environment) {
     });
 }
 fn glLoadMatrixf(env: &mut Environment, m: ConstPtr<GLfloat>) {
+    env.framework_state
+        .opengles
+        .note_visual_call("glLoadMatrixf", [m.to_bits(), 0, 0, 0]);
     with_ctx_and_mem(env, |gles, mem| {
         let m = mem.ptr_at(m, 16);
         unsafe { gles.LoadMatrixf(m) };
     });
 }
 fn glLoadMatrixx(env: &mut Environment, m: ConstPtr<GLfixed>) {
+    env.framework_state
+        .opengles
+        .note_visual_call("glLoadMatrixx", [m.to_bits(), 0, 0, 0]);
     with_ctx_and_mem(env, |gles, mem| {
         let m = mem.ptr_at(m, 16);
         unsafe { gles.LoadMatrixx(m) };
     });
 }
 fn glMultMatrixf(env: &mut Environment, m: ConstPtr<GLfloat>) {
+    env.framework_state
+        .opengles
+        .note_visual_call("glMultMatrixf", [m.to_bits(), 0, 0, 0]);
     with_ctx_and_mem(env, |gles, mem| {
         let m = mem.ptr_at(m, 16);
         unsafe { gles.MultMatrixf(m) };
     });
 }
 fn glMultMatrixx(env: &mut Environment, m: ConstPtr<GLfixed>) {
+    env.framework_state
+        .opengles
+        .note_visual_call("glMultMatrixx", [m.to_bits(), 0, 0, 0]);
     with_ctx_and_mem(env, |gles, mem| {
         let m = mem.ptr_at(m, 16);
         unsafe { gles.MultMatrixx(m) };
@@ -1100,6 +1139,9 @@ fn glIsTexture(env: &mut Environment, texture: GLuint) -> GLboolean {
     with_ctx_and_mem(env, |gles, _mem| unsafe { gles.IsTexture(texture) })
 }
 fn glBindTexture(env: &mut Environment, target: GLenum, texture: GLuint) {
+    env.framework_state
+        .opengles
+        .note_visual_call("glBindTexture", [target, texture, 0, 0]);
     with_ctx_and_mem(env, |gles, _mem| unsafe {
         gles.BindTexture(target, texture)
     })
@@ -1202,6 +1244,15 @@ fn glTexImage2D(
     type_: GLenum,
     pixels: ConstVoidPtr,
 ) {
+    env.framework_state.opengles.note_visual_call(
+        "glTexImage2D",
+        [
+            target,
+            ((level as u32) << 16) | (internalformat as u32 & 0xffff),
+            ((width as u32) << 16) | (height as u32 & 0xffff),
+            pixels.to_bits(),
+        ],
+    );
     with_ctx_and_mem(env, |gles, mem| unsafe {
         let pixels = if pixels.is_null() {
             std::ptr::null()
@@ -1235,6 +1286,15 @@ fn glTexSubImage2D(
     type_: GLenum,
     pixels: ConstVoidPtr,
 ) {
+    env.framework_state.opengles.note_visual_call(
+        "glTexSubImage2D",
+        [
+            target,
+            ((xoffset as u32) << 16) | (yoffset as u32 & 0xffff),
+            ((width as u32) << 16) | (height as u32 & 0xffff),
+            pixels.to_bits(),
+        ],
+    );
     with_ctx_and_mem(env, |gles, mem| unsafe {
         let pixel_count: GuestUSize = width.checked_mul(height).unwrap().try_into().unwrap();
         let size = image_size_estimate(pixel_count, format, type_);

@@ -141,6 +141,34 @@ pub fn set_view_controller(env: &mut Environment, view: id, controller: id) {
     host_obj.view_controller = controller;
 }
 
+/// Host-only, read-only state used by the bounded input recorder. Reading this
+/// never sends guest messages and therefore cannot affect hit testing or view
+/// lifecycle behavior.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct DiagnosticState {
+    pub superview: id,
+    pub layer: id,
+    pub controller: id,
+    pub interactive: bool,
+    pub multiple_touch: bool,
+    pub gesture_count: usize,
+}
+
+pub(crate) fn diagnostic_state(objc: &ObjC, view: id) -> Option<DiagnosticState> {
+    let host = objc
+        .get_host_object(view)?
+        .as_any()
+        .downcast_ref::<UIViewHostObject>()?;
+    Some(DiagnosticState {
+        superview: host.superview,
+        layer: host.layer,
+        controller: host.view_controller,
+        interactive: host.user_interaction_enabled,
+        multiple_touch: host.multiple_touch_enabled,
+        gesture_count: host.gesture_recognizers.len(),
+    })
+}
+
 /// Emit a compact snapshot of the visible UIKit tree when the user leaves an
 /// unresponsive title. This is deliberately bounded so it can distinguish a
 /// missing/hidden/off-screen interface from a stalled run loop without turning

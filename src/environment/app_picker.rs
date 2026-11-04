@@ -291,11 +291,20 @@ fn enumerate_apps(
     // so a full round can be exercised without repeatedly paging through the
     // library. Everything else remains alphabetical.
     // Bundle identifiers avoid depending on localized or truncated names.
-    const DEV_220_TEST_BATCH: &[&str] = &[
+    const DEV_221_TEST_BATCH: &[&str] = &[
         "BBLAST",
+        "BUNGEEBALL",
+        "DECOLORO",
+        "EPOCH",
+        "FLIPSESCAPE",
+        "PARACHUTENINJA",
         "PEGGLE",
         "RAGDOLL3",
+        "ROLANDO",
+        "SLINGSHOTRACING",
         "SPOING",
+        "TOYBOT2",
+        "UNMECHANICAL",
     ];
     apps.sort_by_key(|app| {
         let normalized_name: String = app
@@ -304,7 +313,7 @@ fn enumerate_apps(
             .filter(|character| character.is_ascii_alphanumeric())
             .flat_map(char::to_uppercase)
             .collect();
-        let focus_index = DEV_220_TEST_BATCH
+        let focus_index = DEV_221_TEST_BATCH
             .iter()
             .position(|name| normalized_name == *name || normalized_name.starts_with(*name))
             .map(|idx| (0, idx));
@@ -817,7 +826,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.20",
+            "iDared 32bit {}{}{} · Dev 2.21",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""

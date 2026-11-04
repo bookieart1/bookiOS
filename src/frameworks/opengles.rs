@@ -17,9 +17,16 @@ use touchHLE_gl_bindings::gles11::types::GLenum;
 use crate::mem::ConstPtr;
 
 const GL_ERROR_CANDIDATES: usize = 32;
+const GL_VISUAL_HISTORY: usize = 64;
 
 #[derive(Clone, Copy, Default)]
 struct GlErrorCandidate {
+    call: &'static str,
+    args: [u32; 4],
+}
+
+#[derive(Clone, Copy, Default)]
+struct GlVisualCall {
     call: &'static str,
     args: [u32; 4],
 }
@@ -52,6 +59,12 @@ pub struct State {
     /// observed, so healthy gameplay gets no additional log traffic.
     gl_error_candidates: [GlErrorCandidate; GL_ERROR_CANDIDATES],
     gl_error_candidate_written: u64,
+    /// Fixed-size visual-state history retained independently of glGetError.
+    /// It is emitted only at an explicit recorder dump, so healthy gameplay
+    /// does not produce per-call logging.
+    gl_visual_history: [GlVisualCall; GL_VISUAL_HISTORY],
+    gl_visual_history_written: u64,
+    gl_visual_history_dumped: bool,
 }
 impl State {
     fn current_ctx_for_thread(&mut self, thread: crate::ThreadId) -> &mut Option<crate::objc::id> {
@@ -110,6 +123,34 @@ impl State {
         self.log_gl_error_candidates(source, error);
     }
 
+    pub(crate) fn note_visual_call(&mut self, call: &'static str, args: [u32; 4]) {
+        let index = self.gl_visual_history_written as usize % GL_VISUAL_HISTORY;
+        self.gl_visual_history[index] = GlVisualCall { call, args };
+        self.gl_visual_history_written = self.gl_visual_history_written.saturating_add(1);
+    }
+
+    pub(crate) fn log_visual_history(&mut self, reason: &str) {
+        if self.gl_visual_history_dumped {
+            return;
+        }
+        self.gl_visual_history_dumped = true;
+        let count = (self.gl_visual_history_written as usize).min(GL_VISUAL_HISTORY);
+        log!(
+            "OpenGL ES bounded visual history: reason={reason:?}, newest {count}, total={}",
+            self.gl_visual_history_written
+        );
+        let start = self.gl_visual_history_written.saturating_sub(count as u64);
+        for sequence in start..self.gl_visual_history_written {
+            let event = self.gl_visual_history[sequence as usize % GL_VISUAL_HISTORY];
+            log!(
+                "OpenGL ES visual #{}: {} args={:08x?}",
+                sequence + 1,
+                event.call,
+                event.args
+            );
+        }
+    }
+
     pub(crate) fn log_gl_error_candidates(&self, source: &str, error: GLenum) {
         let count = (self.gl_error_candidate_written as usize).min(GL_ERROR_CANDIDATES);
         log!(
@@ -145,6 +186,17 @@ mod tests {
         );
         state.note_gl_error_observation(0, "guest glGetError");
         assert_eq!(state.gl_error_candidate_written, 0);
+    }
+
+    #[test]
+    fn visual_history_is_bounded_and_survives_clean_error_observations() {
+        let mut state = State::default();
+        for value in 0..(GL_VISUAL_HISTORY as u32 + 3) {
+            state.note_visual_call("glTexImage2D", [value, 0, 0, 0]);
+        }
+        state.note_gl_error_observation(0, "guest glGetError");
+        assert_eq!(state.gl_visual_history_written, 67);
+        assert_eq!(state.gl_visual_history[2].args[0], 66);
     }
 }
 
