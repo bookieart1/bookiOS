@@ -34,11 +34,11 @@ const OBJECT_LIFETIME_EVENTS: usize = 64;
 const DICTIONARY_ORIGINS: usize = 1024;
 const UNRESOLVED_RELOCATIONS: usize = 32;
 const STRING_SEARCHES: usize = 32;
-const TOUCH_EVENTS: usize = 64;
+const TOUCH_EVENTS: usize = 32;
 const SELECTOR_EVENTS: usize = 64;
-const FOCUSED_BOUNDARY_EVENTS: usize = 64;
-const KVO_EVENTS: usize = 64;
-const MEDIA_EVENTS: usize = 32;
+const FOCUSED_BOUNDARY_EVENTS: usize = 16;
+const KVO_EVENTS: usize = 16;
+const MEDIA_EVENTS: usize = 16;
 const HEALTHY_PRESENT_INTERVAL: Duration = Duration::from_millis(100);
 const SLOW_PRESENT_INTERVAL: Duration = Duration::from_millis(180);
 const HEALTHY_PRESENT_STREAK: u16 = 30;
@@ -429,7 +429,7 @@ struct TouchEvent {
     action: &'static str,
     touch: u32,
     view: u32,
-    view_class: Text,
+    view_class: ShortText,
     superview: u32,
     layer: u32,
     controller: u32,
@@ -448,11 +448,11 @@ struct FocusedBoundaryEvent {
     sequence: u64,
     thread: usize,
     category: &'static str,
-    selector: Text,
+    selector: ShortText,
     receiver: u32,
-    receiver_class: Text,
+    receiver_class: ShortText,
     arguments: [u32; 2],
-    argument_classes: [Text; 2],
+    argument_classes: [ShortText; 2],
     pc: u32,
     lr: u32,
 }
@@ -464,7 +464,7 @@ struct KvoEvent {
     action: &'static str,
     object: u32,
     observer: u32,
-    key_path: Text,
+    key_path: ShortText,
     options: u32,
     context: u32,
     pc: u32,
@@ -1284,8 +1284,10 @@ impl Environment {
     ) {
         let view_class = ObjC::try_read_isa(view, &self.mem)
             .and_then(|class| self.objc.try_get_class_name(class))
-            .map(|name| Text::from_bytes(name.as_bytes()))
-            .unwrap_or_else(|| Text::from_bytes(b"<invalid-view>"));
+            .map(|name| ShortText::from_text(Text::from_bytes(name.as_bytes())))
+            .unwrap_or_else(|| {
+                ShortText::from_text(Text::from_bytes(b"<invalid-view>"))
+            });
         let view_state = crate::frameworks::uikit::ui_view::diagnostic_state(&self.objc, view)
             .unwrap_or_default();
         let Some(recorder) = &mut self.diagnostics else {
@@ -1333,7 +1335,7 @@ impl Environment {
             action,
             object: object.to_bits(),
             observer: observer.to_bits(),
-            key_path: Text::from_bytes(key_path.as_bytes()),
+            key_path: ShortText::from_text(Text::from_bytes(key_path.as_bytes())),
             options,
             context,
             pc: regs[15],
@@ -1578,13 +1580,19 @@ impl Environment {
                     .saturating_add(1),
                 thread: self.current_thread,
                 category,
-                selector: name,
+                selector: ShortText::from_text(name),
                 receiver,
-                receiver_class: Text::from_bytes(class_name.as_bytes()),
+                receiver_class: ShortText::from_text(Text::from_bytes(
+                    class_name.as_bytes(),
+                )),
                 arguments: [regs[2], regs[3]],
                 argument_classes: [
-                    describe_object(&self.objc, &self.mem, regs[2], true),
-                    describe_object(&self.objc, &self.mem, regs[3], true),
+                    ShortText::from_text(describe_object(
+                        &self.objc, &self.mem, regs[2], true,
+                    )),
+                    ShortText::from_text(describe_object(
+                        &self.objc, &self.mem, regs[3], true,
+                    )),
                 ],
                 pc: regs[15],
                 lr: regs[14],
