@@ -57,6 +57,38 @@ struct PickerInput: Decodable {
     let quickOptions: [QuickOption]
     /// Why the last game couldn't start, if it couldn't.
     let startError: String?
+    /// Correlates native construction timings with the Rust library scan.
+    let performanceScanID: UInt64
+    let performanceContext: String
+    let rustElapsedBeforeBridgeUs: UInt64
+}
+
+@_silgen_name("idared_picker_performance_event")
+private func idaredPickerPerformanceEvent(
+    _ scanID: UInt64,
+    _ event: UnsafePointer<CChar>,
+    _ elapsedUs: UInt64
+)
+
+private func performanceNow() -> TimeInterval {
+    ProcessInfo.processInfo.systemUptime
+}
+
+private func performanceMicroseconds(
+    _ start: TimeInterval,
+    _ end: TimeInterval = performanceNow()
+) -> UInt64 {
+    UInt64(max(0, (end - start) * 1_000_000))
+}
+
+private func reportPickerPerformance(
+    _ input: PickerInput,
+    _ event: String,
+    _ elapsedUs: UInt64
+) {
+    event.withCString {
+        idaredPickerPerformanceEvent(input.performanceScanID, $0, elapsedUs)
+    }
 }
 
 /// Games opened with "Open in iDared 32bit", waiting for the picker.
@@ -104,6 +136,7 @@ public func idaredSwiftUIAppPicker(
     _ icons: UnsafePointer<UnsafePointer<UInt8>?>,
     _ iconCount: Int
 ) -> UnsafeMutablePointer<CChar>? {
+    let bridgeEntry = performanceNow()
     // A guest app may have exited while SDL's hidden text input view was the
     // first responder. Never let that keyboard leak into the native picker.
     UIApplication.shared.sendAction(
@@ -117,37 +150,95 @@ public func idaredSwiftUIAppPicker(
     else {
         return nil
     }
+    let jsonDecoded = performanceNow()
+    var imageCreationUs: UInt64 = 0
+    var iconProcessingUs: UInt64 = 0
     var appIcons: [UIImage] = []
     for (i, app) in input.apps.enumerated() {
-        guard i < iconCount, let pixels = icons[i],
-              let icon = makeImage(pixels, app.iconWidth, app.iconHeight)
-        else {
+        guard i < iconCount, let pixels = icons[i] else {
             return nil
         }
+        let imageStarted = performanceNow()
+        guard let icon = makeImage(pixels, app.iconWidth, app.iconHeight) else {
+            return nil
+        }
+        imageCreationUs += performanceMicroseconds(imageStarted)
+        let processingStarted = performanceNow()
         appIcons.append(app.hasIcon ? upscaleSmallIcon(icon) : addQuestionMark(icon))
+        iconProcessingUs += performanceMicroseconds(processingStarted)
     }
 
+    let modelStarted = performanceNow()
     let model = PickerModel(input: input, icons: appIcons)
+    let modelCreated = performanceNow()
+    let windowStarted = performanceNow()
     let window: UIWindow
     if let scene = activeWindowScene() {
         window = UIWindow(windowScene: scene)
     } else {
         window = UIWindow(frame: UIScreen.main.bounds)
     }
+    let windowCreated = performanceNow()
     // Above SDL's launch screen, which fades out on its own.
     window.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.normal.rawValue + 2)
-    window.rootViewController = PickerHostingController(model: model)
+    let controllerStarted = performanceNow()
+    window.rootViewController = PickerHostingController(
+        model: model,
+        performanceStartUptime: bridgeEntry
+    )
+    let controllerCreated = performanceNow()
+    let makeVisibleStarted = performanceNow()
     window.makeKeyAndVisible()
+    let makeVisibleReturned = performanceNow()
+
+    reportPickerPerformance(
+        input,
+        "bridge entry through JSON decode",
+        performanceMicroseconds(bridgeEntry, jsonDecoded)
+    )
+    reportPickerPerformance(input, "UIImage creation", imageCreationUs)
+    reportPickerPerformance(input, "icon resize or placeholder processing", iconProcessingUs)
+    reportPickerPerformance(
+        input,
+        "PickerModel settings and directory snapshots",
+        performanceMicroseconds(modelStarted, modelCreated)
+    )
+    reportPickerPerformance(
+        input,
+        "UIWindow creation",
+        performanceMicroseconds(windowStarted, windowCreated)
+    )
+    reportPickerPerformance(
+        input,
+        "hosting controller creation",
+        performanceMicroseconds(controllerStarted, controllerCreated)
+    )
+    reportPickerPerformance(
+        input,
+        "makeKeyAndVisible call",
+        performanceMicroseconds(makeVisibleStarted, makeVisibleReturned)
+    )
+    reportPickerPerformance(
+        input,
+        "Swift bridge entry through makeKeyAndVisible return",
+        performanceMicroseconds(bridgeEntry, makeVisibleReturned)
+    )
 
     // Rust is waiting on the main thread, so keep the run loop going here.
     while model.result == nil {
         RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
     }
     // Let the picked icon's highlight show before the app starts.
+    let selectionObserved = performanceNow()
     RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
 
     window.isHidden = true
     window.rootViewController = nil
+    reportPickerPerformance(
+        input,
+        "selection observed through picker hidden",
+        performanceMicroseconds(selectionObserved)
+    )
     return strdup(model.result!)
 }
 
@@ -810,9 +901,14 @@ final class PickerModel: ObservableObject {
 
 final class PickerHostingController: UIHostingController<PickerView> {
     private let model: PickerModel
+    private let performanceStartUptime: TimeInterval
+    private var reportedFirstLayout = false
+    private var reportedFirstVisibleFrame = false
+    private var reportedInitialOrientationStable = false
 
-    init(model: PickerModel) {
+    init(model: PickerModel, performanceStartUptime: TimeInterval) {
         self.model = model
+        self.performanceStartUptime = performanceStartUptime
         super.init(rootView: PickerView(model: model))
         view.backgroundColor = .black
     }
@@ -829,6 +925,58 @@ final class PickerHostingController: UIHostingController<PickerView> {
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
         .portrait
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        guard !reportedFirstLayout else { return }
+        reportedFirstLayout = true
+        reportPickerPerformance(
+            model.input,
+            "Swift bridge entry through first layout",
+            performanceMicroseconds(performanceStartUptime)
+        )
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !reportedFirstVisibleFrame else { return }
+        reportedFirstVisibleFrame = true
+        let swiftElapsed = performanceMicroseconds(performanceStartUptime)
+        reportPickerPerformance(
+            model.input,
+            "Swift bridge entry through first visible picker frame",
+            swiftElapsed
+        )
+        reportPickerPerformance(
+            model.input,
+            "total Rust scan start through first visible picker frame",
+            model.input.rustElapsedBeforeBridgeUs + swiftElapsed
+        )
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.reportedInitialOrientationStable else { return }
+            self.reportedInitialOrientationStable = true
+            reportPickerPerformance(
+                self.model.input,
+                "initial visible orientation stable on next main-loop turn",
+                performanceMicroseconds(self.performanceStartUptime)
+            )
+        }
+    }
+
+    override func viewWillTransition(
+        to size: CGSize,
+        with coordinator: UIViewControllerTransitionCoordinator
+    ) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            guard let self else { return }
+            reportPickerPerformance(
+                self.model.input,
+                "orientation transition completed",
+                performanceMicroseconds(self.performanceStartUptime)
+            )
+        }
     }
 
     override func viewSafeAreaInsetsDidChange() {

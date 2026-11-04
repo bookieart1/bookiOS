@@ -18,6 +18,23 @@ use crate::window::DeviceFamily;
 use plist::dictionary::Dictionary;
 use plist::Value;
 use std::io::Cursor;
+use std::time::{Duration, Instant};
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BundleConstructionTimings {
+    pub info_plist_read: Duration,
+    pub info_plist_parse: Duration,
+    pub filesystem_creation: Duration,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct IconLoadTimings {
+    pub candidate_discovery: Duration,
+    pub reads: Duration,
+    pub decoding: Duration,
+    pub processing: Duration,
+    pub candidates_considered: usize,
+}
 
 #[derive(Debug)]
 pub struct Bundle {
@@ -28,11 +45,23 @@ pub struct Bundle {
 impl Bundle {
     /// See [Fs::new] for meaning of `read_only_mode`.
     pub fn new_bundle_and_fs_from_host_path(
-        mut bundle_data: BundleData,
+        bundle_data: BundleData,
         read_only_mode: bool,
     ) -> Result<(Bundle, Fs), String> {
-        let plist_bytes = bundle_data.read_plist()?;
+        Self::new_bundle_and_fs_from_host_path_timed(bundle_data, read_only_mode)
+            .map(|(bundle, fs, _)| (bundle, fs))
+    }
 
+    pub fn new_bundle_and_fs_from_host_path_timed(
+        mut bundle_data: BundleData,
+        read_only_mode: bool,
+    ) -> Result<(Bundle, Fs, BundleConstructionTimings), String> {
+        let mut timings = BundleConstructionTimings::default();
+        let started = Instant::now();
+        let plist_bytes = bundle_data.read_plist()?;
+        timings.info_plist_read = started.elapsed();
+
+        let started = Instant::now();
         let plist = Value::from_reader(Cursor::new(plist_bytes))
             .map_err(|_| "Could not deserialize plist data".to_string())?;
 
@@ -49,15 +78,18 @@ impl Bundle {
             }
         );
         let bundle_id = plist["CFBundleIdentifier"].as_string().unwrap();
+        timings.info_plist_parse = started.elapsed();
 
+        let started = Instant::now();
         let (fs, guest_path) = Fs::new(bundle_data, bundle_name, bundle_id, read_only_mode);
+        timings.filesystem_creation = started.elapsed();
 
         let bundle = Bundle {
             path: guest_path,
             plist,
         };
 
-        Ok((bundle, fs))
+        Ok((bundle, fs, timings))
     }
 
     /// Create a fake bundle (see [crate::Environment::new_without_app]).
@@ -271,7 +303,18 @@ impl Bundle {
     }
 
     pub fn load_icon(&self, fs: &Fs) -> Result<Image, String> {
-        let bytes = if let Some(path) = self.icon_path() {
+        self.load_icon_timed(fs).map(|(image, _)| image)
+    }
+
+    pub fn load_icon_timed(&self, fs: &Fs) -> Result<(Image, IconLoadTimings), String> {
+        let mut timings = IconLoadTimings::default();
+        let started = Instant::now();
+        let icon_path = self.icon_path();
+        timings.candidate_discovery = started.elapsed();
+        timings.candidates_considered = if icon_path.is_some() { 1 } else { 2 };
+
+        let started = Instant::now();
+        let bytes = if let Some(path) = icon_path {
             fs.read(path)
                 .map_err(|_| "Could not read icon file".to_string())?
         } else {
@@ -281,29 +324,48 @@ impl Bundle {
                 .or_else(|_| fs.read(self.path.join("icon.png")))
                 .map_err(|_| "Could not find app icon (Icon.png or icon.png)".to_string())?
         };
-        let mut image =
-            Image::from_bytes(&bytes).map_err(|e| format!("Could not parse icon image: {e}"))?;
+        timings.reads = started.elapsed();
+        let started = Instant::now();
+        let mut image = Image::from_bytes(&bytes)
+            .map_err(|e| format!("Could not parse icon image: {e}"))?;
+        timings.decoding = started.elapsed();
+        let started = Instant::now();
         Self::round_icon(&mut image);
-        Ok(image)
+        timings.processing = started.elapsed();
+        Ok((image, timings))
     }
 
     /// Like [Self::load_icon], but uses a bigger version of the same icon if
     /// there is one, e.g. an @2x or iPad icon. Whatever [Self::load_icon]
     /// picks stays the fallback, so its rules still apply.
     pub fn load_best_icon(&self, fs: &Fs) -> Result<Image, String> {
-        let icon = self.load_icon(fs)?;
+        self.load_best_icon_timed(fs).map(|(image, _)| image)
+    }
+
+    pub fn load_best_icon_timed(&self, fs: &Fs) -> Result<(Image, IconLoadTimings), String> {
+        let (icon, mut timings) = self.load_icon_timed(fs)?;
         let (width, height) = icon.dimensions();
         if width != height {
-            return Ok(icon);
+            return Ok((icon, timings));
         }
         let mut best: Option<Image> = None;
-        for path in self.icon_candidates() {
+        let started = Instant::now();
+        let candidates = self.icon_candidates();
+        timings.candidate_discovery += started.elapsed();
+        timings.candidates_considered += candidates.len();
+        for path in candidates {
+            let started = Instant::now();
             let Ok(bytes) = fs.read(&path) else {
+                timings.reads += started.elapsed();
                 continue;
             };
+            timings.reads += started.elapsed();
+            let started = Instant::now();
             let Ok(image) = Image::from_bytes(&bytes) else {
+                timings.decoding += started.elapsed();
                 continue;
             };
+            timings.decoding += started.elapsed();
             // Apps list all sorts of images as icons, so only take a bigger
             // square one, within reason.
             let (w, h) = image.dimensions();
@@ -313,10 +375,12 @@ impl Bundle {
             }
         }
         let Some(mut image) = best else {
-            return Ok(icon);
+            return Ok((icon, timings));
         };
+        let started = Instant::now();
         Self::round_icon(&mut image);
-        Ok(image)
+        timings.processing += started.elapsed();
+        Ok((image, timings))
     }
 
     /// Every file that could be the app's icon at some size: each icon named

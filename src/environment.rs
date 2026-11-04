@@ -651,6 +651,10 @@ impl Environment {
             let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 env.with_yielder(yielder, move |env| {
                     echo!("CPU emulation begins now.");
+                    echo!(
+                        "iDared Game Launch Performance: guest CPU begins at process t={:.3} ms",
+                        crate::performance_process_elapsed_ms()
+                    );
                     // Some apps use the stack inside the static initializer.
                     // While properly behaving apps should be fine, some app
                     // will try to poke the top of the stack, so we'll give
@@ -841,7 +845,7 @@ impl Environment {
         if let Some(addrs) = env.options.gdb_listen_addrs.take() {
             let listener = TcpListener::bind(addrs.as_slice())
                 .map_err(|e| format!("Could not bind to {addrs:?}: {e}"))?;
-            echo!(
+            echo_no_panic!(
                 "Waiting for debugger connection on {}...",
                 addrs
                     .into_iter()
@@ -1688,6 +1692,10 @@ impl Environment {
                 self.return_to_app_picker = true;
             }
             if self.return_to_app_picker {
+                echo_no_panic!(
+                    "iDared Return Performance: guest execution ending at process t={:.3} ms",
+                    crate::performance_process_elapsed_ms()
+                );
                 self.diagnostic_dump("return-to-picker");
                 // Put the context back so it's freed when Environment drops.
                 let thread = self.threads.get_mut(self.current_thread).unwrap();
@@ -2608,6 +2616,14 @@ impl Drop for Environment {
     // since this should only occur after a sucessful panic or the app ending,
     // but it is a bit cleaner and avoids confusion inside the logs.
     fn drop(&mut self) {
+        let time_game_teardown = !self.is_app_picker && !self.objc.is_null();
+        let teardown_started = Instant::now();
+        if time_game_teardown {
+            echo_no_panic!(
+                "iDared Return Performance: guest Environment teardown begins at process t={:.3} ms",
+                crate::performance_process_elapsed_ms()
+            );
+        }
         if self.objc.is_null() {
             return;
         }
@@ -2621,6 +2637,13 @@ impl Drop for Environment {
                 .all(|thread| thread.host_context.is_none())
         {
             ENVIRONMENT_INSTANCE_EXISTS.store(false, std::sync::atomic::Ordering::SeqCst);
+            if time_game_teardown {
+                echo_no_panic!(
+                    "iDared Return Performance: guest Environment teardown completed in {:.3} ms at process t={:.3} ms",
+                    teardown_started.elapsed().as_secs_f64() * 1000.0,
+                    crate::performance_process_elapsed_ms()
+                );
+            }
             return;
         }
         unsafe {
@@ -2641,6 +2664,13 @@ impl Drop for Environment {
             *self = env;
         }
         ENVIRONMENT_INSTANCE_EXISTS.store(false, std::sync::atomic::Ordering::Relaxed);
+        if time_game_teardown {
+            echo_no_panic!(
+                "iDared Return Performance: guest Environment teardown completed in {:.3} ms at process t={:.3} ms",
+                teardown_started.elapsed().as_secs_f64() * 1000.0,
+                crate::performance_process_elapsed_ms()
+            );
+        }
     }
 }
 

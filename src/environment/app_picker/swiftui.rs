@@ -7,12 +7,13 @@
 //! (`iphone/iDared32bit/AppPicker.swift`) rather than drawn with our own
 //! UIKit.
 
-use super::{quick_option_args, quick_options, AppInfo, QuickOptionKind};
+use super::{quick_option_args, quick_options, AppInfo, PickerPerformance, QuickOptionKind};
 use crate::image::Image;
 use crate::paths;
 use std::ffi::{c_char, CStr, CString};
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use std::time::Instant;
 
 /// Shows the picker until an app is picked. Takes JSON describing it and one
 /// RGBA icon per app. Returns the picked app's index, then each quick option's
@@ -26,6 +27,27 @@ static PICKER: OnceLock<PickerFn> = OnceLock::new();
 #[no_mangle]
 pub extern "C" fn idared_set_swiftui_app_picker(picker: PickerFn) {
     let _ = PICKER.set(picker);
+}
+
+/// Receives bounded construction milestones from the native Swift picker.
+/// Values are elapsed microseconds from Swift bridge entry unless the event
+/// name explicitly says it includes the preceding Rust scan.
+#[no_mangle]
+pub unsafe extern "C" fn idared_picker_performance_event(
+    scan_id: u64,
+    event: *const c_char,
+    elapsed_us: u64,
+) {
+    if event.is_null() {
+        return;
+    }
+    let event = unsafe { CStr::from_ptr(event) }.to_string_lossy();
+    echo!(
+        "Picker Performance scan #{} Swift: {} = {:.3} ms",
+        scan_id,
+        event,
+        elapsed_us as f64 / 1000.0
+    );
 }
 
 pub fn is_available() -> bool {
@@ -48,7 +70,9 @@ pub struct ReloadState {
 pub fn app_picker(
     apps: Result<Vec<AppInfo>, String>,
     state: Option<ReloadState>,
+    performance: PickerPerformance,
 ) -> Result<Picked, String> {
+    let preparation_started = Instant::now();
     let picker = *PICKER.get().unwrap();
     let (apps, error) = match apps {
         Ok(apps) => (apps, None),
@@ -56,6 +80,7 @@ pub fn app_picker(
     };
 
     // Swift draws a "?" on this for apps without an icon.
+    let started = Instant::now();
     let mut placeholder = Image::from_pixel_vec([128, 128, 128, 255].repeat(57 * 57), (57, 57));
     // Should match Bundle::load_icon().
     placeholder.round_corners(10.0, /* four_corners: */ true);
@@ -63,7 +88,9 @@ pub fn app_picker(
         .iter()
         .map(|app| app.icon.as_ref().unwrap_or(&placeholder))
         .collect();
+    let placeholder_and_icon_refs = started.elapsed();
 
+    let started = Instant::now();
     let wallpaper = paths::wallpaper_files()
         .iter()
         .map(|file| paths::user_data_base_path().join(file))
@@ -91,8 +118,10 @@ pub fn app_picker(
             )
         })
         .collect();
+    let apps_json_elapsed = started.elapsed();
     // Swift shows these, and sends back each one's value: the choice index,
     // or 1 for a switch that's on. Only Rust knows the option arguments.
+    let started = Instant::now();
     let quick_options_json: Vec<String> = quick_options()
         .map(|option| {
             let kind = match option.kind {
@@ -111,6 +140,8 @@ pub fn app_picker(
             )
         })
         .collect();
+    let quick_options_elapsed = started.elapsed();
+    let started = Instant::now();
     let optional = |s: Option<String>| s.map_or("null".to_owned(), |s| json_string(&s));
     let json = format!(
         "{{\"apps\":[{}],\"error\":{},\"wallpaperPath\":{},\
@@ -118,7 +149,8 @@ pub fn app_picker(
          \"initialPage\":{},\"initialQuickOptionValues\":{},\"branding\":{},\
          \"shortVersionText\":{},\"devVersionText\":{},\"copyright\":{},\
          \"fileManagerURL\":{},\"websiteURL\":{},\"quickOptions\":[{}],\
-         \"startError\":{}}}",
+         \"startError\":{},\"performanceScanID\":{},\"performanceContext\":{},\
+         \"rustElapsedBeforeBridgeUs\":{}}}",
         apps_json.join(","),
         optional(error),
         optional(wallpaper.map(|p| p.to_string_lossy().into_owned())),
@@ -146,17 +178,49 @@ pub fn app_picker(
         }),
         json_string(branding),
         json_string(crate::DISPLAY_VERSION),
-        json_string("Dev 2.29"),
+        json_string("Dev 2.30"),
         json_string(&crate::licenses::get_text()),
         optional(paths::url_for_opening_user_data_dir().ok()),
         json_string("https://iDared32bit-emu.com/"),
         quick_options_json.join(","),
         optional(crate::window::START_ERROR.lock().unwrap().take()),
+        performance.scan_id,
+        json_string(performance.context.label()),
+        performance.scan_started.elapsed().as_micros(),
     );
     // Control characters, including NUL, are escaped above.
     let json = CString::new(json).unwrap();
 
     let icon_ptrs: Vec<*const u8> = icons.iter().map(|icon| icon.pixels().as_ptr()).collect();
+    let remaining_json_and_pointers = started.elapsed();
+    let preparation_total = preparation_started.elapsed();
+    echo!("=== iDared Picker Rust-to-Swift Preparation ===");
+    echo!(
+        "Scan #{} Context: {}",
+        performance.scan_id,
+        performance.context.label()
+    );
+    echo!(
+        "Placeholder/icon references: {:.3} ms",
+        placeholder_and_icon_refs.as_secs_f64() * 1000.0
+    );
+    echo!(
+        "App JSON generation:         {:.3} ms",
+        apps_json_elapsed.as_secs_f64() * 1000.0
+    );
+    echo!(
+        "Quick-option JSON:           {:.3} ms",
+        quick_options_elapsed.as_secs_f64() * 1000.0
+    );
+    echo!(
+        "Other JSON/C string/pointers:{:>10.3} ms",
+        remaining_json_and_pointers.as_secs_f64() * 1000.0
+    );
+    echo!(
+        "Total Rust-to-Swift prep:    {:.3} ms",
+        preparation_total.as_secs_f64() * 1000.0
+    );
+    echo!("=== End iDared Picker Rust-to-Swift Preparation ===");
     let result_ptr = unsafe { picker(json.as_ptr(), icon_ptrs.as_ptr(), icon_ptrs.len()) };
     if result_ptr.is_null() {
         return Err("Couldn't show the app picker.".to_string());

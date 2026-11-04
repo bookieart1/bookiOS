@@ -44,6 +44,84 @@ use crate::paths;
 use crate::Environment;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+static NEXT_PICKER_SCAN_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone, Copy)]
+pub enum PickerInvocation {
+    ColdStart,
+    ReturnFromGame,
+    LibraryReload,
+}
+
+impl PickerInvocation {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::ColdStart => "Cold Start",
+            Self::ReturnFromGame => "Return From Game",
+            Self::LibraryReload => "Library Reload",
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct PickerPerformance {
+    pub(super) scan_id: u64,
+    pub(super) context: PickerInvocation,
+    pub(super) scan_started: Instant,
+}
+
+#[derive(Clone, Default)]
+struct PackageTiming {
+    name: String,
+    total: Duration,
+    zip_open: Duration,
+    archive_validation: Duration,
+    bundle_discovery: Duration,
+    info_plist_read: Duration,
+    info_plist_parse: Duration,
+    filesystem_creation: Duration,
+    localization: Duration,
+    icon_candidates: Duration,
+    icon_reads: Duration,
+    icon_decoding: Duration,
+    icon_processing: Duration,
+    archive_entries: usize,
+}
+
+impl PackageTiming {
+    fn measured_components(&self) -> Duration {
+        self.zip_open
+            + self.archive_validation
+            + self.bundle_discovery
+            + self.info_plist_read
+            + self.info_plist_parse
+            + self.filesystem_creation
+            + self.localization
+            + self.icon_candidates
+            + self.icon_reads
+            + self.icon_decoding
+            + self.icon_processing
+    }
+
+    fn remainder(&self) -> Duration {
+        self.total.saturating_sub(self.measured_components())
+    }
+}
+
+#[derive(Default)]
+struct LibraryTiming {
+    loose_import: Duration,
+    language_selection: Duration,
+    directory_enumeration: Duration,
+    sorting: Duration,
+    packages_attempted: usize,
+    packages_succeeded: usize,
+    packages_skipped: usize,
+    packages: Vec<PackageTiming>,
+}
 
 struct AppInfo {
     path: PathBuf,
@@ -134,20 +212,23 @@ fn picker_compatibility(app: &AppInfo) -> &'static str {
     }
 }
 
-pub fn app_picker(options: Options) -> Result<(PathBuf, Vec<String>), String> {
-    let apps = find_apps(&options);
+pub fn app_picker(
+    options: Options,
+    invocation: PickerInvocation,
+) -> Result<(PathBuf, Vec<String>), String> {
+    let (apps, performance) = find_apps(&options, invocation);
 
     #[cfg(target_os = "ios")]
     if swiftui::is_available() {
         // The picker asks to be shown again when the Games folder changes,
         // e.g. after a game is added in the Files app.
-        let (mut apps, mut state) = (apps, None);
+        let (mut apps, mut performance, mut state) = (apps, performance, None);
         loop {
-            match swiftui::app_picker(apps, state)? {
+            match swiftui::app_picker(apps, state, performance)? {
                 swiftui::Picked::App(path, args) => return Ok((path, args)),
                 swiftui::Picked::Reload(new_state) => {
                     state = Some(new_state);
-                    apps = find_apps(&options);
+                    (apps, performance) = find_apps(&options, PickerInvocation::LibraryReload);
                 }
             }
         }
@@ -155,28 +236,43 @@ pub fn app_picker(options: Options) -> Result<(PathBuf, Vec<String>), String> {
     show_app_picker_gui(options, apps)
 }
 
-fn find_apps(options: &Options) -> Result<Vec<AppInfo>, String> {
+fn find_apps(
+    options: &Options,
+    invocation: PickerInvocation,
+) -> (Result<Vec<AppInfo>, String>, PickerPerformance) {
+    let performance = PickerPerformance {
+        scan_id: NEXT_PICKER_SCAN_ID.fetch_add(1, Ordering::Relaxed),
+        context: invocation,
+        scan_started: Instant::now(),
+    };
+    let mut timing = LibraryTiming::default();
     let apps_dir = paths::user_data_base_path().join(paths::apps_dir());
 
-    if !apps_dir.is_dir() {
+    let result = if !apps_dir.is_dir() {
         Err(format!(
             "The {} folder couldn't be found.",
             paths::apps_dir()
         ))
     } else {
         #[cfg(any(target_os = "ios", target_os = "android"))]
-        move_loose_ipas(&apps_dir);
+        {
+            let started = Instant::now();
+            move_loose_ipas(&apps_dir);
+            timing.loose_import = started.elapsed();
+        }
+        let started = Instant::now();
         let languages = options.preferred_languages.clone().unwrap_or_else(|| {
             sdl2::locale::get_preferred_locales()
                 .map(|loc| loc.lang)
                 .collect()
         });
+        timing.language_selection = started.elapsed();
         // Only the iOS picker shows bigger icons at their full size.
         #[cfg(target_os = "ios")]
         let best_icons = swiftui::is_available();
         #[cfg(not(target_os = "ios"))]
         let best_icons = false;
-        enumerate_apps(&apps_dir, &languages, best_icons)
+        enumerate_apps(&apps_dir, &languages, best_icons, &mut timing)
             .map_err(|err| {
                 format!(
                     "Couldn't get list of apps in the {} directory: {}.",
@@ -194,7 +290,9 @@ fn find_apps(options: &Options) -> Result<Vec<AppInfo>, String> {
                     Ok(apps)
                 }
             })
-    }
+    };
+    log_library_performance(performance, &timing);
+    (result, performance)
 }
 
 /// Moves .ipa files left in the main folder, e.g. by the Files app, into the
@@ -236,9 +334,19 @@ fn enumerate_apps(
     apps_dir: &Path,
     languages: &[String],
     best_icons: bool,
+    timing: &mut LibraryTiming,
 ) -> Result<Vec<AppInfo>, std::io::Error> {
     let mut apps = Vec::new();
-    for app in std::fs::read_dir(apps_dir)? {
+    let started = Instant::now();
+    let mut entries = std::fs::read_dir(apps_dir)?;
+    timing.directory_enumeration += started.elapsed();
+    loop {
+        let started = Instant::now();
+        let entry = entries.next();
+        timing.directory_enumeration += started.elapsed();
+        let Some(app) = entry else {
+            break;
+        };
         let app_path = app?.path();
         if app_path.extension() != Some(OsStr::new("app"))
             && app_path.extension() != Some(OsStr::new("ipa"))
@@ -246,12 +354,23 @@ fn enumerate_apps(
             continue;
         }
 
+        timing.packages_attempted += 1;
+        let package_started = Instant::now();
+        let mut package = PackageTiming {
+            name: app_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| app_path.display().to_string()),
+            ..PackageTiming::default()
+        };
+
         // TODO: avoid loading the whole FS somehow?
-        let (bundle, fs) = match BundleData::open_any(&app_path).and_then(|bundle_data| {
-            Bundle::new_bundle_and_fs_from_host_path(bundle_data, /* read_only_mode: */ true)
-        }) {
+        let (bundle_data, open_timings) = match BundleData::open_any_timed(&app_path) {
             Ok(ok) => ok,
             Err(e) => {
+                package.total = package_started.elapsed();
+                timing.packages_skipped += 1;
+                timing.packages.push(package);
                 log!(
                     "Warning: couldn't open app bundle {}: {} (skipping)",
                     app_path.display(),
@@ -260,17 +379,50 @@ fn enumerate_apps(
                 continue;
             }
         };
+        package.zip_open = open_timings.zip_open;
+        package.archive_validation = open_timings.archive_validation;
+        package.bundle_discovery = open_timings.bundle_discovery;
+        package.archive_entries = open_timings.archive_entries;
+        let (bundle, fs, construction_timings) =
+            match Bundle::new_bundle_and_fs_from_host_path_timed(
+                bundle_data,
+                /* read_only_mode: */ true,
+            ) {
+                Ok(ok) => ok,
+                Err(e) => {
+                    package.total = package_started.elapsed();
+                    timing.packages_skipped += 1;
+                    timing.packages.push(package);
+                    log!(
+                        "Warning: couldn't open app bundle {}: {} (skipping)",
+                        app_path.display(),
+                        e
+                    );
+                    continue;
+                }
+            };
+        package.info_plist_read = construction_timings.info_plist_read;
+        package.info_plist_parse = construction_timings.info_plist_parse;
+        package.filesystem_creation = construction_timings.filesystem_creation;
 
         // TODO: what if this crashes?
+        let started = Instant::now();
         let display_name = bundle.localized_display_name(&fs, languages);
+        package.localization = started.elapsed();
 
         let icon = if best_icons {
-            bundle.load_best_icon(&fs)
+            bundle.load_best_icon_timed(&fs)
         } else {
-            bundle.load_icon(&fs)
+            bundle.load_icon_timed(&fs)
         };
         let icon = match icon {
-            Ok(icon) => Some(icon),
+            Ok((icon, icon_timings)) => {
+                package.icon_candidates = icon_timings.candidate_discovery;
+                package.icon_reads = icon_timings.reads;
+                package.icon_decoding = icon_timings.decoding;
+                package.icon_processing = icon_timings.processing;
+                Some(icon)
+            }
             Err(e) => {
                 log!("Warning: couldn't load icon for app bundle {}: {} (displaying placeholder instead)", app_path.display(), e);
                 None
@@ -285,6 +437,9 @@ fn enumerate_apps(
             display_name_ns_string: None,
             icon_ui_image: None,
         });
+        package.total = package_started.elapsed();
+        timing.packages_succeeded += 1;
+        timing.packages.push(package);
     }
 
     // Put the current focused device-test batch first, in alphabetical order,
@@ -313,6 +468,7 @@ fn enumerate_apps(
         "TRISM",
         "WIREWAY",
     ];
+    let started = Instant::now();
     apps.sort_by_key(|app| {
         let normalized = |text: &str| -> String {
             text.to_uppercase()
@@ -338,8 +494,136 @@ fn enumerate_apps(
             .unwrap_or(usize::MAX);
         (rank, app.display_name.to_uppercase())
     });
+    timing.sorting = started.elapsed();
 
     Ok(apps)
+}
+
+fn duration_ms(duration: Duration) -> f64 {
+    duration.as_secs_f64() * 1000.0
+}
+
+fn percentile(sorted: &[Duration], percentile: usize) -> Duration {
+    if sorted.is_empty() {
+        return Duration::ZERO;
+    }
+    let index = (sorted.len() * percentile).div_ceil(100).saturating_sub(1);
+    sorted[index.min(sorted.len() - 1)]
+}
+
+fn log_library_performance(performance: PickerPerformance, timing: &LibraryTiming) {
+    let total = performance.scan_started.elapsed();
+    let sum = |f: fn(&PackageTiming) -> Duration| timing.packages.iter().map(f).sum();
+    let zip_open = sum(|p| p.zip_open);
+    let archive_validation = sum(|p| p.archive_validation);
+    let bundle_discovery = sum(|p| p.bundle_discovery);
+    let info_plist_read = sum(|p| p.info_plist_read);
+    let info_plist_parse = sum(|p| p.info_plist_parse);
+    let filesystem_creation = sum(|p| p.filesystem_creation);
+    let localization = sum(|p| p.localization);
+    let icon_candidates = sum(|p| p.icon_candidates);
+    let icon_reads = sum(|p| p.icon_reads);
+    let icon_decoding = sum(|p| p.icon_decoding);
+    let icon_processing = sum(|p| p.icon_processing);
+    let package_remainder: Duration = timing.packages.iter().map(PackageTiming::remainder).sum();
+    let measured = timing.loose_import
+        + timing.language_selection
+        + timing.directory_enumeration
+        + zip_open
+        + archive_validation
+        + bundle_discovery
+        + info_plist_read
+        + info_plist_parse
+        + filesystem_creation
+        + localization
+        + icon_candidates
+        + icon_reads
+        + icon_decoding
+        + icon_processing
+        + package_remainder
+        + timing.sorting;
+    let outside_packages = total.saturating_sub(measured);
+    let archive_entries: usize = timing.packages.iter().map(|p| p.archive_entries).sum();
+
+    let mut totals: Vec<Duration> = timing.packages.iter().map(|p| p.total).collect();
+    totals.sort_unstable();
+    let median = percentile(&totals, 50);
+    let p95 = percentile(&totals, 95);
+    let mut slowest = timing.packages.clone();
+    slowest.sort_by_key(|p| std::cmp::Reverse(p.total));
+
+    echo!("=== iDared Picker Performance ===");
+    echo!(
+        "Scan #{} Context: {}",
+        performance.scan_id,
+        performance.context.label()
+    );
+    echo!(
+        "Rust scan started near process t={:.3} ms",
+        crate::performance_process_elapsed_ms() - total.as_secs_f64() * 1000.0
+    );
+    echo!(
+        "Packages: {} attempted, {} loaded, {} skipped; {} archive entries",
+        timing.packages_attempted,
+        timing.packages_succeeded,
+        timing.packages_skipped,
+        archive_entries
+    );
+    echo!("Loose IPA/import check:       {:.3} ms", duration_ms(timing.loose_import));
+    echo!("Language selection:           {:.3} ms", duration_ms(timing.language_selection));
+    echo!("Directory enumeration:        {:.3} ms", duration_ms(timing.directory_enumeration));
+    echo!("ZIP open/central directory:   {:.3} ms", duration_ms(zip_open));
+    echo!("Archive entry validation:     {:.3} ms", duration_ms(archive_validation));
+    echo!("Application bundle discovery:{:>10.3} ms", duration_ms(bundle_discovery));
+    echo!("Info.plist reading:           {:.3} ms", duration_ms(info_plist_read));
+    echo!("Info.plist parsing:           {:.3} ms", duration_ms(info_plist_parse));
+    echo!("Guest filesystem creation:    {:.3} ms", duration_ms(filesystem_creation));
+    echo!("Localization:                 {:.3} ms", duration_ms(localization));
+    echo!("Icon candidate discovery:     {:.3} ms", duration_ms(icon_candidates));
+    echo!("Icon reads/decompression:     {:.3} ms", duration_ms(icon_reads));
+    echo!("Icon decoding:                {:.3} ms", duration_ms(icon_decoding));
+    echo!("Icon processing:              {:.3} ms", duration_ms(icon_processing));
+    echo!("Per-package remainder:        {:.3} ms", duration_ms(package_remainder));
+    echo!("Sorting/classification:       {:.3} ms", duration_ms(timing.sorting));
+    echo!("Unattributed scan overhead:   {:.3} ms", duration_ms(outside_packages));
+    echo!("Total Rust library scan:      {:.3} ms", duration_ms(total));
+    echo!(
+        "Package timing median/p95:   {:.3} / {:.3} ms",
+        duration_ms(median),
+        duration_ms(p95)
+    );
+    echo!("Slowest packages (bounded to five):");
+    for (index, package) in slowest.iter().take(5).enumerate() {
+        echo!(
+            "{}. {} — {:.3} ms (entries {}, zip {:.3}, validate {:.3}, fs {:.3}, metadata {:.3}, icons {:.3}, other {:.3})",
+            index + 1,
+            package.name,
+            duration_ms(package.total),
+            package.archive_entries,
+            duration_ms(package.zip_open),
+            duration_ms(package.archive_validation),
+            duration_ms(package.filesystem_creation),
+            duration_ms(package.info_plist_read + package.info_plist_parse + package.localization),
+            duration_ms(package.icon_candidates + package.icon_reads + package.icon_decoding + package.icon_processing),
+            duration_ms(package.remainder()),
+        );
+    }
+    echo!("=== End iDared Picker Performance ===");
+}
+
+#[cfg(test)]
+mod picker_performance_tests {
+    use super::percentile;
+    use std::time::Duration;
+
+    #[test]
+    fn percentile_is_bounded_and_uses_nearest_rank() {
+        let samples: Vec<Duration> = (1..=20).map(Duration::from_millis).collect();
+        assert_eq!(percentile(&samples, 50), Duration::from_millis(10));
+        assert_eq!(percentile(&samples, 95), Duration::from_millis(19));
+        assert_eq!(percentile(&samples, 100), Duration::from_millis(20));
+        assert_eq!(percentile(&[], 95), Duration::ZERO);
+    }
 }
 
 #[derive(Default)]
@@ -844,7 +1128,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.29",
+            "iDared 32bit {}{}{} · Dev 2.30",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""

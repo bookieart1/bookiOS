@@ -13,6 +13,7 @@ use std::fmt::Debug;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 use zip::result::ZipError;
 use zip::ZipArchive;
 
@@ -78,6 +79,16 @@ pub enum BundleData {
     },
 }
 
+/// Bounded timing data for opening an app package. This is diagnostic-only:
+/// callers that do not need it continue to use [`BundleData::open_any`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BundleOpenTimings {
+    pub zip_open: Duration,
+    pub archive_validation: Duration,
+    pub bundle_discovery: Duration,
+    pub archive_entries: usize,
+}
+
 impl BundleData {
     fn find_bundle_path_in_archive(zip: &mut ZipArchive<std::fs::File>) -> Result<String, String> {
         for i in 0..zip.len() {
@@ -115,30 +126,46 @@ impl BundleData {
     }
 
     pub fn open_ipa(path: &Path) -> Result<BundleData, String> {
+        Self::open_ipa_timed(path).map(|(bundle, _)| bundle)
+    }
+
+    pub fn open_ipa_timed(path: &Path) -> Result<(BundleData, BundleOpenTimings), String> {
+        let mut timings = BundleOpenTimings::default();
+        let started = Instant::now();
         let file =
             std::fs::File::open(path).map_err(|e| format!("Could not open IPA file: {e}"))?;
         let mut zip =
             ZipArchive::new(file).map_err(|e| format!("Could not open IPA archive: {e}"))?;
+        timings.zip_open = started.elapsed();
+        timings.archive_entries = zip.len();
         // A damaged or incomplete file (e.g. an unfinished download) can have
         // entries that can't be read, so check them all here.
+        let started = Instant::now();
         for i in 0..zip.len() {
             zip.by_index(i)
                 .map_err(|e| format!("The IPA file is damaged or incomplete: {e}"))?;
         }
+        timings.archive_validation = started.elapsed();
+        let started = Instant::now();
         let bundle_path = Self::find_bundle_path_in_archive(&mut zip)?;
-        Ok(BundleData::Zip { zip, bundle_path })
+        timings.bundle_discovery = started.elapsed();
+        Ok((BundleData::Zip { zip, bundle_path }, timings))
     }
 
     pub fn open_any(path: &Path) -> Result<BundleData, String> {
+        Self::open_any_timed(path).map(|(bundle, _)| bundle)
+    }
+
+    pub fn open_any_timed(path: &Path) -> Result<(BundleData, BundleOpenTimings), String> {
         if path.is_file()
             && path
                 .extension()
                 .map(|ext| ext.eq_ignore_ascii_case("ipa"))
                 .unwrap_or(false)
         {
-            Ok(Self::open_ipa(path)?)
+            Self::open_ipa_timed(path)
         } else if path.is_dir() {
-            Ok(Self::open_host_dir(path)?)
+            Ok((Self::open_host_dir(path)?, BundleOpenTimings::default()))
         } else {
             Err(format!(
                 "{} is not a directory or an IPA file",

@@ -143,6 +143,7 @@ Special options:
 ";
 
 pub fn main<T: Iterator<Item = String>>(mut args: T) -> Result<(), String> {
+    let _ = PERFORMANCE_PROCESS_START.get_or_init(std::time::Instant::now);
     echo!(
         "iDared 32bit {}{}{} — https://idared32bit-emu.com/ (based on touchHLE)",
         branding(),
@@ -175,6 +176,7 @@ pub fn main<T: Iterator<Item = String>>(mut args: T) -> Result<(), String> {
     let mut option_args = Vec::new();
     let mut options = options::Options::default();
     let mut app_args = None::<Vec<String>>;
+    let mut returning_to_picker = false;
 
     for arg in args {
         if let Some(ref mut app_args) = app_args {
@@ -218,6 +220,7 @@ pub fn main<T: Iterator<Item = String>>(mut args: T) -> Result<(), String> {
                 &option_args,
                 &options,
                 &app_args,
+                returning_to_picker,
             )
         }));
         let return_to_app_picker = match res {
@@ -242,7 +245,19 @@ pub fn main<T: Iterator<Item = String>>(mut args: T) -> Result<(), String> {
         // Show the picker on the next iteration rather than relaunching the
         // directly-launched app.
         bundle_path = None;
+        returning_to_picker = true;
     }
+}
+
+static PERFORMANCE_PROCESS_START: std::sync::OnceLock<std::time::Instant> =
+    std::sync::OnceLock::new();
+
+pub(crate) fn performance_process_elapsed_ms() -> f64 {
+    PERFORMANCE_PROCESS_START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_secs_f64()
+        * 1000.0
 }
 
 /// Run an app or the app picker.
@@ -253,6 +268,7 @@ fn run_app(
     option_args: &[String],
     options: &options::Options,
     app_args: &Option<Vec<String>>,
+    returning_to_picker: bool,
 ) -> Result<bool, String> {
     let mut option_args = option_args.to_vec();
     let mut options = options.clone();
@@ -274,10 +290,17 @@ fn run_app(
         echo!(
             "No app specified, opening app picker. Use the --help flag to see command-line usage."
         );
-        let (bundle_path, mut extra_options) = environment::app_picker::app_picker(options)?;
+        let invocation = if returning_to_picker {
+            environment::app_picker::PickerInvocation::ReturnFromGame
+        } else {
+            environment::app_picker::PickerInvocation::ColdStart
+        };
+        let (bundle_path, mut extra_options) =
+            environment::app_picker::app_picker(options, invocation)?;
         option_args.append(&mut extra_options);
         bundle_path
     };
+    let launch_started = std::time::Instant::now();
 
     // When PowerShell does tab-completion on a directory, for some reason it
     // expands it to `'..\My Bundle.app\'` and that trailing \ seems to
@@ -287,9 +310,10 @@ fn run_app(
         log!("Warning: The bundle path has a trailing quotation mark! This often happens accidentally on Windows when tab-completing, because '\\\"' gets interpreted by Rust in the wrong way. Did you meant to write {:?}?", fixed);
     }
 
-    let bundle_data = fs::BundleData::open_any(&bundle_path)
+    let (bundle_data, open_timings) = fs::BundleData::open_any_timed(&bundle_path)
         .map_err(|e| format!("Could not open app bundle: {e}"))?;
-    let (bundle, fs) = match bundle::Bundle::new_bundle_and_fs_from_host_path(
+    let (bundle, fs, construction_timings) =
+        match bundle::Bundle::new_bundle_and_fs_from_host_path_timed(
         bundle_data,
         /* read_only_mode: */ false,
     ) {
@@ -297,7 +321,7 @@ fn run_app(
         Err(err) => {
             return Err(format!("Application bundle error: {err}. Check that the path is to an .app directory or an .ipa file."));
         }
-    };
+        };
 
     let app_id = bundle.bundle_identifier();
     let minimum_os_version = bundle.minimum_os_version();
@@ -414,6 +438,7 @@ fn run_app(
         assert!(parse_result == Ok(true));
     }
 
+    let environment_started = std::time::Instant::now();
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         Environment::new(
             bundle,
@@ -455,7 +480,50 @@ fn run_app(
             std::panic::resume_unwind(e)
         }
     };
-    Ok(env.run())
+    let environment_creation = environment_started.elapsed();
+    echo!("=== iDared Game Launch Performance ===");
+    echo!("Selected package: {}", bundle_path.display());
+    echo!(
+        "ZIP open/central directory: {:.3} ms",
+        open_timings.zip_open.as_secs_f64() * 1000.0
+    );
+    echo!(
+        "Archive entry validation:   {:.3} ms",
+        open_timings.archive_validation.as_secs_f64() * 1000.0
+    );
+    echo!(
+        "App bundle discovery:       {:.3} ms",
+        open_timings.bundle_discovery.as_secs_f64() * 1000.0
+    );
+    echo!(
+        "Info.plist read/parse:      {:.3} ms",
+        (construction_timings.info_plist_read + construction_timings.info_plist_parse)
+            .as_secs_f64()
+            * 1000.0
+    );
+    echo!(
+        "Selected-game filesystem:   {:.3} ms",
+        construction_timings.filesystem_creation.as_secs_f64() * 1000.0
+    );
+    echo!(
+        "Guest Environment creation: {:.3} ms",
+        environment_creation.as_secs_f64() * 1000.0
+    );
+    echo!(
+        "Selection return to guest run: {:.3} ms",
+        launch_started.elapsed().as_secs_f64() * 1000.0
+    );
+    echo!(
+        "Guest execution begins at process t={:.3} ms",
+        performance_process_elapsed_ms()
+    );
+    echo!("=== End iDared Game Launch Performance ===");
+    let result = env.run();
+    echo!(
+        "iDared Return Performance: guest run and Environment teardown returned at process t={:.3} ms",
+        performance_process_elapsed_ms()
+    );
+    Ok(result)
 }
 
 fn take_return_to_app_picker_after_error() -> bool {

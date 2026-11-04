@@ -170,6 +170,10 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
                 // even if Home is pressed again before we've returned.
                 if !env.return_to_app_picker {
                     log!("Handling HomeButton event: returning to app picker.");
+                    echo!(
+                        "iDared Return Performance: Home/exit requested at process t={:.3} ms",
+                        crate::performance_process_elapsed_ms()
+                    );
                     if !env.is_app_picker {
                         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                             ui_view::log_bounded_view_transition_history(env, "HomeButton");
