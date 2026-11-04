@@ -444,6 +444,34 @@ fn CFStringFind(
     }
 }
 
+fn CFStringFindWithOptions(
+    env: &mut Environment,
+    string: CFStringRef,
+    to_find: CFStringRef,
+    range: CFRange,
+    options: CFStringCompareFlags,
+    result: MutPtr<CFRange>,
+) -> bool {
+    let range = NSRange {
+        location: range.location.try_into().unwrap(),
+        length: range.length.try_into().unwrap(),
+    };
+    let found: NSRange = msg![env; string rangeOfString:to_find options:options range:range];
+    if found.location == NSNotFound as NSUInteger {
+        return false;
+    }
+    if !result.is_null() {
+        env.mem.write(
+            result,
+            CFRange {
+                location: found.location.try_into().unwrap(),
+                length: found.length.try_into().unwrap(),
+            },
+        );
+    }
+    true
+}
+
 fn CFStringHasSuffix(env: &mut Environment, the_string: CFStringRef, suffix: CFStringRef) -> bool {
     msg![env; the_string hasSuffix:suffix]
 }
@@ -545,6 +573,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFStringGetFastestEncoding(_)),
     export_c_func!(CFStringGetSmallestEncoding(_)),
     export_c_func!(CFStringFind(_, _, _)),
+    export_c_func!(CFStringFindWithOptions(_, _, _, _, _)),
     export_c_func!(CFStringHasSuffix(_, _)),
     export_c_func!(CFStringUppercase(_, _)),
     export_c_func!(CFStringCreateWithPascalString(_, _, _)),
@@ -562,7 +591,10 @@ mod tests {
     #[test]
     fn supported_iana_charset_names_are_canonical() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        assert_eq!(CFStringGetSystemEncoding(&mut env), kCFStringEncodingMacRoman);
+        assert_eq!(
+            CFStringGetSystemEncoding(&mut env),
+            kCFStringEncodingMacRoman
+        );
         assert_eq!(
             iana_charset_name(kCFStringEncodingMacRoman),
             Some("macintosh")
@@ -604,5 +636,31 @@ mod tests {
         assert_ne!(string_type, 0);
         assert_eq!(CFGetTypeID(env, immutable), string_type);
         assert_eq!(CFGetTypeID(env, mutable), string_type);
+    }
+
+    #[test]
+    fn find_with_options_honors_the_supplied_range() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let haystack = from_rust_string(env, "one two TWO".to_owned());
+        let needle = from_rust_string(env, "two".to_owned());
+        let result = env.mem.alloc_and_write(CFRange {
+            location: -1,
+            length: 0,
+        });
+        assert!(CFStringFindWithOptions(
+            env,
+            haystack,
+            needle,
+            CFRange {
+                location: 4,
+                length: 7
+            },
+            1,
+            result,
+        ));
+        let found = env.mem.read(result);
+        assert_eq!((found.location, found.length), (4, 3));
+        env.mem.free(result.cast());
     }
 }

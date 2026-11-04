@@ -204,6 +204,33 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 }
 
+- (bool)containsPasteboardTypes:(id)pasteboard_types {
+    if pasteboard_types == nil {
+        return false;
+    }
+    let count: NSUInteger = msg![env; pasteboard_types count];
+    for index in 0..count {
+        let pasteboard_type: id = msg![env; pasteboard_types objectAtIndex:index];
+        if pasteboard_type == nil {
+            continue;
+        }
+        let key = ns_string::to_rust_string(env, pasteboard_type).into_owned();
+        let host = env.objc.borrow::<PasteboardHostObject>(this);
+        if host.data.contains_key(&key) {
+            return true;
+        }
+        if host.string != nil
+            && matches!(
+                key.as_str(),
+                "public.text" | "public.plain-text" | "public.utf8-plain-text"
+            )
+        {
+            return true;
+        }
+    }
+    false
+}
+
 - (())dealloc {
     let (name, string, data) = {
         let host = env.objc.borrow_mut::<PasteboardHostObject>(this);
@@ -270,5 +297,19 @@ mod tests {
         let change_count: NSInteger = msg![env; board changeCount];
         assert_eq!(change_count, 1);
         release(env, pasteboard_type);
+    }
+
+    #[test]
+    fn contains_pasteboard_types_matches_typed_and_string_values() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let board: id = msg_class![env; UIPasteboard pasteboardWithUniqueName];
+        let value = ns_string::from_rust_string(env, "hello".to_owned());
+        () = msg![env; board setString:value];
+        let text_type = ns_string::from_rust_string(env, "public.utf8-plain-text".to_owned());
+        let types: id = msg_class![env; NSArray arrayWithObject:text_type];
+        assert!(msg![env; board containsPasteboardTypes:types]);
+        release(env, text_type);
+        release(env, value);
     }
 }

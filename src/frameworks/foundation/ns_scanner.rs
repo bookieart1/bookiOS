@@ -149,17 +149,51 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (bool)scanHexInt:(MutPtr<u32>)result {
-    assert!(!result.is_null());
     skip_characters(env, this);
 
-    let NSScannerHostObject { to_be_skipped: _set, string, len, pos } = env.objc.borrow::<NSScannerHostObject>(this).clone();
-    assert!(pos < len);
-    let susbstring: id = msg![env; string substringFromIndex:pos];
-    let tmp = to_rust_string(env, susbstring);
-    assert!(!tmp.starts_with("0x") && !tmp.starts_with("0X"));
-    assert!(!tmp.chars().next().unwrap().is_ascii_hexdigit()); // TODO
-    env.mem.write(result, 0);
-    false
+    let NSScannerHostObject { string, len, pos, .. } =
+        env.objc.borrow::<NSScannerHostObject>(this).clone();
+    if pos >= len {
+        return false;
+    }
+
+    let mut cursor = pos;
+    if cursor + 2 <= len {
+        let zero: unichar = msg![env; string characterAtIndex:cursor];
+        let x: unichar = msg![env; string characterAtIndex:cursor + 1];
+        if zero == b'0' as unichar && (x == b'x' as unichar || x == b'X' as unichar) {
+            cursor += 2;
+        }
+    }
+
+    let digits_start = cursor;
+    let mut value = 0u32;
+    let mut overflowed = false;
+    while cursor < len {
+        let c: unichar = msg![env; string characterAtIndex:cursor];
+        let digit = match c {
+            c if (b'0' as unichar..=b'9' as unichar).contains(&c) => u32::from(c - b'0' as unichar),
+            c if (b'a' as unichar..=b'f' as unichar).contains(&c) => u32::from(c - b'a' as unichar) + 10,
+            c if (b'A' as unichar..=b'F' as unichar).contains(&c) => u32::from(c - b'A' as unichar) + 10,
+            _ => break,
+        };
+        value = match value.checked_mul(16).and_then(|v| v.checked_add(digit)) {
+            Some(value) if !overflowed => value,
+            _ => {
+                overflowed = true;
+                u32::MAX
+            }
+        };
+        cursor += 1;
+    }
+    if cursor == digits_start {
+        return false;
+    }
+    env.objc.borrow_mut::<NSScannerHostObject>(this).pos = cursor;
+    if !result.is_null() {
+        env.mem.write(result, value);
+    }
+    true
 }
 
 - (bool)scanUpToString:(id)stop_string // NSString *
@@ -419,5 +453,23 @@ mod tests {
         assert_eq!(floating_point_prefix_len("1.e2!"), Some(4));
         assert_eq!(floating_point_prefix_len("1e+tail"), Some(1));
         assert_eq!(floating_point_prefix_len("+tail"), None);
+    }
+
+    #[test]
+    fn hexadecimal_scanner_accepts_prefix_null_output_and_saturates() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let input = from_rust_string(env, "  0x1f 100000000tail".to_owned());
+        let scanner: id = msg_class![env; NSScanner scannerWithString:input];
+        let output = env.mem.alloc_and_write(0u32);
+        let first: bool = msg![env; scanner scanHexInt:output];
+        assert!(first);
+        assert_eq!(env.mem.read(output), 31);
+        let second: bool = msg![env; scanner scanHexInt:MutPtr::<u32>::null()];
+        assert!(second);
+        let location: NSUInteger = msg![env; scanner scanLocation];
+        assert_eq!(location, 16);
+        env.mem.free(output.cast());
+        release(env, input);
     }
 }

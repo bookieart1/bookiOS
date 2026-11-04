@@ -63,15 +63,20 @@ corpus, passed as the Dev 2.25 general control. Complete evidence and the other
 eight titles are recorded in
 [the Dev 2.25 result](dev-2.25-exact-system-contracts.md).
 
-## Planned follow-up: Dev 2.26
+## Later physical evidence: Dev 2.26
 
-All thirteen titles from the Dev 2.25 pass remain represented. Cannon Cadets,
-Clowning Around, Kick the Buddy, Labyrinth 2, Mini Militia, Sonic Dash,
-Trainyard and ZombieSmash have later general contract work. Cordy, Guerrilla
-Bob and Muffin Knight have narrowly bounded causal probes where a compatibility
-change would currently be unsafe. Current is the URL-loading control and Spoing
-is the general control. Exact changes and non-goals are recorded in
-[the Dev 2.26 scope](dev-2.26-later-contracts-and-causal-probes.md).
+The exact delivered build is `eeb7775`, workflow `41816961881`. Cannon Cadets,
+Clowning Around, Kick the Buddy, Labyrinth 2, Trainyard and ZombieSmash crossed
+the Dev 2.26 boundary. Current's 162 touch events reach its interactive EAGL
+view but are not consumed into visible actions. Muffin Knight remains in a
+symbolizable offline polling loop after two real `ENETUNREACH` results. Sonic
+Dash requests unsupported OpenGL ES 2 and displays a corrupted ES1 fallback.
+The user reports Guerrilla Bob working in the tested scope and Spoing remains a
+healthy control. Mini Militia is removed from routine compatibility batches at
+the user's request because its remaining path combines orientation and obsolete
+online/GameKit behavior. Exact evidence and the next queue are recorded in
+[the Dev 2.26 result](dev-2.26-device-result.md); the original predictions are
+preserved in [the Dev 2.26 scope](dev-2.26-later-contracts-and-causal-probes.md).
 
 ## Exact IPA mapping
 

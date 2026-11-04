@@ -111,6 +111,16 @@ pub const CLASSES: ClassExports = objc_classes! {
     0
 }
 
+- (bool)isDaylightSavingTime {
+    // The currently modelled zones are fixed-offset GMT zones and therefore
+    // never enter daylight-saving time.
+    false
+}
+
+- (bool)isDaylightSavingTimeForDate:(id)_date {
+    false
+}
+
 // NSCopying implementation
 - (id)copyWithZone:(NSZonePtr)_zone {
     retain(env, this)
@@ -139,5 +149,6 @@ mod tests {
 
         let invalid: id = msg![env; time_zone localizedName:6u32 locale:nil];
         assert_eq!(invalid, nil);
+        assert!(!msg![env; time_zone isDaylightSavingTime]);
     }
 }

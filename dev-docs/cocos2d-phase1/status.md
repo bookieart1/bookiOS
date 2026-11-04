@@ -1,5 +1,18 @@
 # Cocos2d project resume point
 
+**Dev 2.26 physical result (2026-11-04):** all three logs embed the exact
+delivered implementation `eeb7775480cb8bd7b76089fdcdf64d9f16db1b3f` and IPA
+workflow `41816961881`. Cannon Cadets, Clowning Around, Kick the Buddy,
+Labyrinth 2, Trainyard and ZombieSmash crossed their intended Dev 2.26
+boundaries and exposed later failures. Current receives 162 host-to-guest touch
+events on its full-screen EAGL view but ignores them later in the guest path;
+Muffin Knight is confirmed in a stable offline-connect polling loop; Sonic Dash
+requests unavailable OpenGL ES 2 and renders a corrupted ES1 fallback. The user
+reports Guerrilla Bob working, Spoing remains healthy, and Mini Militia is now
+explicitly dropped from routine work at the user's request. See
+[the complete result](dev-2.26-device-result.md). No subsequent implementation
+or build is authorized by this review.
+
 **Dev 2.26 implementation in progress (2026-11-04):** all thirteen Dev 2.25
 titles remain in one interpretable batch. Eight later exact contracts receive
 general corrections (gradient creation, progress-view state, visible table-cell

@@ -39,10 +39,11 @@ mod tests {
             .register_host_selector("description".to_owned(), &mut env.mem);
         let signature: id = msg![env; target methodSignatureForSelector:perform];
         assert_ne!(signature, nil);
-        let invocation: id =
-            msg_class![env; NSInvocation invocationWithMethodSignature:signature];
+        let invocation: id = msg_class![env; NSInvocation invocationWithMethodSignature:signature];
         () = msg![env; invocation setTarget:target];
         () = msg![env; invocation setSelector:perform];
+        let recorded_selector: SEL = msg![env; invocation selector];
+        assert_eq!(recorded_selector, perform);
         let selector_argument = env.mem.alloc_and_write(description);
         let selector_argument_raw: MutVoidPtr = selector_argument.cast();
         () = msg![env; invocation setArgument:selector_argument_raw atIndex:2i32];
@@ -177,6 +178,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     assert!(env.objc.borrow_mut::<NSInvocationHostObject>(this).selector.is_none()); // TODO
     env.objc.borrow_mut::<NSInvocationHostObject>(this).selector = Some(selector);
     record_invocation_state(env, "set-selector", this, -1);
+}
+
+- (SEL)selector {
+    env.objc
+        .borrow::<NSInvocationHostObject>(this)
+        .selector
+        .expect("NSInvocation selector requested before it was set")
 }
 
 - (())retainArguments {

@@ -30,6 +30,7 @@ struct NSOperationHostObject {
     target: id,
     selector: Option<SEL>,
     object: id,
+    invocation: id,
     cancelled: bool,
     executing: bool,
     finished: bool,
@@ -62,6 +63,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         target: nil,
         selector: None,
         object: nil,
+        invocation: nil,
         cancelled: false,
         executing: false,
         finished: false,
@@ -121,14 +123,23 @@ pub const CLASSES: ClassExports = objc_classes! {
     let host_object = env.objc.borrow::<NSOperationHostObject>(this);
     let target = host_object.target;
     let object = host_object.object;
+    let invocation = host_object.invocation;
     release(env, target);
     release(env, object);
+    release(env, invocation);
     env.objc.dealloc_object(this, &mut env.mem)
 }
 
 @end
 
 @implementation NSInvocationOperation: NSOperation
+
+- (id)initWithInvocation:(id)invocation {
+    assert_ne!(invocation, nil, "NSInvocationOperation requires an invocation");
+    retain(env, invocation);
+    env.objc.borrow_mut::<NSOperationHostObject>(this).invocation = invocation;
+    this
+}
 
 - (id)initWithTarget:(id)target selector:(SEL)selector object:(id)object {
     retain(env, target);
@@ -142,14 +153,21 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())main {
     let host_object = env.objc.borrow::<NSOperationHostObject>(this);
+    let invocation = host_object.invocation;
     let target = host_object.target;
     let selector = host_object.selector;
     let object = host_object.object;
-    if target != nil {
+    if invocation != nil {
+        let _: () = msg![env; invocation invoke];
+    } else if target != nil {
         if let Some(selector) = selector {
             let _: () = msg_send_no_type_checking(env, (target, selector, object));
         }
     }
+}
+
+- (id)invocation {
+    env.objc.borrow::<NSOperationHostObject>(this).invocation
 }
 
 - (id)result { nil }
@@ -273,3 +291,31 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objc::msg_class;
+
+    #[test]
+    fn invocation_operation_retains_and_invokes_its_invocation() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let target: id = msg_class![env; NSObject new];
+        let selector = env
+            .objc
+            .register_host_selector("description".to_owned(), &mut env.mem);
+        let signature: id = msg![env; target methodSignatureForSelector:selector];
+        let invocation: id = msg_class![env; NSInvocation invocationWithMethodSignature:signature];
+        () = msg![env; invocation setTarget:target];
+        () = msg![env; invocation setSelector:selector];
+        let operation: id = msg_class![env; NSInvocationOperation alloc];
+        let operation: id = msg![env; operation initWithInvocation:invocation];
+        let stored: id = msg![env; operation invocation];
+        assert_eq!(stored, invocation);
+        () = msg![env; operation start];
+        assert!(msg![env; operation isFinished]);
+        release(env, operation);
+        release(env, target);
+    }
+}

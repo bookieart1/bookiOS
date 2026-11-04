@@ -99,6 +99,10 @@ fn time(env: &mut Environment, out: MutPtr<time_t>) -> time_t {
     time
 }
 
+fn difftime(_env: &mut Environment, time1: time_t, time0: time_t) -> f64 {
+    f64::from(time1) - f64::from(time0)
+}
+
 fn tzset(_env: &mut Environment) {
     log!("TODO: tzset()");
 }
@@ -823,6 +827,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(clock()),
     export_c_func!(times(_)),
     export_c_func!(time(_)),
+    export_c_func!(difftime(_, _)),
     export_c_func!(tzset()),
     export_c_func!(gmtime_r(_, _)),
     export_c_func!(gmtime(_)),
@@ -834,3 +839,15 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(strptime(_, _, _)),
     export_c_func!(strftime(_, _, _, _)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn difftime_uses_double_precision_and_signed_order() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        assert_eq!(difftime(&mut env, 10, 4), 6.0);
+        assert_eq!(difftime(&mut env, 4, 10), -6.0);
+    }
+}

@@ -8,7 +8,7 @@
 //! Resources:
 //! - Apple's [Threading Programming Guide](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/Multithreading/Introduction/Introduction.html)
 
-use super::{ns_string, ns_timer, NSTimeInterval};
+use super::{ns_string, ns_timer, NSTimeInterval, NSUInteger};
 use crate::dyld::{ConstantExports, HostConstant};
 use crate::environment::ThreadId;
 use crate::frameworks::audio_toolbox::audio_queue::{handle_audio_queue, AudioQueueRef};
@@ -78,6 +78,7 @@ struct ObjectSelectorSource {
     selector: SEL,
     argument: id,
     due_by: Option<Instant>,
+    order: NSUInteger,
     // Used for waitUntilDone:, (uses NULL if not waiting)
     semaphore: MutPtr<sem_t>,
 }
@@ -109,6 +110,21 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())cancelPerformSelectorsWithTarget:(id)target {
     cancel_all_perform_requests_for_target(env, this, target);
+}
+
+- (())performSelector:(SEL)selector
+                target:(id)target
+              argument:(id)argument
+                 order:(NSUInteger)order
+                 modes:(id)modes {
+    // Mode-specific queues are not distinguished yet, but an empty modes
+    // array schedules nothing. This preserves the observable next-iteration,
+    // ordering and ownership contracts without pretending to emulate private
+    // run-loop modes separately.
+    if modes == nil || msg![env; modes count] == 0u32 {
+        return;
+    }
+    add_perform_request_with_order(env, this, target, selector, argument, Some(0.0), false, order);
 }
 
 - (())addTimer:(id)timer // NSTimer*
@@ -326,6 +342,28 @@ pub(crate) fn add_perform_request(
     delay: Option<f64>,
     should_sync: bool,
 ) -> MutPtr<sem_t> {
+    add_perform_request_with_order(
+        env,
+        run_loop,
+        target,
+        selector,
+        argument,
+        delay,
+        should_sync,
+        0,
+    )
+}
+
+fn add_perform_request_with_order(
+    env: &mut Environment,
+    run_loop: id,
+    target: id,
+    selector: SEL,
+    argument: id,
+    delay: Option<f64>,
+    should_sync: bool,
+    order: NSUInteger,
+) -> MutPtr<sem_t> {
     log_dbg!(
         "Adding object selector request {target:?} {:?} {argument:?} on run loop {run_loop:?}",
         selector.as_str(env.mem.as_mut())
@@ -355,13 +393,19 @@ pub(crate) fn add_perform_request(
             .checked_add(Duration::from_secs_f64(dur))
             .unwrap()
     });
-    selector_objects.push_back(ObjectSelectorSource {
+    let request = ObjectSelectorSource {
         target,
         selector,
         argument,
         due_by,
+        order,
         semaphore,
-    });
+    };
+    let insertion = selector_objects
+        .iter()
+        .position(|candidate| candidate.order > order)
+        .unwrap_or(selector_objects.len());
+    selector_objects.insert(insertion, request);
     semaphore
 }
 
@@ -641,6 +685,7 @@ pub fn run_run_loop(
                         selector,
                         argument,
                         due_by: _,
+                        order: _,
                         semaphore,
                     } = selector_objects.remove(index).unwrap();
                     log_dbg!("Running object selector request {target:?} {:?} {argument:?} on run loop {run_loop:?}", selector.as_str(env.mem.as_mut()));
@@ -800,5 +845,31 @@ mod tests {
             .timers
             .clear();
         assert!(!contains_timer(env, run_loop, timer));
+    }
+
+    #[test]
+    fn ordered_perform_requests_keep_lower_orders_first() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let run_loop: id = msg_class![env; NSRunLoop currentRunLoop];
+        let target: id = msg_class![env; NSObject new];
+        let selector = env
+            .objc
+            .register_host_selector("description".to_owned(), &mut env.mem);
+        let default_mode = ns_string::get_static_str(env, NSDefaultRunLoopMode);
+        let modes: id = msg_class![env; NSArray arrayWithObject:default_mode];
+        () = msg![env; run_loop performSelector:selector target:target argument:nil order:20u32 modes:modes];
+        () = msg![env; run_loop performSelector:selector target:target argument:nil order:5u32 modes:modes];
+        let queued = &env
+            .objc
+            .borrow::<NSRunLoopHostObject>(run_loop)
+            .selector_objects;
+        assert_eq!(
+            queued
+                .iter()
+                .map(|request| request.order)
+                .collect::<Vec<_>>(),
+            vec![5, 20]
+        );
     }
 }

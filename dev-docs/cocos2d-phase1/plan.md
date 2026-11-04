@@ -1,5 +1,17 @@
 # Cocos2d compatibility project: implementation roadmap
 
+**Dev 2.26 result and next decision (2026-11-04):** prioritize four direct
+general contracts: linear-gradient drawing for Cannon Cadets, mutable-set copy
+factory semantics for Kick the Buddy, invocation-backed scheduled timers for
+Labyrinth 2, and correction of the mutable-data method ABI/registration exposed
+by Trainyard. Research historical zero-row-byte bitmap semantics before adding
+ZombieSmash. Add only bounded failed-receiver provenance for Clowning Around
+and guest touch-callback/coordinate evidence for Current. Symbolize Muffin
+Knight offline before another device pass; treat Sonic Dash as a separate,
+high-cost OpenGL ES 2/fallback investigation. Mini Militia is dropped by user
+request. Full evidence, predictions and exclusions are in
+[the Dev 2.26 device result](dev-2.26-device-result.md).
+
 **Dev 2.26 active milestone (2026-11-04):** implement the eight evidence-backed
 later contracts exposed by Dev 2.25 and pair them with three bounded causal
 probes. Cordy remains standards-correctly non-HTTP for local files; Guerrilla

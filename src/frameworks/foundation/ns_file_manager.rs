@@ -71,9 +71,13 @@ fn NSSearchPathForDirectoriesInDomains(
     domain_mask: NSSearchPathDomainMask,
     expand_tilde: bool,
 ) -> id {
-    // TODO: other cases not implemented
-    assert!(domain_mask == NSUserDomainMask);
-    assert!(expand_tilde);
+    // iPhone applications can only observe their sandbox's user domain. A
+    // mask may name several domains (including NSAllDomainsMask); unavailable
+    // domains simply contribute no entries.
+    if domain_mask & NSUserDomainMask == 0 {
+        let empty = ns_array::from_vec(env, Vec::new());
+        return autorelease(env, empty);
+    }
 
     let dir = match directory {
         NSApplicationDirectory | NSAllApplicationsDirectory => {
@@ -96,7 +100,18 @@ fn NSSearchPathForDirectoriesInDomains(
             .join("Application Support"),
         _ => todo!("NSSearchPathDirectory {}", directory),
     };
-    let dir = ns_string::from_rust_string(env, String::from(dir));
+    let absolute = String::from(dir);
+    let path = if expand_tilde {
+        absolute
+    } else {
+        let home_directory = env.fs.home_directory();
+        let home = home_directory.as_str();
+        absolute
+            .strip_prefix(home)
+            .map(|suffix| format!("~{suffix}"))
+            .unwrap_or(absolute)
+    };
+    let dir = ns_string::from_rust_string(env, path);
     let dir_list = ns_array::from_vec(env, vec![dir]);
     autorelease(env, dir_list)
 }
@@ -216,6 +231,21 @@ pub const CLASSES: ClassExports = objc_classes! {
         env.framework_state.foundation.ns_file_manager.default_manager = Some(new);
         new
     }
+}
+
+- (id)URLsForDirectory:(NSSearchPathDirectory)directory
+             inDomains:(NSSearchPathDomainMask)domain_mask {
+    let paths = NSSearchPathForDirectoriesInDomains(env, directory, domain_mask, true);
+    let count: NSUInteger = msg![env; paths count];
+    let mut urls = Vec::with_capacity(count as usize);
+    for index in 0..count {
+        let path: id = msg![env; paths objectAtIndex:index];
+        let url: id = msg_class![env; NSURL alloc];
+        let url: id = msg![env; url initFileURLWithPath:path isDirectory:true];
+        urls.push(url);
+    }
+    let urls = ns_array::from_vec(env, urls);
+    autorelease(env, urls)
 }
 
 - (id)currentDirectoryPath {
@@ -758,5 +788,19 @@ mod tests {
         );
         let path: id = msg![&mut env; array objectAtIndex:0u32];
         assert!(ns_string::to_rust_string(&mut env, path).ends_with("/Library/Application Support"));
+    }
+
+    #[test]
+    fn domain_masks_return_only_available_user_paths() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let all_domains =
+            NSSearchPathForDirectoriesInDomains(&mut env, NSDocumentDirectory, 0xffff, true);
+        let count: NSUInteger = msg![&mut env; all_domains count];
+        assert_eq!(count, 1);
+
+        let system_only =
+            NSSearchPathForDirectoriesInDomains(&mut env, NSDocumentDirectory, 1 << 3, true);
+        let count: NSUInteger = msg![&mut env; system_only count];
+        assert_eq!(count, 0);
     }
 }

@@ -133,7 +133,9 @@ pub fn app_picker(
                 .join(paths::apps_dir())
                 .to_string_lossy()
         ),
-        state.as_ref().map_or("null".to_owned(), |state| state.page.to_string()),
+        state
+            .as_ref()
+            .map_or("null".to_owned(), |state| state.page.to_string()),
         state.as_ref().map_or("null".to_owned(), |state| {
             let values: Vec<String> = state
                 .quick_option_values
@@ -144,7 +146,7 @@ pub fn app_picker(
         }),
         json_string(branding),
         json_string(crate::DISPLAY_VERSION),
-        json_string("Dev 2.26"),
+        json_string("Dev 2.27"),
         json_string(&crate::licenses::get_text()),
         optional(paths::url_for_opening_user_data_dir().ok()),
         json_string("https://iDared32bit-emu.com/"),

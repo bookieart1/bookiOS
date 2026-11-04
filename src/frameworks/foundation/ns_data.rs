@@ -6,8 +6,8 @@
 //! `NSData` and `NSMutableData`.
 
 use super::ns_error::{
-    NSCocoaErrorDomain, NSFilePathErrorKey, NSFileReadNoSuchFileError,
-    NSFileWriteFileExistsError, NSFileWriteUnknownError,
+    NSCocoaErrorDomain, NSFilePathErrorKey, NSFileReadNoSuchFileError, NSFileWriteFileExistsError,
+    NSFileWriteUnknownError,
 };
 use super::ns_string::{from_rust_string, get_static_str, to_rust_string};
 use super::{NSRange, NSUInteger};
@@ -30,9 +30,8 @@ impl HostObject for NSDataHostObject {}
 const NS_DATA_READING_MAPPED_IF_SAFE: NSUInteger = 1 << 0;
 const NS_DATA_READING_UNCACHED: NSUInteger = 1 << 1;
 const NS_DATA_READING_MAPPED_ALWAYS: NSUInteger = 1 << 3;
-const NS_DATA_READING_KNOWN_OPTIONS: NSUInteger = NS_DATA_READING_MAPPED_IF_SAFE
-    | NS_DATA_READING_UNCACHED
-    | NS_DATA_READING_MAPPED_ALWAYS;
+const NS_DATA_READING_KNOWN_OPTIONS: NSUInteger =
+    NS_DATA_READING_MAPPED_IF_SAFE | NS_DATA_READING_UNCACHED | NS_DATA_READING_MAPPED_ALWAYS;
 const NS_DATA_WRITING_ATOMIC: NSUInteger = 1 << 0;
 const NS_DATA_WRITING_WITHOUT_OVERWRITING: NSUInteger = 1 << 1;
 const NS_DATA_WRITING_KNOWN_OPTIONS: NSUInteger =
@@ -85,9 +84,7 @@ fn write_to_file(
 
     let unknown_options = options & !NS_DATA_WRITING_KNOWN_OPTIONS;
     if unknown_options != 0 {
-        log!(
-            "Warning: NSData write uses unknown option bits {unknown_options:#x}; ignoring them"
-        );
+        log!("Warning: NSData write uses unknown option bits {unknown_options:#x}; ignoring them");
     }
 
     let file = to_rust_string(env, path);
@@ -111,7 +108,8 @@ fn write_to_file(
     let slice = if host_object.length == 0 {
         &[]
     } else {
-        env.mem.bytes_at(host_object.bytes.cast(), host_object.length)
+        env.mem
+            .bytes_at(host_object.bytes.cast(), host_object.length)
     };
 
     let result = if options & NS_DATA_WRITING_ATOMIC != 0 {
@@ -150,9 +148,7 @@ fn init_with_contents_of_file(
 ) -> id {
     let unknown_options = options & !NS_DATA_READING_KNOWN_OPTIONS;
     if unknown_options != 0 {
-        log!(
-            "Warning: NSData read uses unknown option bits {unknown_options:#x}; ignoring them"
-        );
+        log!("Warning: NSData read uses unknown option bits {unknown_options:#x}; ignoring them");
     }
     // The defined options are caching/mapping hints. The guest filesystem
     // currently provides owned bytes, so an eager read has the same visible
@@ -406,6 +402,18 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.borrow::<NSDataHostObject>(this).length
 }
 
+- (id)subdataWithRange:(NSRange)range {
+    let host = env.objc.borrow::<NSDataHostObject>(this);
+    let end = range.location.checked_add(range.length).expect("NSData range overflow");
+    assert!(end <= host.length, "subdataWithRange: is outside NSData bounds");
+    if range.length == 0 {
+        return msg_class![env; NSData data];
+    }
+    let start: MutPtr<u8> = host.bytes.cast();
+    let start: ConstVoidPtr = (start + range.location).cast_const().cast();
+    msg_class![env; NSData dataWithBytes:start length:range.length]
+}
+
 - (bool)isEqualToData:(id)other {
     // FIXME: Avoid allocation
     let a = to_rust_slice(env, this).to_owned();
@@ -653,6 +661,20 @@ mod tests {
     }
 
     #[test]
+    fn subdata_with_range_copies_the_requested_bytes() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let bytes = env.mem.alloc(4);
+        env.mem
+            .bytes_at_mut(bytes.cast(), 4)
+            .copy_from_slice(&[1, 2, 3, 4]);
+        let data: id = msg_class![env; NSData dataWithBytes:bytes.cast_const() length:4u32];
+        let subdata: id = msg![env; data subdataWithRange:NSRange { location: 1, length: 2 }];
+        assert_eq!(to_rust_slice(env, subdata), &[2, 3]);
+        env.mem.free(bytes.cast());
+    }
+
+    #[test]
     fn mutable_data_capacity_provides_stable_writable_storage() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
@@ -666,7 +688,11 @@ mod tests {
         () = msg![env; data setLength:16u32];
         let bytes_after: MutVoidPtr = msg![env; data mutableBytes];
         assert_eq!(bytes_after, bytes_before);
-        assert!(env.mem.bytes_at(bytes_after.cast(), 16).iter().all(|&byte| byte == 0));
+        assert!(env
+            .mem
+            .bytes_at(bytes_after.cast(), 16)
+            .iter()
+            .all(|&byte| byte == 0));
     }
 
     #[test]
@@ -681,8 +707,7 @@ mod tests {
         // Dirt reaches this API with +URLWithString: after prefixing its
         // bundle path with file:// and percent-escaping it, rather than with
         // +fileURLWithPath:. Exercise that complete shared contract here.
-        let url_string =
-            from_rust_string(env, "file:///missing%20dirt%20resource".to_string());
+        let url_string = from_rust_string(env, "file:///missing%20dirt%20resource".to_string());
         let url: id = msg_class![env; NSURL alloc];
         let url: id = msg![env; url initWithString:url_string];
         assert!(msg![env; url isFileURL]);
@@ -733,7 +758,10 @@ mod tests {
         let user_info: id = msg![env; error userInfo];
         let key = get_static_str(env, NSFilePathErrorKey);
         let reported_path: id = msg![env; user_info objectForKey:key];
-        assert_eq!(to_rust_string(env, reported_path), "/missing-parent/toybot-save.dat");
+        assert_eq!(
+            to_rust_string(env, reported_path),
+            "/missing-parent/toybot-save.dat"
+        );
 
         env.mem.free(out_error.cast());
         release(env, sentinel);

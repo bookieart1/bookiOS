@@ -1,9 +1,9 @@
 # iDared 32-bit tested-app compatibility ledger
 
-Last reconciled: November 1, 2026
-Latest device-tested checkpoint: **iDared Dev 1.84** (`e5045fb`; three-part focused result; Dev 1.71 remains the latest full-catalog survey)
-Latest built checkpoint: **iDared Dev 1.84** (`e5045fb`; hosted tests, package and physical-device result verified)
-Current activity: **Dev 1.85 is implementing four bounded shared contracts: `NSDate` keyed encoding for Glowfish, `UISlider.setContinuous:` for Toy Bot 1/2 with Crazy Golf as a regression, `UIFont.fontName` for Fragger/Cube, and run-loop target cancellation for Rolando/junny. Dev 1.84's deferred host-orientation request did not improve Hamlet or Glowfish HD and correlated with two reproducible whole-host exits at native keyboard presentation, so the ordering change is reverted to the Dev 1.83 keyboard-safe path. Parachute Ninja remains strict at a real UIApplication supplied as an error-like callback value; no selector fabrication is included. Blot and Spoing remain healthy, Dirt was not retested in this split run, and the universal recorder remains unchanged.**
+Last reconciled: November 4, 2026
+Latest device-tested checkpoint: **iDared Dev 2.26**, implementation `eeb7775480cb8bd7b76089fdcdf64d9f16db1b3f`, IPA workflow `41816961881`; three supplied logs cover all thirteen requested launches.
+Latest built checkpoint: **iDared Dev 2.26**, same embedded implementation and workflow. Build verification and physical-device compatibility remain separate evidence categories.
+Current activity: **Dev 2.27 is the user-authorized exact-Foundation batch. Twelve general historical contracts cover fourteen requested games: 100 Chambers, BikeRacePro, Carnival, Dismount, Fieldrunners, Fieldrunners 2, Legends of Ooo, MX Mayhem, NinJump, ParaPanic HD, Scribblenauts, Super Hexagon, The Sims 3 and Wire Way. All fourteen are pinned first in the picker. No physical result is claimed before device testing.**
 
 The maintainer review at the end of this ledger qualifies earlier implementation claims. In particular, Dev 1.47's font fallback is provisional, its arc implementation is approximate, and its date formatter is not locale/time-zone complete. Earlier sections are historical checkpoints, not a claim that all listed work is currently complete.
 
@@ -4211,3 +4211,79 @@ physical testing, and none of the diagnostics changes guest behavior.
 
 The exact implementation boundary, prediction and falsifier for each title are
 in `cocos2d-phase1/dev-2.26-later-contracts-and-causal-probes.md`.
+
+## Dev 2.26 physical-device result — November 4, 2026
+
+All three returned logs identify implementation
+`eeb7775480cb8bd7b76089fdcdf64d9f16db1b3f` and workflow `41816961881`.
+Every eligible launch retained the universal recorder. The complete hashes,
+per-title evidence and next actions are in
+`cocos2d-phase1/dev-2.26-device-result.md`.
+
+| App | Verified Dev 2.26 result | Current decision |
+|---|---|---|
+| Cannon Cadets | Crosses gradient creation, then lacks `_CGContextDrawLinearGradient`. | Safe general drawing contract is next. |
+| Clowning Around | Crosses `UIProgressView`; 112 frames precede an absent host-object lookup during stage-select animation. | Record the exact failed receiver/generation; do not tolerate unregistered objects. |
+| Cordy | Repeats `statusCode` sent to a local-file `NSURLResponse` at caller `0x008f6320`. | Symbolize guest caller; no fake HTTP response. |
+| Current | User sees an unresponsive menu, but 162 touches reach the full-screen EAGL view and 1,965 frames present. | Trace guest callback arguments/coordinates; basic hit-testing theory is rejected. |
+| Guerrilla Bob | User reports working; 2,621 presentations and clean Home return. | Working in tested scope; no immediate retest. |
+| Kick the Buddy | Crosses image decode and reaches missing `+[NSMutableSet setWithSet:]`. | Safe general Foundation factory/copy contract. |
+| Labyrinth 2 | Crosses visible-cell lookup and reaches missing invocation-backed scheduled timer. | Safe general timer contract with run-loop/ownership tests. |
+| Mini Militia | Still wrong orientation/offline; teardown reaches missing `GKMatchmaker`. | Dropped from routine work at user's request; preserve for explicit GameKit work only. |
+| Muffin Knight | Two honest offline connects fail, then main thread loops at `0x015b3b50..0x015b3be0`; Home cannot be handled. | Offline symbolization first; no fake network or watchdog. |
+| Sonic Dash | Runs but is severely corrupted after ES2 creation returns nil and an ES1 fallback renders. | Separate high-cost ES2/fallback investigation; no small safe patch established. |
+| Trainyard | Mutable-data initializer now hits strict typed-dispatch mismatch; bundle DB also receives denied writable open. | Correct method ABI/registration first, then reassess DB path. |
+| ZombieSmash | XML cancellation crosses; later bitmap creation passes caller storage with zero row bytes. | Research historical contract and preserve buffer safety before patching. |
+| Spoing | Working control passes. | Retain only when relevant to changed subsystems. |
+
+This result is evidence and planning only. It does not authorize or claim a
+subsequent compatibility implementation, commit, push or IPA.
+
+## New-game encryption inventory — November 4, 2026
+
+Seven supplied evidence files from Dev 2.26 implementation
+`eeb7775480cb8bd7b76089fdcdf64d9f16db1b3f` were indexed without performing a
+runtime compatibility analysis. Across 70 unique titles, ten packages are
+explicitly encrypted, one (Burrito Bison) is explicitly reported as badly
+decrypted, and 59 show no encryption blocker. Repeated launches and the later
+Legends of Ooo confirmation were de-duplicated by bundle identifier.
+
+The exact title/package mapping, evidence hashes and the user's deferred visual
+observations are preserved in
+`new-game-encryption-survey-2026-11-04.md`. The preceding Dev 2.26 compatibility
+result remains the current analyzed compatibility checkpoint. No emulator code,
+commit, push, or IPA build is authorized or produced by this inventory.
+
+## Replacement-package runtime triage — November 4, 2026
+
+The combined Dev 2.26 log at implementation `eeb7775480cb8bd7b76089fdcdf64d9f16db1b3f`
+materially revises three package-only conclusions. A decrypted JellyCar 1.5.4
+reaches an autorelease-pool use-after-deallocation at a reused `NSNumber`
+address; a decrypted Sky Burger 1.2.2 reaches missing `UIActionSheet`; and a
+decrypted full-version TowerBloxx 2.0.26 reaches missing
+`UIPickerView.dataSource` during nib outlet connection. Nyan Cat ran in the
+observed scope and is excluded from further repair work at the user's request.
+
+The survey also establishes a prioritized cross-library queue. Exact
+Foundation/POSIX contracts are first, legacy UIKit controls second, bounded
+autorelease/lifetime provenance third, followed by audio conversion,
+graphics-state capture, null-producer tracing, and CPU/host/service evidence.
+The complete title mapping, repeated-versus-new boundaries, predictions, and
+external/package exclusions are in `new-game-runtime-triage-2026-11-04.md`.
+This was analysis and documentation only; no source implementation or IPA was
+created.
+
+## Dev 2.27 authorized exact-Foundation batch — November 4, 2026
+
+The user authorized the complete fourteen-title batch rather than a smaller
+single-contract build. Every requested title maps to changed compatibility
+code; BikeRacePro and Legends of Ooo share file-manager URL enumeration, while
+Carnival and Wire Way share correct short-read behavior. The remaining ten
+titles each exercise a distinct general Foundation/Core Foundation/UIKit/libc
+contract. No bundle-identifier branch, fake service success, relaxed memory
+safety or crash suppression is included.
+
+The exact contract, implementation boundary, prediction and falsifier for each
+title are preserved in `dev-2.27-exact-foundation-contracts.md`. Source and host
+tests are implementation evidence only. The ledger must not promote any title
+until the verified artifact is exercised on the physical device.

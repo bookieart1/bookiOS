@@ -292,26 +292,32 @@ fn enumerate_apps(
     // library. Everything else remains alphabetical.
     // Normalized display names cover the mixed archive naming in this batch;
     // matching is exact or a version-suffixed prefix, never a substring.
-    const DEV_226_TEST_NAMES: &[&str] = &[
-        "CANNON CADETS",
-        "CLOWNING AROUND",
-        "CORDY",
-        "CURRENT",
-        "GUERRILLA BOB",
-        "KICK THE BUDDY",
-        "LABYRINTH 2",
-        "MINI MILITIA",
-        "MUFFIN KNIGHT",
-        "SONIC DASH",
-        "SPOING",
-        "TRAINYARD",
-        "ZOMBIESMASH",
+    const DEV_227_TEST_NAMES: &[&str] = &[
+        "100CHAMBERS",
+        "BIKERACEPRO",
+        "CARNIVAL",
+        "DISMOUNT",
+        "FIELDRUNNERS",
+        "FIELDRUNNERS2",
+        "LEGENDSOFOOO",
+        "MXMAYHEM",
+        "NINJUMP",
+        "PARAPANICHD",
+        "SCRIBBLENAUTS",
+        "SUPERHEXAGON",
+        "THESIMS3",
+        "WIREWAY",
     ];
     apps.sort_by_key(|app| {
-        let display_name = app.display_name.to_uppercase().replace('’', "'");
-        let is_test = DEV_226_TEST_NAMES
+        let display_name: String = app
+            .display_name
+            .to_uppercase()
+            .chars()
+            .filter(|character| character.is_ascii_alphanumeric())
+            .collect();
+        let is_test = DEV_227_TEST_NAMES
             .iter()
-            .any(|&name| display_name == name || display_name.starts_with(&format!("{name} ")));
+            .any(|&name| display_name == name || display_name.starts_with(name));
         (!is_test, app.display_name.to_uppercase())
     });
 
@@ -820,7 +826,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.26",
+            "iDared 32bit {}{}{} · Dev 2.27",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""
