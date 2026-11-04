@@ -1983,8 +1983,7 @@ impl Environment {
     pub fn diagnostic_dump(&mut self, reason: &str) {
         if self.diagnostics.is_some() {
             self.framework_state
-                .opengles
-                .log_visual_history(reason);
+                .log_opengles_visual_history(reason);
         }
         if let Some(recorder) = &mut self.diagnostics {
             if !recorder.dumped {

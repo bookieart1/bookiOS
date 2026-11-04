@@ -14,7 +14,7 @@ object success.
 | Bungee Ball | New targeted diagnostic | Retains the newest resource/path/file Objective-C boundaries with receiver and two decoded arguments. | The nil NSString failure should be preceded by the resource producer or missing argument path. No correlated event falsifies this capture strategy. |
 | Decoloro | New targeted diagnostic | Touch history now records the touched view class, superview, layer, controller, interaction/multitouch flags and gesture count; final GL visual history is also retained. | The exit log should distinguish an interactive live view with no presenting surface from a wrong/disabled receiver. |
 | EPOCH | New targeted diagnostic | Retains AVURLAsset/AVPlayerItem identity and status/error lifecycle plus KVO registration/change/delivery. | The null failure should correlate to a concrete item/observer/key path ordering. An empty media/KVO history despite reaching status falsifies the hook coverage. |
-| Flip's Escape | New targeted diagnostic | Retains the last 64 texture, viewport/scissor, matrix, client-array and draw calls independently of `glGetError`. | The corrupted final frame should expose a texture/pointer/state transition; a normal-looking history means a deeper host-side texture snapshot is needed. |
+| Flip's Escape | New targeted diagnostic | Retains the last 32 texture, viewport/scissor, matrix, client-array and draw calls independently of `glGetError`. | The corrupted final frame should expose a texture/pointer/state transition; a normal-looking history means a deeper host-side texture snapshot is needed. |
 | Parachute Ninja | New targeted diagnostic | Retains callback-like target/action/response/unpack Objective-C boundaries and decoded arguments. | The `domain` dispatch should become traceable to a Plus+/ngmoco callback target or argument producer. |
 | Peggle | Existing Dev 2.20 diagnostic | Preserves 32 candidate draw/framebuffer calls whenever error `0x506` is observed. | The next compositor/guest error should identify its immediately preceding candidate sequence. |
 | Ragdoll 3 | Existing Dev 2.20 semantic correction | Preserves historically absent `hw.l2cachesize` behavior (`ENOENT`). | The title should cross or intentionally handle that optional sysctl. |
@@ -39,7 +39,7 @@ object success.
 ## Boundedness and validation
 
 The new recorder storage is fixed: 64 focused Objective-C boundaries, 64 KVO
-events, 32 media events and 64 GL visual calls. It performs no per-event log
+events, 32 media events and 32 GL visual calls. It performs no per-event log
 output during gameplay. GL history is dumped only once on return or failure;
 dispatch provenance is printed only at an actual strict dispatch failure.
 

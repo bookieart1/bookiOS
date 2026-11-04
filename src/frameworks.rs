@@ -57,6 +57,12 @@ pub struct State {
     uikit: uikit::State,
 }
 
+impl State {
+    pub(crate) fn log_opengles_visual_history(&mut self, reason: &str) {
+        self.opengles.log_visual_history(reason);
+    }
+}
+
 /// Container for thread local state of various child modules
 #[derive(Default)]
 pub struct ThreadLocalState {
