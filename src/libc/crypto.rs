@@ -191,6 +191,14 @@ fn CC_SHA256(env: &mut Environment, data: ConstVoidPtr, len: u32, md: MutPtr<u8>
     md
 }
 
+fn CC_SHA512(env: &mut Environment, data: ConstVoidPtr, len: u32, md: MutPtr<u8>) -> MutPtr<u8> {
+    let mut hasher = Sha512::new();
+    hasher.update(env.mem.bytes_at(data.cast(), len));
+    let digest = hasher.finalize();
+    env.mem.bytes_at_mut(md, 64).copy_from_slice(&digest[..]);
+    md
+}
+
 /// All state lives in the app's context, so apps can copy it.
 #[allow(non_camel_case_types)]
 #[repr(C, packed)]
@@ -512,6 +520,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CC_SHA1_Update(_, _, _)),
     export_c_func!(CC_SHA1_Final(_, _)),
     export_c_func!(CC_SHA256(_, _, _)),
+    export_c_func!(CC_SHA512(_, _, _)),
     export_c_func!(CC_SHA256_Init(_)),
     export_c_func!(CC_SHA256_Update(_, _, _)),
     export_c_func!(CC_SHA256_Final(_, _)),
@@ -575,6 +584,27 @@ mod tests {
             &[
                 0x23, 0x09, 0x7d, 0x22, 0x34, 0x05, 0xd8, 0x22, 0x86, 0x42, 0xa4, 0x77, 0xbd, 0xa2,
                 0x55, 0xb3, 0x2a, 0xad, 0xbc, 0xe4, 0xbd, 0xa0, 0xb3, 0xf7, 0xe3, 0x6c, 0x9d, 0xa7,
+            ]
+        );
+    }
+    #[test]
+    fn one_shot_sha512_matches_standard_vector() {
+        let mut env = Environment::new_fake_for_test();
+        let data = env.mem.alloc(3).cast::<u8>();
+        env.mem.bytes_at_mut(data, 3).copy_from_slice(b"abc");
+        let digest = env.mem.alloc(64).cast::<u8>();
+        assert_eq!(
+            CC_SHA512(&mut env, data.cast_const().cast(), 3, digest),
+            digest
+        );
+        assert_eq!(
+            env.mem.bytes_at(digest, 64),
+            &[
+                0xdd, 0xaf, 0x35, 0xa1, 0x93, 0x61, 0x7a, 0xba, 0xcc, 0x41, 0x73, 0x49, 0xae,
+                0x20, 0x41, 0x31, 0x12, 0xe6, 0xfa, 0x4e, 0x89, 0xa9, 0x7e, 0xa2, 0x0a, 0x9e,
+                0xee, 0xe6, 0x4b, 0x55, 0xd3, 0x9a, 0x21, 0x92, 0x99, 0x2a, 0x27, 0x4f, 0xc1,
+                0xa8, 0x36, 0xba, 0x3c, 0x23, 0xa3, 0xfe, 0xeb, 0xbd, 0x45, 0x4d, 0x44, 0x23,
+                0x64, 0x3c, 0xe8, 0x0e, 0x2a, 0x9a, 0xc9, 0x4f, 0xa5, 0x4c, 0xa4, 0x9f,
             ]
         );
     }

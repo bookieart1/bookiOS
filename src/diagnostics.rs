@@ -36,16 +36,17 @@ const AUTORELEASE_ENQUEUES: usize = 24;
 const DICTIONARY_ORIGINS: usize = 1024;
 const UNRESOLVED_RELOCATIONS: usize = 32;
 const STRING_SEARCHES: usize = 32;
-const TOUCH_EVENTS: usize = 32;
+const TOUCH_EVENTS: usize = 64;
 const SELECTOR_EVENTS: usize = 64;
-const FOCUSED_BOUNDARY_EVENTS: usize = 16;
+const FOCUSED_BOUNDARY_EVENTS: usize = 128;
+const MOTION_EVENTS: usize = 64;
 const KVO_EVENTS: usize = 16;
 const MEDIA_EVENTS: usize = 16;
 const DEFAULTS_EVENTS: usize = 32;
-const HEALTHY_PRESENT_INTERVAL: Duration = Duration::from_millis(100);
-const SLOW_PRESENT_INTERVAL: Duration = Duration::from_millis(180);
+const HEALTHY_PRESENT_INTERVAL: Duration = Duration::from_millis(25);
+const SLOW_PRESENT_INTERVAL: Duration = Duration::from_millis(34);
 const HEALTHY_PRESENT_STREAK: u16 = 30;
-const SLOW_PRESENT_STREAK: u8 = 3;
+const SLOW_PRESENT_STREAK: u8 = 8;
 #[cfg(test)]
 const MAX_RECORDER_BYTES: usize = 384 * 1024;
 
@@ -410,6 +411,19 @@ struct Progress {
     presents: u64,
     yields: u64,
     sources: [usize; 4],
+    thread_samples: [ThreadSnapshot; 16],
+    thread_sample_count: u8,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ThreadSnapshot {
+    pub id: usize,
+    pub pc: u32,
+    pub lr: u32,
+    pub sp: u32,
+    pub state: u8,
+    pub blocked: u8,
+    pub detail: u32,
 }
 
 #[derive(Default)]
@@ -508,6 +522,19 @@ struct MediaEvent {
     lr: u32,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct MotionEvent {
+    sequence: u64,
+    thread: usize,
+    elapsed_ms: u128,
+    timestamp: f64,
+    x: f64,
+    y: f64,
+    z: f64,
+    pc: u32,
+    lr: u32,
+}
+
 pub struct Recorder {
     recent: Ring<Event, RECENT>,
     signals: Ring<Event, SIGNALS>,
@@ -546,6 +573,7 @@ pub struct Recorder {
     focused_boundary_events: Ring<FocusedBoundaryEvent, FOCUSED_BOUNDARY_EVENTS>,
     kvo_events: Ring<KvoEvent, KVO_EVENTS>,
     media_events: Ring<MediaEvent, MEDIA_EVENTS>,
+    motion_events: Ring<MotionEvent, MOTION_EVENTS>,
     sequence: u64,
     api: u64,
     objc: u64,
@@ -599,6 +627,7 @@ impl Recorder {
             focused_boundary_events: Ring::default(),
             kvo_events: Ring::default(),
             media_events: Ring::default(),
+            motion_events: Ring::default(),
             sequence: 0,
             api: 0,
             objc: 0,
@@ -943,13 +972,23 @@ impl Recorder {
             count: addresses.len(),
         });
     }
-    pub fn checkpoint(&mut self, thread: usize, regs: &[u32], threads: usize, runnable: usize) {
+    pub fn checkpoint(
+        &mut self,
+        thread: usize,
+        regs: &[u32],
+        threads: usize,
+        runnable: usize,
+        thread_samples: &[ThreadSnapshot],
+    ) {
         self.yields += 1;
         let now = Instant::now();
         if now < self.next_progress {
             return;
         }
         self.next_progress = now + Duration::from_secs(5);
+        let mut samples = [ThreadSnapshot::default(); 16];
+        let sample_count = thread_samples.len().min(samples.len());
+        samples[..sample_count].copy_from_slice(&thread_samples[..sample_count]);
         let sample = Progress {
             ms: now.duration_since(self.started).as_millis(),
             thread,
@@ -963,6 +1002,8 @@ impl Recorder {
             presents: self.presents,
             yields: self.yields,
             sources: self.sources,
+            thread_samples: samples,
+            thread_sample_count: sample_count as u8,
         };
         self.progress.push(sample);
         // Persist limited evidence even when a host kill prevents a final dump.
@@ -985,6 +1026,10 @@ impl Recorder {
     fn print_progress(p: &Progress) {
         echo_no_panic!("flight progress ms={} tid={} pc={:#x} lr={:#x} thread-slots={} runnable={} api={} objc={} main-loops={} EAGL-returns={} yields={} main-sources[timer,selector,queue,unit]={:?}",
             p.ms, p.thread, p.pc, p.lr, p.threads, p.runnable, p.api, p.objc, p.run_loops, p.presents, p.yields, p.sources);
+        for sample in &p.thread_samples[..usize::from(p.thread_sample_count)] {
+            echo_no_panic!("flight thread snapshot tid={} pc={:#x} lr={:#x} sp={:#x} state={} blocked={} detail={:#x}",
+                sample.id, sample.pc, sample.lr, sample.sp, sample.state, sample.blocked, sample.detail);
+        }
     }
     fn print_event(&self, e: &Event) {
         let c = &e.call;
@@ -1163,6 +1208,15 @@ impl Recorder {
             echo_no_panic!("flight AV media #{} tid={} action={} object={:#x} related={:#x} detail={:#x} pc={:#x} lr={:#x}",
                 event.sequence, event.thread, event.action, event.object, event.related,
                 event.detail, event.pc, event.lr);
+        }
+        echo_no_panic!(
+            "flight motion samples: newest {MOTION_EVENTS}; total={} (bounded real/simulated acceleration observations)",
+            self.motion_events.written
+        );
+        for event in self.motion_events.iter() {
+            echo_no_panic!("flight motion #{} tid={} elapsed-ms={} timestamp={:.6} xyz=({:.6},{:.6},{:.6}) pc={:#x} lr={:#x}",
+                event.sequence, event.thread, event.elapsed_ms, event.timestamp,
+                event.x, event.y, event.z, event.pc, event.lr);
         }
         echo_no_panic!(
             "flight collection ownership events: newest {COLLECTION_EVENTS}; total={} (bounded observations, not proof of ownership correctness)",
@@ -1375,6 +1429,24 @@ impl Environment {
             active,
             x,
             y,
+            pc: regs[15],
+            lr: regs[14],
+        });
+    }
+
+    pub fn diagnostic_motion_sample(&mut self, x: f64, y: f64, z: f64, timestamp: f64) {
+        let Some(recorder) = &mut self.diagnostics else {
+            return;
+        };
+        let regs = self.cpu.regs();
+        recorder.motion_events.push(MotionEvent {
+            sequence: recorder.motion_events.written.saturating_add(1),
+            thread: self.current_thread,
+            elapsed_ms: recorder.started.elapsed().as_millis(),
+            timestamp,
+            x,
+            y,
+            z,
             pc: regs[15],
             lr: regs[14],
         });
@@ -1617,6 +1689,16 @@ impl Environment {
                 b"Invocation",
                 b"operation",
                 b"Operation",
+                b"scene",
+                b"Scene",
+                b"transition",
+                b"Transition",
+                b"level",
+                b"Level",
+                b"audio",
+                b"Audio",
+                b"stop",
+                b"Stop",
             ],
         ) {
             Some("callback")
@@ -1628,9 +1710,28 @@ impl Environment {
                 b"hitTest",
                 b"pointInside",
                 b"sendAction",
+                b"locationInView",
+                b"convertPoint",
+                b"control",
+                b"Control",
             ],
         ) {
             Some("input")
+        } else if selector_matches(
+            name.bytes(),
+            &[
+                b"valueForKey",
+                b"ValueForKey",
+                b"setValue",
+                b"SetValue",
+                b"undefinedKey",
+                b"UndefinedKey",
+            ],
+        ) {
+            // KVC mistakes often surface later as a corrupt name, target, or
+            // collection entry. Preserve the producer boundary and decoded
+            // object arguments without changing dispatch or ownership.
+            Some("kvc")
         } else if selector_matches(
             name.bytes(),
             &[
@@ -2488,7 +2589,7 @@ mod tests {
         let mut recorder = Recorder::new();
         for _ in 0..40 {
             recorder.next_progress = Instant::now();
-            recorder.checkpoint(0, &[0; 16], 1, 1);
+            recorder.checkpoint(0, &[0; 16], 1, 1, &[]);
         }
         assert_eq!(recorder.progress.iter().count(), PROGRESS);
         assert_eq!(recorder.progress.written, 40);
@@ -2668,9 +2769,11 @@ mod tests {
         let healthy_end = start + Duration::from_millis(u64::from(HEALTHY_PRESENT_STREAK) * 16);
         recorder.note_present_at(healthy_end + Duration::from_millis(250));
         assert!(recorder.slow_capture.is_none());
-        recorder.note_present_at(healthy_end + Duration::from_millis(500));
-        assert!(recorder.slow_capture.is_none());
-        recorder.note_present_at(healthy_end + Duration::from_millis(750));
+        for interval in 2..=SLOW_PRESENT_STREAK {
+            recorder.note_present_at(
+                healthy_end + Duration::from_millis(u64::from(interval) * 250),
+            );
+        }
 
         let capture = recorder.slow_capture.as_ref().unwrap();
         assert_eq!(capture.gap_ms, 250);
@@ -2775,9 +2878,9 @@ mod tests {
 
         recorder.note_present_at(start + Duration::from_millis(250));
         assert!(recorder.slow_capture.is_none());
-        recorder.note_present_at(start + Duration::from_millis(500));
-        assert!(recorder.slow_capture.is_none());
-        recorder.note_present_at(start + Duration::from_millis(750));
+        for interval in 2..=SLOW_PRESENT_STREAK {
+            recorder.note_present_at(start + Duration::from_millis(u64::from(interval) * 250));
+        }
 
         let capture = recorder.slow_capture.as_ref().unwrap();
         assert!(!capture.had_healthy_baseline);
@@ -2786,7 +2889,9 @@ mod tests {
         assert_eq!(capture.recent.iter().count(), 1);
 
         recorder.api = 100;
-        recorder.note_present_at(start + Duration::from_millis(1_000));
+        recorder.note_present_at(
+            start + Duration::from_millis(u64::from(SLOW_PRESENT_STREAK + 1) * 250),
+        );
         assert_eq!(recorder.slow_capture.as_ref().unwrap().boundary_delta, 12);
     }
 }

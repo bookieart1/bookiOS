@@ -47,6 +47,7 @@ fn main() {
             // Part of the OpenGL ES 1.1 common profile.
             "GL_OES_compressed_paletted_texture",
             "GL_OES_matrix_palette",
+            "GL_OES_point_size_array",
             "GL_OES_blend_subtract",
             "GL_OES_vertex_array_object",
         ],

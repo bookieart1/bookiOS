@@ -291,33 +291,24 @@ fn enumerate_apps(
     // so a full round can be exercised without repeatedly paging through the
     // library. Everything else remains alphabetical.
     // Normalized display names, bundle identifiers and archive filenames cover
-    // the mixed naming in this batch. In particular, the Super Hexagon archive
-    // has an empty display name, so identity fallback is required to pin it.
-    const DEV_228_TEST_NAMES: &[&str] = &[
+    // the mixed naming in this batch and keep every requested test reachable
+    // even when an archive's display-name metadata differs from its filename.
+    const DEV_229_TEST_NAMES: &[&str] = &[
         "100CHAMBERS",
         "BIKERACEPRO",
         "CANNONCADETS",
         "CARNIVAL",
-        "CLOWNINGAROUND",
         "CURRENT",
         "DISMOUNT",
-        "FIELDRUNNERS",
         "FIELDRUNNERS2",
-        "JELLYCAR154",
         "KICKTHEBUDDY",
         "LABYRINTH2",
         "LEGENDSOFOOO",
         "MXMAYHEM",
-        "NINJUMP",
         "PARAPANICHD",
-        "PEGGLE",
         "PERFECTCELL",
-        "SCRIBBLENAUTS",
         "SPOING",
-        "SUPERFALL",
-        "SUPERHEXAGON",
         "THESIMS3",
-        "TIKITOTEMS2",
         "TRAINYARD",
         "TRISM",
         "WIREWAY",
@@ -337,7 +328,7 @@ fn enumerate_apps(
                 .and_then(|name| name.to_str())
                 .unwrap_or_default(),
         );
-        let rank = DEV_228_TEST_NAMES
+        let rank = DEV_229_TEST_NAMES
             .iter()
             .position(|&name| {
                 [&display_name, &bundle_identifier, &filename]
@@ -853,7 +844,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.28",
+            "iDared 32bit {}{}{} · Dev 2.29",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""

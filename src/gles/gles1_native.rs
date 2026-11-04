@@ -245,6 +245,14 @@ impl GLES for GLES1Native<'_> {
     unsafe fn PointSizex(&mut self, size: GLfixed) {
         gles11::PointSizex(size)
     }
+    unsafe fn PointSizePointerOES(
+        &mut self,
+        type_: GLenum,
+        stride: GLsizei,
+        pointer: *const GLvoid,
+    ) {
+        gles11::PointSizePointerOES(type_, stride, pointer)
+    }
     unsafe fn PointParameterf(&mut self, pname: GLenum, param: GLfloat) {
         gles11::PointParameterf(pname, param)
     }

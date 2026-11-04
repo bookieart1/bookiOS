@@ -1120,6 +1120,16 @@ impl GLES for GLES1OnGL2<'_> {
     unsafe fn PointSizex(&mut self, size: GLfixed) {
         gl21::PointSize(fixed_to_float(size))
     }
+    unsafe fn PointSizePointerOES(
+        &mut self,
+        type_: GLenum,
+        stride: GLsizei,
+        pointer: *const GLvoid,
+    ) {
+        unimplemented!(
+            "GL_POINT_SIZE_ARRAY_OES on the desktop compatibility backend: type={type_:#x} stride={stride} pointer={pointer:p}"
+        )
+    }
     unsafe fn PointParameterf(&mut self, pname: GLenum, param: GLfloat) {
         gl21::PointParameterf(pname, param)
     }

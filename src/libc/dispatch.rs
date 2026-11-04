@@ -23,6 +23,70 @@ pub(crate) struct BlockLiteral {
 }
 unsafe impl SafeRead for BlockLiteral {}
 
+/// A guest block copied out of its caller's stack frame. Blocks used only
+/// synchronously do not need this, but APIs such as NSBlockOperation own the
+/// block after their factory method returns.
+pub(crate) struct CopiedBlock {
+    block: MutPtr<BlockLiteral>,
+    dispose_helper: Option<GuestFunction>,
+}
+
+impl CopiedBlock {
+    pub(crate) fn block(&self) -> MutPtr<BlockLiteral> {
+        self.block
+    }
+}
+
+/// Copy a 32-bit Apple block literal, including its captured payload, and run
+/// the compiler-emitted copy helper when the block has one. This is the subset
+/// of Block_copy required by framework objects that genuinely own a block; it
+/// deliberately does not expose a guest _Block_copy symbol yet.
+pub(crate) fn copy_block_for_later(
+    env: &mut Environment,
+    block: MutPtr<BlockLiteral>,
+) -> CopiedBlock {
+    const BLOCK_HAS_COPY_DISPOSE: i32 = 1 << 25;
+
+    assert!(!block.is_null());
+    let literal = env.mem.read(block);
+    assert!(!literal._descriptor.is_null());
+    let descriptor = literal._descriptor.cast::<u32>();
+    // The first two descriptor words are reserved and the total literal size.
+    let size = env.mem.read(descriptor + 1);
+    assert!(
+        size >= std::mem::size_of::<BlockLiteral>() as u32,
+        "Invalid guest block size {size}"
+    );
+    let bytes = env.mem.bytes_at(block.cast_const().cast(), size).to_vec();
+    let copied = env.mem.alloc(size).cast::<BlockLiteral>();
+    env.mem
+        .bytes_at_mut(copied.cast::<u8>(), size)
+        .copy_from_slice(&bytes);
+
+    let dispose_helper = if literal._flags & BLOCK_HAS_COPY_DISPOSE != 0 {
+        let copy_helper: GuestFunction = env.mem.read(descriptor + 2);
+        let dispose_helper: GuestFunction = env.mem.read(descriptor + 3);
+        assert_ne!(copy_helper.addr_without_thumb_bit(), 0);
+        assert_ne!(dispose_helper.addr_without_thumb_bit(), 0);
+        () = copy_helper.call_from_host(env, (copied.cast_void(), block.cast_void()));
+        Some(dispose_helper)
+    } else {
+        None
+    };
+
+    CopiedBlock {
+        block: copied,
+        dispose_helper,
+    }
+}
+
+pub(crate) fn dispose_copied_block(env: &mut Environment, copied: CopiedBlock) {
+    if let Some(dispose_helper) = copied.dispose_helper {
+        () = dispose_helper.call_from_host(env, (copied.block.cast_void(),));
+    }
+    env.mem.free(copied.block.cast_void());
+}
+
 fn new_queue_object(env: &mut Environment) -> MutVoidPtr {
     // Queue objects are opaque to callers. Scheduling is intentionally added
     // separately when a game demonstrates which dispatch operations it needs.

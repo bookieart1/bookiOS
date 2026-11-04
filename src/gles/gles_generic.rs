@@ -131,6 +131,12 @@ pub trait GLES {
     // Points
     unsafe fn PointSize(&mut self, size: GLfloat);
     unsafe fn PointSizex(&mut self, size: GLfixed);
+    unsafe fn PointSizePointerOES(
+        &mut self,
+        type_: GLenum,
+        stride: GLsizei,
+        pointer: *const GLvoid,
+    );
     unsafe fn PointParameterf(&mut self, pname: GLenum, param: GLfloat);
     unsafe fn PointParameterx(&mut self, pname: GLenum, param: GLfixed);
     unsafe fn PointParameterfv(&mut self, pname: GLenum, params: *const GLfloat);

@@ -351,6 +351,15 @@ pub(super) fn handle_timer(env: &mut Environment, timer: id) -> Option<Instant> 
         selector.as_str(&env.mem),
         target
     );
+    let selector_name = selector.as_str(&env.mem).to_owned();
+    env.diagnostic_selector_event(
+        "timer-fire",
+        run_loop,
+        target,
+        &selector_name,
+        timer,
+        Some(ns_interval),
+    );
 
     let pool: id = msg_class![env; NSAutoreleasePool new];
 

@@ -127,6 +127,15 @@ fn CFDictionaryGetValueIfPresent(
     true
 }
 
+fn CFDictionaryContainsKey(
+    env: &mut Environment,
+    dict: CFDictionaryRef,
+    key: ConstVoidPtr,
+) -> bool {
+    let key: id = key.cast().cast_mut();
+    msg![env; dict _touchHLEContainsKey:key]
+}
+
 fn CFDictionaryGetCount(env: &mut Environment, dict: CFDictionaryRef) -> CFIndex {
     let count: NSUInteger = msg![env; dict count];
     log_dbg!("CFDictionaryGetCount dict {:?} {}", dict, count);
@@ -287,6 +296,39 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFDictionaryRemoveAllValues(_)),
     export_c_func!(CFDictionaryGetValue(_, _)),
     export_c_func!(CFDictionaryGetValueIfPresent(_, _, _)),
+    export_c_func!(CFDictionaryContainsKey(_, _)),
     export_c_func!(CFDictionaryGetCount(_)),
     export_c_func!(CFDictionaryGetKeysAndValues(_, _, _)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objc::{msg, msg_class, release};
+
+    #[test]
+    fn contains_key_distinguishes_present_and_absent_objects() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let present: id = msg_class![&mut env; NSObject new];
+        let absent: id = msg_class![&mut env; NSObject new];
+        let value: id = msg_class![&mut env; NSObject new];
+        let dict: id = msg_class![&mut env; NSMutableDictionary new];
+        () = msg![&mut env; dict setObject:value forKey:present];
+
+        assert!(CFDictionaryContainsKey(
+            &mut env,
+            dict,
+            present.cast().cast_const()
+        ));
+        assert!(!CFDictionaryContainsKey(
+            &mut env,
+            dict,
+            absent.cast().cast_const()
+        ));
+
+        release(&mut env, dict);
+        release(&mut env, value);
+        release(&mut env, absent);
+        release(&mut env, present);
+    }
+}

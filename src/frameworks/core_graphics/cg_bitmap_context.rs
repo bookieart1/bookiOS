@@ -66,10 +66,17 @@ pub fn CGBitmapContextCreate(
         env.objc.borrow::<CGColorSpaceHostObject>(color_space).name
     };
 
+    let unsupported_format = || {
+        panic!(
+            "Unsupported CGBitmapContext format: color-space={color_space:?} bitmap-info={bitmap_info:#010x} width={width} height={height} bits-per-component={bits_per_component} bytes-per-row={bytes_per_row} data={data:?}"
+        )
+    };
     let component_count = match color_space {
         "alpha-only" => 1,
-        kCGColorSpaceGenericRGB => components_for_rgb(bitmap_info).unwrap(),
-        kCGColorSpaceGenericGray => components_for_gray(bitmap_info).unwrap(),
+        kCGColorSpaceGenericRGB => components_for_rgb(bitmap_info)
+            .unwrap_or_else(|()| unsupported_format()),
+        kCGColorSpaceGenericGray => components_for_gray(bitmap_info)
+            .unwrap_or_else(|()| unsupported_format()),
         _ => unimplemented!("support other color spaces"),
     };
 

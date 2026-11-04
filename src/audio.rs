@@ -140,6 +140,29 @@ fn failed_audio_format_description(bytes: &[u8]) -> String {
         return format!("RIFF/WAVE without a valid fmt chunk; bytes={}", bytes.len());
     }
 
+    if bytes.get(..4) == Some(b"FORM") && bytes.get(8..12) == Some(b"AIFC") {
+        let mut pos = 12usize;
+        while pos.checked_add(8).is_some_and(|end| end <= bytes.len()) {
+            let size = u32::from_be_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
+            let start = pos + 8;
+            let Some(end) = start.checked_add(size) else {
+                break;
+            };
+            if &bytes[pos..pos + 4] == b"COMM" && end <= bytes.len() && size >= 22 {
+                let channels = u16::from_be_bytes(bytes[start..start + 2].try_into().unwrap());
+                let frames = u32::from_be_bytes(bytes[start + 2..start + 6].try_into().unwrap());
+                let bits = u16::from_be_bytes(bytes[start + 6..start + 8].try_into().unwrap());
+                let compression = &bytes[start + 18..start + 22];
+                return format!(
+                    "AIFC compression={} channels={} frames={} bits={} bytes={}",
+                    String::from_utf8_lossy(compression), channels, frames, bits, bytes.len()
+                );
+            }
+            pos = end.saturating_add(size & 1);
+        }
+        return format!("AIFC without a valid COMM chunk; bytes={}", bytes.len());
+    }
+
     let magic = bytes
         .iter()
         .take(12)
@@ -321,9 +344,11 @@ fn caf_pcm8_to_pcm16(bytes: &[u8]) -> Option<symphonia_formats::SymphoniaDecoded
 /// end of the file here instead.
 fn aiff_to_pcm16(bytes: &[u8]) -> Option<symphonia_formats::SymphoniaDecodedToPcm> {
     let u32_at = |at: usize| Some(u32::from_be_bytes(bytes.get(at..at + 4)?.try_into().ok()?));
-    if bytes.get(..4)? != b"FORM" || bytes.get(8..12)? != b"AIFF" {
+    let form_type = bytes.get(8..12)?;
+    if bytes.get(..4)? != b"FORM" || (form_type != b"AIFF" && form_type != b"AIFC") {
         return None;
     }
+    let is_aifc = form_type == b"AIFC";
     let (mut comm, mut data_start) = (None, None);
     let mut pos = 12;
     while pos + 8 <= bytes.len() {
@@ -342,7 +367,17 @@ fn aiff_to_pcm16(bytes: &[u8]) -> Option<symphonia_formats::SymphoniaDecodedToPc
                 if channels == 0 || !(1..=32).contains(&bits) {
                     return None;
                 }
-                comm = Some((channels, frames, bits, rate));
+                let little_endian = if is_aifc {
+                    match bytes.get(start + 18..start + 22)? {
+                        b"NONE" | b"twos" => false,
+                        b"sowt" => true,
+                        // Do not guess compressed codecs such as ima4.
+                        _ => return None,
+                    }
+                } else {
+                    false
+                };
+                comm = Some((channels, frames, bits, rate, little_endian));
             }
             b"SSND" => data_start = Some(start + 8 + usize::try_from(u32_at(start)?).ok()?),
             _ => (),
@@ -351,7 +386,7 @@ fn aiff_to_pcm16(bytes: &[u8]) -> Option<symphonia_formats::SymphoniaDecodedToPc
         let size = usize::try_from(u32_at(pos + 4)?).ok()?;
         pos = start.checked_add(size)?.checked_add(size & 1)?;
     }
-    let (channels, frames, bits, rate) = comm?;
+    let (channels, frames, bits, rate, little_endian) = comm?;
     let width = usize::from(bits).div_ceil(8);
     let len = usize::try_from(frames).ok()? * usize::from(channels) * width;
     let samples = bytes.get(data_start?..)?;
@@ -360,7 +395,13 @@ fn aiff_to_pcm16(bytes: &[u8]) -> Option<symphonia_formats::SymphoniaDecodedToPc
         // Samples are signed and big-endian: keep the top 16 bits.
         bytes: samples
             .chunks(width)
-            .flat_map(|s| [s.get(1).copied().unwrap_or(0), s[0]])
+            .flat_map(|s| {
+                if little_endian {
+                    [s[0], s.get(1).copied().unwrap_or(0)]
+                } else {
+                    [s.get(1).copied().unwrap_or(0), s[0]]
+                }
+            })
             .collect(),
         sample_rate: rate.try_into().ok()?,
         channels: channels.into(),
@@ -744,5 +785,25 @@ mod tests {
             pcm.bytes,
             [0x00, 0x80, 0x00, 0x00, 0x00, 0x7f, 0x00, 0xc0]
         );
+    }
+
+    #[test]
+    fn aifc_uncompressed_none_is_read_as_signed_big_endian_pcm() {
+        let mut bytes = b"FORM\0\0\0\0AIFCCOMM\0\0\0\x16".to_vec();
+        bytes.extend_from_slice(&[
+            0, 1, // mono
+            0, 0, 0, 2, // two frames
+            0, 16, // 16-bit
+            0x40, 0x0e, 0xac, 0x44, 0, 0, 0, 0, 0, 0, // 44100 extended
+            b'N', b'O', b'N', b'E', // uncompressed AIFC
+        ]);
+        bytes.extend_from_slice(b"SSND\0\0\0\x0c\0\0\0\0\0\0\0\0\x12\x34\xfe\xdc");
+        let form_size = u32::try_from(bytes.len() - 8).unwrap().to_be_bytes();
+        bytes[4..8].copy_from_slice(&form_size);
+
+        let pcm = aiff_to_pcm16(&bytes).unwrap();
+        assert_eq!(pcm.sample_rate, 44100);
+        assert_eq!(pcm.channels, 1);
+        assert_eq!(pcm.bytes, [0x34, 0x12, 0xdc, 0xfe]);
     }
 }

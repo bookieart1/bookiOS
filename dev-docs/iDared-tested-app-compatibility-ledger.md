@@ -1,9 +1,9 @@
 # iDared 32-bit tested-app compatibility ledger
 
 Last reconciled: November 4, 2026
-Latest device-tested checkpoint: **iDared Dev 2.27**, implementation `4b4b3bd8abd91aa1bd65153624ed8071bd40be11`, IPA workflow `41837856742`; three supplied logs cover all fourteen requested launches.
-Latest built checkpoint: **iDared Dev 2.27**, same embedded implementation and workflow. Build verification and physical-device compatibility remain separate evidence categories.
-Current activity: **Dev 2.28 is the user-authorized locked 27-title follow-up: fourteen general compatibility corrections, twelve bounded diagnostic experiments and Spoing as the sole healthy control. All 27 are pinned first in strict alphabetical order through display/bundle/file identity. No physical result is claimed before device testing.**
+Latest device-tested checkpoint: **iDared Dev 2.28**, implementation `5f421ee519024ee137ace6e70e54f4df03d79400`, IPA workflow `41862962461`; four supplied logs cover all 27 requested launches.
+Latest built checkpoint: **iDared Dev 2.28**, same embedded implementation and workflow. Build verification and physical-device compatibility remain separate evidence categories.
+Current activity: **Dev 2.29 is an implementation candidate for the complete authorized Dev 2.28 follow-up: all fourteen later boundaries receive either a safe general contract, a strict partial contract or a bounded causal diagnostic, and Current, Wire Way, Fieldrunners 2, Trism, Carnival and Labyrinth 2 receive the focused diagnostics described in `dev-2.29-follow-up-contracts-and-diagnostics.md`. Hosted compilation/tests and physical-device behavior are not yet established.**
 
 The maintainer review at the end of this ledger qualifies earlier implementation claims. In particular, Dev 1.47's font fallback is provisional, its arc implementation is approximate, and its date formatter is not locale/time-zone complete. Earlier sections are historical checkpoints, not a claim that all listed work is currently complete.
 
@@ -4333,3 +4333,26 @@ Spoing is the only unchanged regression control.
 Exact implementation boundaries, per-title predictions and safety limits are
 in `dev-2.28-locked-27-contracts-and-provenance.md`. Source/tests/build evidence
 must remain separate from the forthcoming physical-device result.
+
+## Dev 2.28 physical-device result — November 4, 2026
+
+Four supplied logs verify implementation
+`5f421ee519024ee137ace6e70e54f4df03d79400` and workflow `41862962461`; the
+universal recorder and bounded Dev 2.28 provenance were active. All fourteen
+direct compatibility contracts crossed their former boundary, but most expose
+a later independent missing contract or ownership failure rather than becoming
+fully compatible.
+
+Carnival runs but its presentation rate declines under load and many AIFC
+music/effect files fail real decoding. Labyrinth 2 runs but has collision/motion
+and menu corruption. Current receives touches at the EAGL view and keeps
+presenting near 59 Hz, so its inert menu is downstream of basic host input
+delivery. Fieldrunners 2 and Trism stop servicing the application event loop,
+which explains why even Home is unresponsive. Wire Way's post-level black state
+is actively rendered by the guest with a complete framebuffer and a full-screen
+black draw; it is not a frozen compositor.
+
+The exact evidence hashes, every title's later boundary, compatibility status
+and next discriminating action are preserved in
+`dev-2.28-device-result.md`. This result updates evidence only and does not
+authorize a source change, commit, push or IPA build.

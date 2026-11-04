@@ -11,7 +11,7 @@ use super::ns_enumerator::{fast_enumeration_helper, NSFastEnumerationState};
 use super::NSUInteger;
 use crate::abi::DotDotDot;
 use crate::environment::Environment;
-use crate::mem::MutPtr;
+use crate::mem::{ConstPtr, MutPtr};
 use crate::objc::{
     autorelease, id, msg, msg_class, nil, objc_classes, retain, ClassExports, HostObject, NSZonePtr,
 };
@@ -64,6 +64,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     assert!(object != nil);
     let new: id = msg![env; this alloc];
     let new: id = msg![env; new initWithObject:object];
+    autorelease(env, new)
+}
+
++ (id)setWithObjects:(ConstPtr<id>)objects count:(NSUInteger)count {
+    let new: id = msg![env; this alloc];
+    env.objc.borrow_mut::<SetHostObject>(new).dict = set_from_counted_objects(env, objects, count);
     autorelease(env, new)
 }
 
@@ -120,6 +126,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     assert!(this == env.objc.get_known_class("NSMutableSet", &mut env.mem));
     let new: id = msg![env; this alloc];
     env.objc.borrow_mut::<SetHostObject>(new).dict = set_from_objects(env, first_obj, args);
+    autorelease(env, new)
+}
+
++ (id)setWithObjects:(ConstPtr<id>)objects count:(NSUInteger)count {
+    let new: id = msg![env; this alloc];
+    env.objc.borrow_mut::<SetHostObject>(new).dict = set_from_counted_objects(env, objects, count);
     autorelease(env, new)
 }
 
@@ -561,11 +573,40 @@ fn set_from_array(env: &mut Environment, array: id) -> DictionaryHostObject {
     dict
 }
 
+fn set_from_counted_objects(
+    env: &mut Environment,
+    objects: ConstPtr<id>,
+    count: NSUInteger,
+) -> DictionaryHostObject {
+    assert!(count == 0 || !objects.is_null());
+    let null: id = msg_class![env; NSNull null];
+    let mut dict = DictionaryHostObject::default();
+    for index in 0..count {
+        let object = env.mem.read(objects + index);
+        assert_ne!(object, nil, "NSSet cannot contain nil");
+        dict.insert(env, object, null, /* copy_key: */ false);
+    }
+    dict
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::frameworks::foundation::ns_string;
     use crate::objc::{release, Class};
+
+    #[test]
+    fn counted_factory_reads_exact_count_and_deduplicates() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let one: id = msg_class![&mut env; NSObject new];
+        let two: id = msg_class![&mut env; NSObject new];
+        let objects = env.mem.alloc_and_write([one, two, one]);
+        let set: id = msg_class![&mut env; NSSet setWithObjects:objects.cast_const() count:3u32];
+        let count: NSUInteger = msg![&mut env; set count];
+        assert_eq!(count, 2);
+        release(&mut env, one);
+        release(&mut env, two);
+    }
 
     #[test]
     fn concrete_sets_return_the_stored_equal_member() {

@@ -214,5 +214,6 @@ pub(crate) fn sample_acceleration(
         .unwrap_or((0.0, 0.0, -1.0));
     let process_info = msg_class![env; NSProcessInfo processInfo];
     let timestamp: NSTimeInterval = msg![env; process_info systemUptime];
+    env.diagnostic_motion_sample(x.into(), y.into(), z.into(), timestamp);
     (x.into(), y.into(), z.into(), timestamp)
 }

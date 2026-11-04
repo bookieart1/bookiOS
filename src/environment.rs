@@ -1630,11 +1630,53 @@ impl Environment {
                             && matches!(t.blocked_by, ThreadBlock::NotBlocked)
                     })
                     .count();
+                let mut thread_samples = [crate::diagnostics::ThreadSnapshot::default(); 16];
+                let mut thread_sample_count = 0usize;
+                for (tid, thread) in self.threads.iter().enumerate().take(thread_samples.len()) {
+                    if thread.state == ThreadState::Dead {
+                        continue;
+                    }
+                    let regs = if tid == self.current_thread {
+                        Some(self.cpu.regs())
+                    } else {
+                        thread.guest_context.as_ref().map(|context| &context.regs)
+                    };
+                    let Some(regs) = regs else {
+                        continue;
+                    };
+                    let (blocked, detail) = match &thread.blocked_by {
+                        ThreadBlock::NotBlocked => (0, 0),
+                        ThreadBlock::Sleeping(_) => (1, 0),
+                        ThreadBlock::Mutex(mutex) => (2, *mutex as u32),
+                        ThreadBlock::Semaphore(pointer) => (3, pointer.to_bits()),
+                        ThreadBlock::Condition(pointer, _) => (4, pointer.to_bits()),
+                        ThreadBlock::Joining(joined, _) => (5, *joined as u32),
+                        ThreadBlock::WaitingForDebugger(_) => (6, 0),
+                        ThreadBlock::Suspended(count, _) => (7, *count as u32),
+                        ThreadBlock::FileObjectLock(pointer) => (8, pointer.to_bits()),
+                    };
+                    thread_samples[thread_sample_count] = crate::diagnostics::ThreadSnapshot {
+                        id: tid,
+                        pc: regs[15],
+                        lr: regs[14],
+                        sp: regs[13],
+                        state: match thread.state {
+                            ThreadState::Running => 1,
+                            ThreadState::Stepping => 2,
+                            ThreadState::Paused => 3,
+                            ThreadState::Dead => 4,
+                        },
+                        blocked,
+                        detail,
+                    };
+                    thread_sample_count += 1;
+                }
                 recorder.checkpoint(
                     self.current_thread,
                     self.cpu.regs(),
                     self.threads.len(),
                     runnable,
+                    &thread_samples[..thread_sample_count],
                 );
             }
 

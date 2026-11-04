@@ -43,6 +43,9 @@ fn abs(_env: &mut Environment, arg: i32) -> i32 {
 fn fabs(_env: &mut Environment, arg: f64) -> f64 {
     arg.abs()
 }
+fn fabsf(_env: &mut Environment, arg: f32) -> f32 {
+    arg.abs()
+}
 
 // Trigonometric functions
 
@@ -568,6 +571,7 @@ fn __fpclassifyf(_env: &mut Environment, arg: f32) -> GuestFPCategory {
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(abs(_)),
     export_c_func!(fabs(_)),
+    export_c_func!(fabsf(_)),
     // Trigonometric functions
     export_c_func!(sin(_)),
     export_c_func!(sinf(_)),
@@ -662,6 +666,14 @@ pub const FUNCTIONS: FunctionExports = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn single_precision_absolute_value_preserves_float_semantics() {
+        let mut env = Environment::new_fake_for_test();
+        assert_eq!(fabsf(&mut env, -12.5), 12.5);
+        assert_eq!(fabsf(&mut env, -0.0).to_bits(), 0.0f32.to_bits());
+        assert!(fabsf(&mut env, f32::NAN).is_nan());
+    }
 
     #[test]
     fn fenv_exception_functions_share_the_guest_fpscr() {

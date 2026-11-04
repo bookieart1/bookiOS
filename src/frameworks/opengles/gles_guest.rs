@@ -793,6 +793,22 @@ fn glVertexPointer(
         gles.VertexPointer(size, type_, stride, pointer)
     })
 }
+fn glPointSizePointerOES(
+    env: &mut Environment,
+    type_: GLenum,
+    stride: GLsizei,
+    pointer: ConstVoidPtr,
+) {
+    env.framework_state.opengles.note_visual_call(
+        "glPointSizePointerOES",
+        [type_, stride as u32, pointer.to_bits(), 0],
+    );
+    with_ctx_and_mem(env, |gles, mem| unsafe {
+        let pointer =
+            translate_pointer_or_offset_to_host(gles, mem, pointer, gles11::ARRAY_BUFFER_BINDING);
+        gles.PointSizePointerOES(type_, stride, pointer)
+    })
+}
 
 // OES_matrix_palette
 fn glCurrentPaletteMatrixOES(env: &mut Environment, matrix_palette_index: GLuint) {
@@ -1939,6 +1955,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(glNormalPointer(_, _, _)),
     export_c_func!(glTexCoordPointer(_, _, _, _)),
     export_c_func!(glVertexPointer(_, _, _, _)),
+    export_c_func!(glPointSizePointerOES(_, _, _)),
     // OES_matrix_palette
     export_c_func!(glCurrentPaletteMatrixOES(_)),
     export_c_func!(glLoadPaletteFromModelViewMatrixOES()),

@@ -524,6 +524,51 @@ pub fn CGContextFillRect(env: &mut Environment, context: CGContextRef, rect: CGR
     cg_bitmap_context::fill_rect(env, context, rect, /* clear: */ false);
 }
 
+/// Fill the current path with the nonzero winding rule and then clear it.
+/// Path points are transformed to device space at draw time, matching the
+/// existing clipping and bitmap drawing machinery.
+fn CGContextFillPath(env: &mut Environment, context: CGContextRef) {
+    let (path, transform) = {
+        let host = env.objc.borrow::<CGContextHostObject>(context);
+        (host.path, host.transform)
+    };
+    if path.is_null() {
+        return;
+    }
+    let elements = env
+        .objc
+        .borrow::<CGMutablePathHostObject>(path)
+        .path_elements
+        .clone();
+    let fill = clip_path_from_elements(&elements, transform);
+    CGContextBeginPath(env, context);
+    let Some(fill) = fill else {
+        return;
+    };
+
+    let mut drawer = CGBitmapContextDrawer::new(&env.objc, &mut env.mem, context);
+    let color = drawer.rgb_fill_color();
+    let min_x = fill.bounds.origin.x.floor().max(0.0) as i32;
+    let min_y = fill.bounds.origin.y.floor().max(0.0) as i32;
+    let max_x = (fill.bounds.origin.x + fill.bounds.size.width)
+        .ceil()
+        .min(drawer.width() as CGFloat) as i32;
+    let max_y = (fill.bounds.origin.y + fill.bounds.size.height)
+        .ceil()
+        .min(drawer.height() as CGFloat) as i32;
+    for y in min_y..max_y {
+        for x in min_x..max_x {
+            let point = CGPoint {
+                x: x as CGFloat + 0.5,
+                y: y as CGFloat + 0.5,
+            };
+            if fill.contains(point) {
+                drawer.put_pixel((x, y), color, true);
+            }
+        }
+    }
+}
+
 pub fn CGContextClearRect(env: &mut Environment, context: CGContextRef, rect: CGRect) {
     cg_bitmap_context::fill_rect(env, context, rect, /* clear: */ true);
 }
@@ -1254,6 +1299,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGContextSetRGBStrokeColor(_, _, _, _, _)),
     export_c_func!(CGContextSetShadowWithColor(_, _, _, _)),
     export_c_func!(CGContextFillRect(_, _)),
+    export_c_func!(CGContextFillPath(_)),
     export_c_func!(CGContextClearRect(_, _)),
     export_c_func!(CGContextClip(_)),
     export_c_func!(CGContextClipToRect(_, _)),

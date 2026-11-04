@@ -10,7 +10,10 @@
 //! for older apps that use a queue only to defer small pieces of work.
 
 use super::{ns_array, NSInteger, NSUInteger};
-use crate::libc::dispatch::{invoke_block_synchronously, BlockLiteral};
+use crate::libc::dispatch::{
+    copy_block_for_later, dispose_copied_block, invoke_block_synchronously, BlockLiteral,
+    CopiedBlock,
+};
 use crate::mem::MutPtr;
 use crate::objc::{
     autorelease, id, msg, msg_send_no_type_checking, nil, objc_classes, release, retain,
@@ -33,6 +36,8 @@ struct NSOperationHostObject {
     selector: Option<SEL>,
     object: id,
     invocation: id,
+    /// NSBlockOperation owns a copy because the source can be a stack block.
+    block: Option<CopiedBlock>,
     cancelled: bool,
     executing: bool,
     finished: bool,
@@ -66,6 +71,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         selector: None,
         object: nil,
         invocation: nil,
+        block: None,
         cancelled: false,
         executing: false,
         finished: false,
@@ -122,13 +128,21 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())removeDependency:(id)_operation {}
 
 - (())dealloc {
-    let host_object = env.objc.borrow::<NSOperationHostObject>(this);
-    let target = host_object.target;
-    let object = host_object.object;
-    let invocation = host_object.invocation;
+    let (target, object, invocation) = {
+        let host_object = env.objc.borrow::<NSOperationHostObject>(this);
+        (host_object.target, host_object.object, host_object.invocation)
+    };
+    let block = env
+        .objc
+        .borrow_mut::<NSOperationHostObject>(this)
+        .block
+        .take();
     release(env, target);
     release(env, object);
     release(env, invocation);
+    if let Some(block) = block {
+        dispose_copied_block(env, block);
+    }
     env.objc.dealloc_object(this, &mut env.mem)
 }
 
@@ -173,6 +187,30 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)result { nil }
+
+@end
+
+@implementation NSBlockOperation: NSOperation
+
++ (id)blockOperationWithBlock:(MutPtr<BlockLiteral>)block {
+    assert!(!block.is_null(), "NSBlockOperation requires a non-null block");
+    let operation: id = msg![env; this alloc];
+    let operation: id = msg![env; operation init];
+    let block = copy_block_for_later(env, block);
+    env.objc.borrow_mut::<NSOperationHostObject>(operation).block = Some(block);
+    autorelease(env, operation)
+}
+
+- (())main {
+    let block = env
+        .objc
+        .borrow::<NSOperationHostObject>(this)
+        .block
+        .as_ref()
+        .expect("NSBlockOperation has no execution block")
+        .block();
+    invoke_block_synchronously(env, block);
+}
 
 @end
 
