@@ -295,6 +295,9 @@ mod tests {
     fn should_indent_while_editing_defaults_true_and_round_trips() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack_size = 0x1000;
+        let stack = env.mem.alloc(stack_size);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + stack_size;
         let cell: id = msg_class![env; UITableViewCell new];
         let initial: bool = msg![env; cell shouldIndentWhileEditing];
         assert!(initial);
@@ -302,6 +305,8 @@ mod tests {
         let updated: bool = msg![env; cell shouldIndentWhileEditing];
         assert!(!updated);
         release(env, cell);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 
     #[test]

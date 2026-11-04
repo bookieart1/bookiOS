@@ -292,6 +292,9 @@ mod tests {
     #[test]
     fn begins_from_current_state_is_scoped_to_the_current_transaction() {
         let mut env = Environment::new_fake_for_test_with_thread();
+        let stack_size = 0x1000;
+        let stack = env.mem.alloc(stack_size);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + stack_size;
         ThreadLocalState::push_explicit_transaction(&mut env);
         assert!(!ThreadLocalState::get_current_transaction(&mut env)
             .unwrap()
@@ -310,5 +313,7 @@ mod tests {
             .unwrap()
             .begins_from_current_state());
         ThreadLocalState::pop_explicit_transaction(&mut env).commit(&mut env);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

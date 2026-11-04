@@ -431,6 +431,9 @@ mod tests {
     #[test]
     fn source_zero_membership_signal_and_invalidation_are_bounded() {
         let mut env = Environment::new_fake_for_test_with_thread();
+        let stack_size = 0x1000;
+        let stack = env.mem.alloc(stack_size);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + stack_size;
         let context = env.mem.alloc_and_write(CFRunLoopSourceContext {
             version: 0,
             info: MutVoidPtr::null(),
@@ -458,11 +461,16 @@ mod tests {
         assert!(!CFRunLoopSourceIsValid(&mut env, source));
         assert!(!CFRunLoopContainsSource(&mut env, run_loop, source, mode));
         release(&mut env, source);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 
     #[test]
     fn source_preserves_historical_order_value() {
         let mut env = Environment::new_fake_for_test_with_thread();
+        let stack_size = 0x1000;
+        let stack = env.mem.alloc(stack_size);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + stack_size;
         let context = env.mem.alloc_and_write(CFRunLoopSourceContext {
             version: 0,
             info: MutVoidPtr::null(),
@@ -479,5 +487,7 @@ mod tests {
         assert_eq!(CFRunLoopSourceGetOrder(&mut env, source), -7);
         CFRunLoopSourceInvalidate(&mut env, source);
         release(&mut env, source);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

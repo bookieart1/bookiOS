@@ -89,6 +89,9 @@ mod tests {
     fn programmatic_dismissal_is_bounded_and_idempotent() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack_size = 0x1000;
+        let stack = env.mem.alloc(stack_size);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + stack_size;
         let title = ns_string::get_static_str(env, "Dismiss");
         let alert: id = msg_class![env; UIAlertView alloc];
         let alert: id = msg![env; alert initWithTitle:title
@@ -106,6 +109,8 @@ mod tests {
         assert!(env.objc.borrow::<UIAlertViewHostObject>(alert).dismissal_scheduled);
         () = msg![env; alert dismissWithClickedButtonIndex:0i32 animated:false];
         assert!(env.objc.borrow::<UIAlertViewHostObject>(alert).dismissal_scheduled);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }
 
