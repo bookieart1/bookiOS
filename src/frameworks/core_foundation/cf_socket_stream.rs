@@ -110,7 +110,8 @@ pub fn copy_error(env: &mut Environment, stream: id) -> id {
     let error = error(env, stream);
     if error.error == 0 { return nil; }
     let domain = get_static_str(env, "NSPOSIXErrorDomain");
-    let object: id = msg_class![env; NSError errorWithDomain:domain code:error.error userInfo:nil];
+    let code = error.error;
+    let object: id = msg_class![env; NSError errorWithDomain:domain code:code userInfo:nil];
     retain(env, object)
 }
 
