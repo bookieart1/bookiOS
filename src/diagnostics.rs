@@ -48,7 +48,7 @@ const SLOW_PRESENT_INTERVAL: Duration = Duration::from_millis(34);
 const HEALTHY_PRESENT_STREAK: u16 = 30;
 const SLOW_PRESENT_STREAK: u8 = 8;
 #[cfg(test)]
-const MAX_RECORDER_BYTES: usize = 384 * 1024;
+const MAX_RECORDER_BYTES: usize = 512 * 1024;
 
 #[derive(Clone, Copy, Debug)]
 struct Text {

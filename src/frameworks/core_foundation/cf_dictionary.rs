@@ -304,14 +304,15 @@ pub const FUNCTIONS: FunctionExports = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frameworks::foundation::ns_string::from_rust_string;
     use crate::objc::{msg, msg_class, release};
 
     #[test]
     fn contains_key_distinguishes_present_and_absent_objects() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
-        let present: id = msg_class![env; NSObject new];
-        let absent: id = msg_class![env; NSObject new];
+        let present = from_rust_string(env, "present".to_owned());
+        let absent = from_rust_string(env, "absent".to_owned());
         let value: id = msg_class![env; NSObject new];
         let dict: id = msg_class![env; NSMutableDictionary new];
         () = msg![env; dict setObject:value forKey:present];
