@@ -44,10 +44,12 @@ mod tests {
         () = msg![env; invocation setTarget:target];
         () = msg![env; invocation setSelector:perform];
         let selector_argument = env.mem.alloc_and_write(description);
-        () = msg![env; invocation setArgument:selector_argument.cast() atIndex:2i32];
+        let selector_argument_raw = selector_argument.cast();
+        () = msg![env; invocation setArgument:selector_argument_raw atIndex:2i32];
         () = msg![env; invocation invoke];
         let return_value = env.mem.alloc_and_write(nil);
-        () = msg![env; invocation getReturnValue:return_value.cast()];
+        let return_value_raw = return_value.cast();
+        () = msg![env; invocation getReturnValue:return_value_raw];
         assert_ne!(env.mem.read(return_value), nil);
         env.mem.free(return_value.cast());
         env.mem.free(selector_argument.cast());

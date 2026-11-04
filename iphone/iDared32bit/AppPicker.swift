@@ -525,12 +525,13 @@ final class PickerModel: ObservableObject {
         ) as? [String: String] ?? [:]
         let defaults = UserDefaults.standard
         let currentLibraryKeys = Set(input.apps.map(\.libraryKey))
+        let initialNewAppKeys: Set<String>
         if let known = defaults.stringArray(forKey: appPickerKnownLibraryKeysKey) {
             let knownLibraryKeys = Set(known)
             let stillNew = Set(
                 defaults.stringArray(forKey: appPickerNewLibraryKeysKey) ?? []
             ).intersection(currentLibraryKeys)
-            newAppKeys = stillNew.union(
+            initialNewAppKeys = stillNew.union(
                 currentLibraryKeys.subtracting(knownLibraryKeys)
             )
             defaults.set(
@@ -540,13 +541,14 @@ final class PickerModel: ObservableObject {
         } else {
             // Migration: the library present when this feature first appears
             // is the baseline, not hundreds of falsely-labelled new games.
-            newAppKeys = []
+            initialNewAppKeys = []
             defaults.set(
                 currentLibraryKeys.sorted(),
                 forKey: appPickerKnownLibraryKeysKey
             )
         }
-        defaults.set(newAppKeys.sorted(), forKey: appPickerNewLibraryKeysKey)
+        newAppKeys = initialNewAppKeys
+        defaults.set(initialNewAppKeys.sorted(), forKey: appPickerNewLibraryKeysKey)
         quickOptionValues = input.quickOptions.map(\.defaultValue)
         showingStartError = input.startError != nil
         wallpaper = input.wallpaperPath.flatMap { UIImage(contentsOfFile: $0) }

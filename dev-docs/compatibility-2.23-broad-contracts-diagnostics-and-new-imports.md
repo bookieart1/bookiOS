@@ -44,13 +44,14 @@ implementation, not another small API contract.
 
 ## Picker behavior
 
-The native picker now keeps two persisted identifier sets: the known library
-and the still-unseen newly imported games. On the first Dev 2.23 run, the
-existing library becomes the baseline so hundreds of old games are not
-incorrectly labelled new. Later imports receive a compact `NEW` badge and are
-shown in a dedicated **New** filter. Launching the game or choosing **Mark as
-Seen** from its long-press menu clears that status. Newness is independent of
-the user's Playable/Needs Work classification.
+The native picker now keeps two persisted library-entry sets, keyed by imported
+filename so separate builds with the same bundle identifier remain distinct:
+the known library and the still-unseen newly imported games. On the first Dev
+2.23 run, the existing library becomes the baseline so hundreds of old games
+are not incorrectly labelled new. Later imports receive a compact `NEW` badge
+and are shown in a dedicated **New** filter. Launching the game or choosing
+**Mark as Seen** from its long-press menu clears that status. Newness is
+independent of the user's Playable/Needs Work classification.
 
 ## Validation boundary
 
