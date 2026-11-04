@@ -1250,8 +1250,9 @@ mod tests {
         let objects: crate::mem::MutPtr<id> = env.mem.alloc(8).cast();
         env.mem.write(objects, first);
         env.mem.write(objects + 1, second);
+        let object_list = objects.cast_const();
         let array: id = msg_class![env; NSMutableArray alloc];
-        let array: id = msg![env; array initWithObjects:objects.cast_const() count:2u32];
+        let array: id = msg![env; array initWithObjects:object_list count:2u32];
         let count: NSUInteger = msg![env; array count];
         assert_eq!(count, 2);
         let actual: id = msg![env; array objectAtIndex:1u32];
