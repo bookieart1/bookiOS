@@ -1,6 +1,6 @@
 # Cocos2d candidate corpus — 2026-11-04
 
-**Dev 2.24 update (2026-11-04):** implementation now underway for the user-expanded batch: ranks 1–4 plus the two framebuffer diagnostic canaries. See [implementation and predictions](dev-2.24-implementation.md). Baseline results below are preserved; no new device pass is claimed.
+**Dev 2.24 update (2026-11-04):** expanded implementation built and downloaded at `fb810996`; all eight new tests pass on Windows and macOS. Both full suites are 292/293 because of the unchanged XML plist fixture failure. Eleven affected games and two controls await physical testing. See [implementation and predictions](dev-2.24-implementation.md) and [exact validation](dev-2.24-validation.json). Baseline results below are preserved; no new device pass is claimed.
 
 37 requested games, now 37 IPAs and 37 indexed launches in three original logs. Zombie Shock was corrected by the user to ZombieSmash, whose IPA was supplied during the audit. Two encrypted executables are package blockers. All 35 eligible launches enabled the universal recorder. See [cases](cases.md) for exact source lines, histories, competing explanations and next experiments; [manifest.json](manifest.json) includes all metadata, dependencies, hashes and resource counts.
 

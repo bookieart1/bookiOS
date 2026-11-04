@@ -1,0 +1,97 @@
+{
+  "dev": "2.24",
+  "baseline_commit": "51a633428ec2b461761434036b6968d729c15594",
+  "implementation_commit": "fb810996cfb960fa5908e78d8f471a09f5a1e896",
+  "ipa_workflow": 41796486938,
+  "test_workflow": 41796487059,
+  "new_tests": {
+    "Windows": {
+      "passed": 8,
+      "failed": 0
+    },
+    "macOS": {
+      "passed": 8,
+      "failed": 0
+    }
+  },
+  "library_suite": {
+    "Windows": {
+      "passed": 292,
+      "failed": 1,
+      "failure": "frameworks::foundation::ns_property_list_serialization::tests::xml_serialization_emits_xml_and_reports_no_error",
+      "classification": "pre-existing unchanged fixture failure"
+    },
+    "macOS": {
+      "passed": 292,
+      "failed": 1,
+      "failure": "frameworks::foundation::ns_property_list_serialization::tests::xml_serialization_emits_xml_and_reports_no_error",
+      "classification": "pre-existing unchanged fixture failure"
+    }
+  },
+  "local_compilers_or_preflight_run": false,
+  "physical_device_results": "pending for every test title and both controls",
+  "universal_recorder": "enabled by default; unchanged",
+  "packaging": {
+    "sha256": "c2911cc24f09413b30bee84061d4df99b58347cf8b7240634f775eb08e995524",
+    "bytes": 20398542,
+    "executable_sha256": "91fada2627df621413790861ab8bbbeff57d7c0f327682f31ce2a18d1eab3036",
+    "bundle_id": "com.bookieart1.idared32bit.dev",
+    "arm64": true,
+    "no_code_signature_load_command": true,
+    "no_code_signature_directory": true,
+    "no_provisioning_profile": true,
+    "marker_checks": {
+      "embedded_commit": true,
+      "embedded_workflow": true
+    },
+    "artifact_zip_digest_matches_github": true,
+    "dev_header_verified": true,
+    "universal_recorder_default": true,
+    "status": "downloaded and verified"
+  },
+  "corpus_checks": {
+    "baseline_games": 37,
+    "mapped_ipas": 37,
+    "launches": 37,
+    "scope_titles": 13,
+    "compatibility_or_partial": 9,
+    "diagnostic_only": 2,
+    "controls": 2,
+    "picker_matches_scope": true
+  },
+  "limitations": [
+    "Physical game/menu/input/graphics/audio/transitions/save compatibility not claimed from host tests",
+    "Stream callbacks and iAd failure selectors invoked explicitly in headless ABI tests; device run-loop timing still unverified",
+    "Development workflow skips formatting and full TestApp integration; lint allowed to fail",
+    "Android NDK setup failure is separate from iOS compilation",
+    "Final documentation/comment-only cleanup will not trigger another build"
+  ],
+  "checks": {
+    "native_Foundation_reference": "passed on macOS; existing copy/defaults test, not all new contracts",
+    "lint": "allowed-to-fail; raw log reports overlong comments in newly indented fixture before clippy; wrapped in documentation-only follow-up, code-identical check passed; no clean lint claim",
+    "formatting": "skipped by development workflow",
+    "full_TestApp_and_native_sanity": "skipped by development workflow",
+    "android": "NDK r28c setup failed while extracting symlinks; Android lint not reached",
+    "local_source_checks": "git diff --check; 37-record and 13-role identity/picker assertions; tested code identical after comment wrapping"
+  },
+  "source_files": [
+    "src/dyld/dylib_list.rs",
+    "src/environment/app_picker.rs",
+    "src/frameworks.rs",
+    "src/frameworks/cf_network/cf_host.rs",
+    "src/frameworks/cf_network/cf_http_message.rs",
+    "src/frameworks/cocos_contract_tests.rs",
+    "src/frameworks/core_foundation.rs",
+    "src/frameworks/core_foundation/cf_socket_stream.rs",
+    "src/frameworks/core_foundation/cf_stream.rs",
+    "src/frameworks/core_foundation/time.rs",
+    "src/frameworks/core_graphics/cg_bitmap_context.rs",
+    "src/frameworks/foundation/ns_keyed_unarchiver.rs",
+    "src/frameworks/foundation/ns_object.rs",
+    "src/frameworks/foundation/ns_run_loop.rs",
+    "src/frameworks/foundation/ns_value.rs",
+    "src/frameworks/iad.rs",
+    "src/frameworks/opengles.rs",
+    "src/frameworks/opengles/gles_guest.rs"
+  ]
+}

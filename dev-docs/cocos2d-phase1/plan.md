@@ -1,6 +1,6 @@
 # Cocos2d compatibility project: implementation roadmap
 
-**Dev 2.24 update (2026-11-04):** implementation now underway for the user-expanded batch: ranks 1–4 plus the two framebuffer diagnostic canaries. See [implementation and predictions](dev-2.24-implementation.md). Baseline results below are preserved; no new device pass is claimed.
+**Dev 2.24 update (2026-11-04):** expanded implementation built and downloaded at `fb810996`; all eight new tests pass on Windows and macOS. Both full suites are 292/293 because of the unchanged XML plist fixture failure. Eleven affected games and two controls await physical testing. See [implementation and predictions](dev-2.24-implementation.md) and [exact validation](dev-2.24-validation.json). Baseline results below are preserved; no new device pass is claimed.
 
 ## Preserved phase-1 proposal
 

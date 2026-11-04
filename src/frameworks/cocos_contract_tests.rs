@@ -88,7 +88,8 @@ fn cocos_contract_kvc_keeps_object_identity_for_guest_setter() {
         let selector: SEL = select.call_from_host(env, (name,));
         let output = env.mem.alloc_and_write(nil);
         let code = env.mem.alloc(16).cast::<u32>();
-        // ARM setter: store its third argument verbatim, with no boxing or retain.
+        // ARM setter: store its third argument verbatim, with no boxing or
+        // retain.
         for (i, word) in [0xe59f_3004u32, 0xe583_2000, 0xe12f_ff1e, output.to_bits()].into_iter().enumerate() {
             env.mem.write(code + i as u32, word);
         }
@@ -212,7 +213,8 @@ fn cocos_contract_offline_stream_callback_abi_and_lifetime() {
         let words = [0xe592_3000u32, 0xe283_3001, 0xe582_3000, 0xe582_0004, 0xe582_1008, 0xe12f_ff1e];
         let code = env.mem.alloc(24).cast::<u32>();
         for (i, word) in words.into_iter().enumerate() { env.mem.write(code + i as u32, word); }
-        // Context retain/release callbacks update distinct counters; retain returns
+        // Context retain/release callbacks update distinct counters; retain
+        // returns
         // info.
         let retain_code = env.mem.alloc(16).cast::<u32>();
         let release_code = env.mem.alloc(16).cast::<u32>();
@@ -244,7 +246,8 @@ fn cocos_contract_offline_stream_callback_abi_and_lifetime() {
         env.mem.free(out.cast());
         let (domain, code) = (error.domain, error.error);
         assert_eq!((domain, code), (1, crate::libc::errno::ENETUNREACH));
-        // Invoke the queued selector directly: the fake environment has no window.
+        // Invoke the queued selector directly: the fake environment has no
+        // window.
         () = msg![env; stream _deliverOfflineError:run_loop];
         () = msg![env; stream _deliverOfflineError:run_loop];
         assert_eq!(env.mem.read(output), 1, "one failure per stream");

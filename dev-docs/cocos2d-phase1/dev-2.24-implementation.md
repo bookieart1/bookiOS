@@ -19,7 +19,7 @@ The original logs, hashes, executable metadata and causal distinctions remain in
 | Dirt | Relevant unchanged graphics/input/audio/save control. | Existing color textures and controls remain correct; no new corruption or slowdown. |
 | Tiki Totems Premium | Relevant unchanged Foundation/UIKit/run-loop/transition control. | Existing gameplay, menus and return/relaunch remain correct. |
 
-These are shared Apple-framework defects/partial contracts, not proof cocos itself is faulty. Stream and ad implementations remain **partial offline contracts**, not complete framework emulation. Graphics probes are **diagnostic-only**. The other five corrections target well-established value/bitmap contracts and still require build and device evidence.
+These are shared Apple-framework defects/partial contracts, not proof cocos itself is faulty. Stream and ad implementations remain **partial offline contracts**, not complete framework emulation. Graphics probes are **diagnostic-only**. The other five corrections target well-established value/bitmap contracts. Focused hosted tests pass; physical-device evidence remains pending.
 
 ## Boundaries and risks
 
@@ -34,7 +34,7 @@ These are shared Apple-framework defects/partial contracts, not proof cocos itse
 
 Added `cocos_contract_*` tests exercise real ARM guest calls, including signed-double/struct returns; NSNumber 0/127/128/255 and archive round-trips; object setter identity and signed/unsigned scalar setters; Boolean archive UID identity across decoder teardown; alpha-only bitmap row padding, clear and caller-owned storage; stream callback arguments/context retention and finite delivery; iAd size/configuration and deferred error callback; finite framebuffer budget/freeze. Callback selectors are invoked explicitly in headless fixtures because fake environments have no window; physical run-loop timing remains a device test.
 
-No local Rust/Cargo/CMake/preflight is run. Lightweight diff/source checks precede hosted compilation. The existing test workflow includes macOS and Windows library tests; development formatting and full TestApp integration/native sanity steps are skipped, and lint is allowed to fail. Inspect actual results independently from IPA packaging. Baseline's known plist XML test failure must not be hidden. Hosted and package results will be appended after completion; currently pending.
+No local Rust/Cargo/CMake/preflight is run. Lightweight diff/source checks precede hosted compilation. The existing test workflow includes macOS and Windows library tests; development formatting and full TestApp integration/native sanity steps are skipped, and lint is allowed to fail. Inspect actual results independently from IPA packaging. Baseline's known plist XML test failure must not be hidden. Final hosted and package results are recorded below. No clean full-matrix pass is claimed.
 
 ## Physical test, alphabetical, without deleting saves
 
@@ -62,3 +62,14 @@ Next milestone: reconcile this same batch's fresh device outcomes and the new FB
 - [Apple Quartz context formats](https://developer.apple.com/library/archive/documentation/GraphicsImaging/Conceptual/drawingwithquartz2d/dq_context/dq_context.html): supported NULL-space 8-bit alpha-only bitmap.
 - [Apple CFStream implementation](https://github.com/apple-oss-distributions/CF/blob/main/CFStream.c) and [archived stream guide](https://developer.apple.com/library/archive/documentation/Networking/Conceptual/CFNetwork/CFStreamTasks/CFStreamTasks.html): creation/open separation, context ownership, deferred events and terminal error state.
 - [Apple-authored iAd header, SDK mirror](https://github.com/theos/sdks/blob/master/iPhoneOS9.3.sdk/System/Library/Frameworks/iAd.framework/Headers/ADBannerView.h): iOS 4 error codes and unavailable-content delegate contract. Later features are not imported into the iOS 4 subset.
+
+## Final build and validation — 2026-11-04
+
+- Built implementation: `fb810996cfb960fa5908e78d8f471a09f5a1e896`; [IPA workflow 41796486938](https://github.com/bookieart1/iDared32bit/actions/runs/41796486938), [test workflow 41796487059](https://github.com/bookieart1/iDared32bit/actions/runs/41796487059).
+- New focused tests: **8/8 pass on Windows and macOS**, including seven ARM/API contract fixtures and one finite framebuffer-probe test. Full library suite on each host: **292 passed, 1 failed**. The remaining `xml_serialization_emits_xml_and_reports_no_error` fixture and its implementation were unchanged by this batch; it already failed in the baseline.
+- Existing native Foundation copy/defaults reference passed on macOS. It is not a native reference for every new contract. Development formatting, full TestApp integration and native TestApp sanity were skipped. Lint's allowed-to-fail step hides a raw comment-length failure in the newly indented fixture; the three comments were wrapped afterwards, and a code-identical comparison passed. No clean clippy result is claimed. Android failed during NDK symlink extraction before its lint step; no runner was requeued.
+- Initial hosted submissions exposed compiler mistakes and an incomplete guest-test fixture. Corrections are preserved in `15ae6330`, `ed944275`, and `fb810996`. The successful ABI fixture supplies a real guest stack and cooperative executor, with explicit ARM struct-return storage. No production assertion was weakened to make tests pass.
+- Local checks: diff whitespace, source/picker/scope identity and manifest cardinality assertions. No local compiler, Cargo, Rust, CMake or preflight. Local original changes remain excluded.
+- Downloaded `outputs/iDared-Dev-2.24.ipa`, 20,398,542 bytes; SHA-256 `c2911cc24f09413b30bee84061d4df99b58347cf8b7240634f775eb08e995524`. Verified arm64, `com.bookieart1.idared32bit.dev`, no code-signature command/directory or provisioning profile, embedded commit and workflow, Dev 2.24 header, artifact archive digest and recorder-default configuration. Local verification: `outputs/iDared-Dev-2.24.verification.json`.
+- A final documentation/comment-only commit preserves these results without starting another build. The delivered binary remains the tested `fb810996` implementation, not a rebuild of the documentation commit.
+- **Primary/secondary games, both controls and all cluster-wide device retests remain pending.** No supplied IPA was executed locally; no title has been promoted to working. Next action is the 13-title test above, then revisit this milestone against the new logs before starting other clusters.

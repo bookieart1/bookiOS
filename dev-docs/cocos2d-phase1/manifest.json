@@ -165,7 +165,8 @@
       "implementation_status": "compatibility",
       "change": "NULL-color-space, 8-bit alpha bitmap creation, drawing and image conversion",
       "physical_result": "pending; baseline observation remains Dev 2.23",
-      "validation": "hosted tests and compilation pending"
+      "validation": "8/8 new tests pass on Windows and macOS; each full suite 292/293 (unchanged XML fixture); iOS IPA verified; device result pending",
+      "implementation_commit": "fb810996cfb960fa5908e78d8f471a09f5a1e896"
     }
   },
   {
@@ -292,7 +293,8 @@
       "implementation_status": "partial contract",
       "change": "owned offline socket streams; scheduled POSIX ENETUNREACH instead of NULL scheduling",
       "physical_result": "pending; baseline observation remains Dev 2.23",
-      "validation": "hosted tests and compilation pending"
+      "validation": "8/8 new tests pass on Windows and macOS; each full suite 292/293 (unchanged XML fixture); iOS IPA verified; device result pending",
+      "implementation_commit": "fb810996cfb960fa5908e78d8f471a09f5a1e896"
     }
   },
   {
@@ -885,7 +887,8 @@
       "implementation_status": "compatibility",
       "change": "KVC object-typed destinations retain/pass NSNumber and NSValue identities instead of scalar unboxing",
       "physical_result": "pending; baseline observation remains Dev 2.23",
-      "validation": "hosted tests and compilation pending"
+      "validation": "8/8 new tests pass on Windows and macOS; each full suite 292/293 (unchanged XML fixture); iOS IPA verified; device result pending",
+      "implementation_commit": "fb810996cfb960fa5908e78d8f471a09f5a1e896"
     }
   },
   {
@@ -1251,7 +1254,8 @@
       "implementation_status": "regression control",
       "change": "unchanged compatibility behavior: existing color textures, input, audio and save/relaunch",
       "physical_result": "pending; baseline observation remains Dev 2.23",
-      "validation": "hosted tests and compilation pending"
+      "validation": "8/8 new tests pass on Windows and macOS; each full suite 292/293 (unchanged XML fixture); iOS IPA verified; device result pending",
+      "implementation_commit": "fb810996cfb960fa5908e78d8f471a09f5a1e896"
     }
   },
   {
@@ -1771,7 +1775,8 @@
       "implementation_status": "partial contract",
       "change": "iOS 4 ADBannerView sizing/configuration and deferred unavailable-service callback",
       "physical_result": "pending; baseline observation remains Dev 2.23",
-      "validation": "hosted tests and compilation pending"
+      "validation": "8/8 new tests pass on Windows and macOS; each full suite 292/293 (unchanged XML fixture); iOS IPA verified; device result pending",
+      "implementation_commit": "fb810996cfb960fa5908e78d8f471a09f5a1e896"
     }
   },
   {
@@ -2180,7 +2185,8 @@
       "implementation_status": "compatibility",
       "change": "unsigned-byte NSNumber creation and retrieval without sign extension",
       "physical_result": "pending; baseline observation remains Dev 2.23",
-      "validation": "hosted tests and compilation pending"
+      "validation": "8/8 new tests pass on Windows and macOS; each full suite 292/293 (unchanged XML fixture); iOS IPA verified; device result pending",
+      "implementation_commit": "fb810996cfb960fa5908e78d8f471a09f5a1e896"
     }
   },
   {
@@ -2681,7 +2687,8 @@
       "implementation_status": "partial contract",
       "change": "owned offline socket streams; scheduled POSIX ENETUNREACH instead of NULL scheduling",
       "physical_result": "pending; baseline observation remains Dev 2.23",
-      "validation": "hosted tests and compilation pending"
+      "validation": "8/8 new tests pass on Windows and macOS; each full suite 292/293 (unchanged XML fixture); iOS IPA verified; device result pending",
+      "implementation_commit": "fb810996cfb960fa5908e78d8f471a09f5a1e896"
     }
   },
   {
@@ -3878,7 +3885,8 @@
       "implementation_status": "partial contract",
       "change": "iOS 4 ADBannerView sizing/configuration and deferred unavailable-service callback",
       "physical_result": "pending; baseline observation remains Dev 2.23",
-      "validation": "hosted tests and compilation pending"
+      "validation": "8/8 new tests pass on Windows and macOS; each full suite 292/293 (unchanged XML fixture); iOS IPA verified; device result pending",
+      "implementation_commit": "fb810996cfb960fa5908e78d8f471a09f5a1e896"
     }
   },
   {
@@ -4878,7 +4886,8 @@
       "implementation_status": "compatibility",
       "change": "signed Gregorian conversion including pre-1970 dates and negative fractions",
       "physical_result": "pending; baseline observation remains Dev 2.23",
-      "validation": "hosted tests and compilation pending"
+      "validation": "8/8 new tests pass on Windows and macOS; each full suite 292/293 (unchanged XML fixture); iOS IPA verified; device result pending",
+      "implementation_commit": "fb810996cfb960fa5908e78d8f471a09f5a1e896"
     }
   },
   {
@@ -5237,7 +5246,8 @@
       "implementation_status": "compatibility",
       "change": "primitive Boolean objects in keyed archives, with cached UID identity",
       "physical_result": "pending; baseline observation remains Dev 2.23",
-      "validation": "hosted tests and compilation pending"
+      "validation": "8/8 new tests pass on Windows and macOS; each full suite 292/293 (unchanged XML fixture); iOS IPA verified; device result pending",
+      "implementation_commit": "fb810996cfb960fa5908e78d8f471a09f5a1e896"
     }
   },
   {
@@ -5359,7 +5369,8 @@
       "implementation_status": "diagnostic-only",
       "change": "first incomplete guest draw/clear framebuffer snapshot within 512 calls, no glGetError consumption",
       "physical_result": "pending; baseline observation remains Dev 2.23",
-      "validation": "hosted tests and compilation pending"
+      "validation": "8/8 new tests pass on Windows and macOS; each full suite 292/293 (unchanged XML fixture); iOS IPA verified; device result pending",
+      "implementation_commit": "fb810996cfb960fa5908e78d8f471a09f5a1e896"
     }
   },
   {
@@ -5896,7 +5907,8 @@
       "implementation_status": "regression control",
       "change": "unchanged compatibility behavior: UIKit/run-loop scene transitions and save/relaunch",
       "physical_result": "pending; baseline observation remains Dev 2.23",
-      "validation": "hosted tests and compilation pending"
+      "validation": "8/8 new tests pass on Windows and macOS; each full suite 292/293 (unchanged XML fixture); iOS IPA verified; device result pending",
+      "implementation_commit": "fb810996cfb960fa5908e78d8f471a09f5a1e896"
     }
   },
   {
@@ -6476,7 +6488,8 @@
       "implementation_status": "diagnostic-only",
       "change": "first incomplete guest draw/clear framebuffer snapshot within 512 calls, no glGetError consumption",
       "physical_result": "pending; baseline observation remains Dev 2.23",
-      "validation": "hosted tests and compilation pending"
+      "validation": "8/8 new tests pass on Windows and macOS; each full suite 292/293 (unchanged XML fixture); iOS IPA verified; device result pending",
+      "implementation_commit": "fb810996cfb960fa5908e78d8f471a09f5a1e896"
     }
   },
   {
