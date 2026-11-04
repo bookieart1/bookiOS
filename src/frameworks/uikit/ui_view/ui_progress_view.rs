@@ -145,13 +145,14 @@ mod tests {
     #[test]
     fn progress_is_clamped_and_style_is_stable() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let view: id = msg_class![&mut env; UIProgressView alloc];
-        let view: id = msg![&mut env; view initWithProgressViewStyle:1i32];
-        () = msg![&mut env; view setProgress:1.5f32 animated:true];
-        let progress: f32 = msg![&mut env; view progress];
-        let style: NSInteger = msg![&mut env; view progressViewStyle];
+        let env = &mut env;
+        let view: id = msg_class![env; UIProgressView alloc];
+        let view: id = msg![env; view initWithProgressViewStyle:1i32];
+        () = msg![env; view setProgress:1.5f32 animated:true];
+        let progress: f32 = msg![env; view progress];
+        let style: NSInteger = msg![env; view progressViewStyle];
         assert_eq!(progress, 1.0);
         assert_eq!(style, 1);
-        release(&mut env, view);
+        release(env, view);
     }
 }
