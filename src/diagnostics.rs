@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 const RECENT: usize = 96;
 const SLOW_RECENT: usize = 32;
 const SIGNALS: usize = 24;
+const NIL_ORIGINS: usize = 64;
 const PROGRESS: usize = 24;
 const CRASH_CALLERS: usize = 8;
 const PROVENANCE: usize = 128;
@@ -31,6 +32,7 @@ const INVOCATION_EVENTS: usize = 32;
 const ARRAY_EVENTS: usize = 256;
 const WATCHED_OBJECTS: usize = 16;
 const OBJECT_LIFETIME_EVENTS: usize = 64;
+const AUTORELEASE_ENQUEUES: usize = 96;
 const DICTIONARY_ORIGINS: usize = 1024;
 const UNRESOLVED_RELOCATIONS: usize = 32;
 const STRING_SEARCHES: usize = 32;
@@ -509,6 +511,9 @@ struct MediaEvent {
 pub struct Recorder {
     recent: Ring<Event, RECENT>,
     signals: Ring<Event, SIGNALS>,
+    /// Nil-producing boundaries survive longer than the generic signal ring,
+    /// so a later null dereference can be related to its likely producer.
+    nil_origins: Ring<Event, NIL_ORIGINS>,
     progress: Ring<Progress, PROGRESS>,
     /// Most recent selected object-producing boundary for a bounded set of
     /// live object pointers. This is deliberately not a general allocation
@@ -524,6 +529,7 @@ pub struct Recorder {
     array_events: Ring<ArrayEvent, ARRAY_EVENTS>,
     watched_objects: [u32; WATCHED_OBJECTS],
     object_lifetime_events: Ring<ObjectLifetimeEvent, OBJECT_LIFETIME_EVENTS>,
+    autorelease_enqueues: Ring<ObjectLifetimeEvent, AUTORELEASE_ENQUEUES>,
     dictionary_origins: [DictionaryOrigin; DICTIONARY_ORIGINS],
     dictionary_origin_sequence: u64,
     defaults_lookup: DefaultsLookup,
@@ -566,6 +572,7 @@ impl Recorder {
         Box::new(Self {
             recent: Ring::default(),
             signals: Ring::default(),
+            nil_origins: Ring::default(),
             progress: Ring::default(),
             provenance: [Provenance::default(); PROVENANCE],
             value_origins: [ValueOrigin::default(); VALUE_ORIGINS],
@@ -577,6 +584,7 @@ impl Recorder {
             array_events: Ring::default(),
             watched_objects: [0; WATCHED_OBJECTS],
             object_lifetime_events: Ring::default(),
+            autorelease_enqueues: Ring::default(),
             dictionary_origins: [DictionaryOrigin::default(); DICTIONARY_ORIGINS],
             dictionary_origin_sequence: 0,
             defaults_lookup: DefaultsLookup::default(),
@@ -618,6 +626,9 @@ impl Recorder {
             note: "enter",
         };
         self.recent.push(event);
+        if object_result && result[0] == 0 {
+            self.nil_origins.push(event);
+        }
         if call.name.bytes() == b"dealloc" {
             self.forget_provenance(call.receiver);
         }
@@ -735,8 +746,7 @@ impl Recorder {
         }
         let bucket_count = VALUE_ORIGINS / VALUE_ORIGIN_WAYS;
         let bucket = ((value as usize).wrapping_mul(0x9e37_79b1) >> 4) % bucket_count;
-        self.value_origins
-            [bucket * VALUE_ORIGIN_WAYS..(bucket + 1) * VALUE_ORIGIN_WAYS]
+        self.value_origins[bucket * VALUE_ORIGIN_WAYS..(bucket + 1) * VALUE_ORIGIN_WAYS]
             .iter()
             .find(|slot| slot.value == value)
     }
@@ -1066,11 +1076,24 @@ impl Recorder {
             self.print_event(e);
         }
         echo_no_panic!(
+            "flight nil-return origins: newest {NIL_ORIGINS}; total={} (bounded producer candidates; nil may be valid)",
+            self.nil_origins.written
+        );
+        for e in self.nil_origins.iter() {
+            self.print_event(e);
+        }
+        echo_no_panic!(
             "flight failed bundle candidates: newest {BUNDLE_CANDIDATES}; total={} (attempted guest paths; each entry text-bounded)",
             self.bundle_candidates.written
         );
         for candidate in self.bundle_candidates.iter() {
-            echo_no_panic!("flight bundle candidate miss path=\"{}\" tid={} pc={:#x} lr={:#x}", candidate.path, candidate.thread, candidate.pc, candidate.lr);
+            echo_no_panic!(
+                "flight bundle candidate miss path=\"{}\" tid={} pc={:#x} lr={:#x}",
+                candidate.path,
+                candidate.thread,
+                candidate.pc,
+                candidate.lr
+            );
         }
         echo_no_panic!(
             "flight bundle directory samples: newest {BUNDLE_DIRECTORY_ENTRIES}; total={} (bounded names from failed resource directories)",
@@ -1159,6 +1182,15 @@ impl Recorder {
             echo_no_panic!("flight lifetime #{} tid={} action={} object={:#x} class=\"{}\" refcount={}->{} context={:#x} pc={:#x} lr={:#x}",
                 event.sequence, event.thread, event.action, event.object, event.class,
                 event.before, event.after, event.context, event.pc, event.lr);
+        }
+        echo_no_panic!(
+            "flight autorelease enqueues: newest {AUTORELEASE_ENQUEUES}; total={} (bounded pool/object ownership evidence; no retains added)",
+            self.autorelease_enqueues.written
+        );
+        for event in self.autorelease_enqueues.iter() {
+            echo_no_panic!("flight autorelease #{} tid={} pool={:#x} object={:#x} class=\"{}\" refcount={} pc={:#x} lr={:#x}",
+                event.sequence, event.thread, event.context, event.object,
+                event.class, event.before, event.pc, event.lr);
         }
         echo_no_panic!(
             "flight invocation lifecycle events: newest {INVOCATION_EVENTS}; total={} (bounded creation/configuration/invoke snapshots)",
@@ -1320,9 +1352,7 @@ impl Environment {
         let view_class = ObjC::try_read_isa(view, &self.mem)
             .and_then(|class| self.objc.try_get_class_name(class))
             .map(|name| ShortText::from_text(Text::from_bytes(name.as_bytes())))
-            .unwrap_or_else(|| {
-                ShortText::from_text(Text::from_bytes(b"<invalid-view>"))
-            });
+            .unwrap_or_else(|| ShortText::from_text(Text::from_bytes(b"<invalid-view>")));
         let view_state = crate::frameworks::uikit::ui_view::diagnostic_state(&self.objc, view)
             .unwrap_or_default();
         let Some(recorder) = &mut self.diagnostics else {
@@ -1403,12 +1433,7 @@ impl Environment {
 
     /// Emit retained producer/lifetime evidence at the exact failed dispatch
     /// boundary. This is failure-only and does not alter receiver validation.
-    pub fn diagnostic_dispatch_failure(
-        &mut self,
-        receiver: id,
-        class: id,
-        selector: &str,
-    ) {
+    pub fn diagnostic_dispatch_failure(&mut self, receiver: id, class: id, selector: &str) {
         let address = receiver.to_bits();
         echo_no_panic!(
             "flight dispatch failure receiver={address:#010x} class={:#010x} selector=\"{}\" pc={:#010x} lr={:#010x}",
@@ -1588,9 +1613,32 @@ impl Environment {
                 b"Notification",
                 b"unpack",
                 b"Unpack",
+                b"invoke",
+                b"Invocation",
+                b"operation",
+                b"Operation",
             ],
         ) {
             Some("callback")
+        } else if selector_matches(
+            name.bytes(),
+            &[
+                b"touch",
+                b"Touch",
+                b"hitTest",
+                b"pointInside",
+                b"sendAction",
+            ],
+        ) {
+            Some("input")
+        } else if selector_matches(
+            name.bytes(),
+            &[
+                b"draw", b"Draw", b"display", b"Display", b"layout", b"Layout", b"render",
+                b"Render", b"present", b"Present",
+            ],
+        ) {
+            Some("presentation")
         } else if selector_matches(
             name.bytes(),
             &[
@@ -1609,25 +1657,16 @@ impl Environment {
         };
         if let Some(category) = category {
             recorder.focused_boundary_events.push(FocusedBoundaryEvent {
-                sequence: recorder
-                    .focused_boundary_events
-                    .written
-                    .saturating_add(1),
+                sequence: recorder.focused_boundary_events.written.saturating_add(1),
                 thread: self.current_thread,
                 category,
                 selector: ShortText::from_text(name),
                 receiver,
-                receiver_class: ShortText::from_text(Text::from_bytes(
-                    class_name.as_bytes(),
-                )),
+                receiver_class: ShortText::from_text(Text::from_bytes(class_name.as_bytes())),
                 arguments: [regs[2], regs[3]],
                 argument_classes: [
-                    ShortText::from_text(describe_object(
-                        &self.objc, &self.mem, regs[2], true,
-                    )),
-                    ShortText::from_text(describe_object(
-                        &self.objc, &self.mem, regs[3], true,
-                    )),
+                    ShortText::from_text(describe_object(&self.objc, &self.mem, regs[2], true)),
+                    ShortText::from_text(describe_object(&self.objc, &self.mem, regs[3], true)),
                 ],
                 pc: regs[15],
                 lr: regs[14],
@@ -1999,6 +2038,30 @@ impl Environment {
             });
         }
     }
+
+    pub fn diagnostic_autorelease_pool_enqueue(&mut self, pool: id, object: id) {
+        let Some(recorder) = &mut self.diagnostics else {
+            return;
+        };
+        let class = ObjC::try_read_isa(object, &self.mem)
+            .and_then(|class| self.objc.try_get_class_name(class))
+            .map(|name| Text::from_bytes(name.as_bytes()))
+            .unwrap_or_else(|| Text::from_bytes(b"<invalid>"));
+        let refcount = self.objc.refcount_for_diagnostics(object).unwrap_or(0);
+        let regs = self.cpu.regs();
+        recorder.autorelease_enqueues.push(ObjectLifetimeEvent {
+            sequence: recorder.autorelease_enqueues.written.saturating_add(1),
+            thread: self.current_thread,
+            action: "autorelease-enqueue",
+            object: object.to_bits(),
+            class,
+            before: refcount,
+            after: refcount,
+            pc: regs[15],
+            lr: regs[14],
+            context: pool.to_bits(),
+        });
+    }
     pub fn diagnostic_dictionary_origin(
         &mut self,
         object: id,
@@ -2046,8 +2109,7 @@ impl Environment {
     }
     pub fn diagnostic_dump(&mut self, reason: &str) {
         if self.diagnostics.is_some() {
-            self.framework_state
-                .log_opengles_visual_history(reason);
+            self.framework_state.log_opengles_visual_history(reason);
         }
         if let Some(recorder) = &mut self.diagnostics {
             if !recorder.dumped {
@@ -2060,11 +2122,9 @@ impl Environment {
                         let mut candidates = [0; 64];
                         let mut n = 0;
                         for event in recorder.recent.iter().rev().take(8) {
-                            for address in [
-                                event.call.receiver,
-                                event.call.args[2],
-                                event.call.args[3],
-                            ] {
+                            for address in
+                                [event.call.receiver, event.call.args[2], event.call.args[3]]
+                            {
                                 if address != 0 && !candidates[..n].contains(&address) {
                                     candidates[n] = address;
                                     n += 1;
@@ -2179,7 +2239,9 @@ impl Environment {
                     let start = instruction_address
                         .saturating_sub(16)
                         .max(binary.text_segment_base.unwrap());
-                    let end = instruction_address.saturating_add(16).min(binary.last_segment_end);
+                    let end = instruction_address
+                        .saturating_add(16)
+                        .min(binary.last_segment_end);
                     let bytes = self
                         .mem
                         .get_bytes_fallible(ConstVoidPtr::from_bits(start), end - start);
@@ -2631,15 +2693,16 @@ mod tests {
             env.diagnostic_string_search(
                 haystack.to_bits(),
                 needle.to_bits(),
-                if index % 2 == 0 { 0 } else { haystack.to_bits() + 4 },
+                if index % 2 == 0 {
+                    0
+                } else {
+                    haystack.to_bits() + 4
+                },
             );
         }
         assert_eq!(*env.cpu.regs(), registers);
         let recorder = env.diagnostics.as_ref().unwrap();
-        assert_eq!(
-            recorder.string_searches.iter().count(),
-            STRING_SEARCHES
-        );
+        assert_eq!(recorder.string_searches.iter().count(), STRING_SEARCHES);
         let last = recorder.string_searches.iter().last().unwrap();
         assert_eq!(last.text.bytes(), &[b'x'; 80]);
         assert_eq!(last.pattern.bytes(), b".xml");
@@ -2691,7 +2754,10 @@ mod tests {
         assert_eq!(selector.delay_ms, 250);
         let collection = recorder.collection_events.iter().last().unwrap();
         assert_eq!(collection.raw_word_count, 3);
-        assert_eq!(collection.raw_words, [0x4433_2211, 0x8877_6655, 0xccbb_aa99]);
+        assert_eq!(
+            collection.raw_words,
+            [0x4433_2211, 0x8877_6655, 0xccbb_aa99]
+        );
         assert!(std::mem::size_of::<Recorder>() < MAX_RECORDER_BYTES);
     }
 

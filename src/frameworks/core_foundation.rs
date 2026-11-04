@@ -22,6 +22,7 @@ pub mod cf_bundle;
 pub mod cf_data;
 pub mod cf_dictionary;
 pub mod cf_locale;
+pub mod cf_notification_center;
 pub mod cf_number;
 pub mod cf_preferences;
 pub mod cf_run_loop;
@@ -34,6 +35,11 @@ pub mod cf_type;
 pub mod cf_url;
 pub mod cf_uuid;
 pub mod time;
+
+#[derive(Default)]
+pub struct State {
+    cf_notification_center: cf_notification_center::State,
+}
 
 pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
     path: "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation",
@@ -66,6 +72,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
         cf_data::FUNCTIONS,
         cf_locale::FUNCTIONS,
         cf_number::FUNCTIONS,
+        cf_notification_center::FUNCTIONS,
         cf_preferences::FUNCTIONS,
         cf_run_loop::FUNCTIONS,
         cf_run_loop_timer::FUNCTIONS,

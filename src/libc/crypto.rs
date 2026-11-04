@@ -8,7 +8,9 @@
 use crate::dyld::FunctionExports;
 use crate::mem::{ConstVoidPtr, GuestUSize, MutPtr, MutVoidPtr, SafeRead};
 use crate::{export_c_func, Environment};
-use aes::cipher::{generic_array::GenericArray as CipherArray, BlockDecrypt, BlockEncrypt, KeyInit};
+use aes::cipher::{
+    generic_array::GenericArray as CipherArray, BlockDecrypt, BlockEncrypt, KeyInit,
+};
 use aes::{Aes128, Aes192, Aes256};
 use digest::Digest;
 use md5::Md5;
@@ -71,6 +73,14 @@ fn CC_SHA1(env: &mut Environment, data: ConstVoidPtr, len: u32, md: MutPtr<u8>) 
     hasher.update(env.mem.bytes_at(data.cast(), len));
     let digest = hasher.finalize();
     env.mem.bytes_at_mut(md, 20).copy_from_slice(&digest[..]);
+    md
+}
+
+fn CC_SHA224(env: &mut Environment, data: ConstVoidPtr, len: u32, md: MutPtr<u8>) -> MutPtr<u8> {
+    let mut hasher = Sha224::new();
+    hasher.update(env.mem.bytes_at(data.cast(), len));
+    let digest = hasher.finalize();
+    env.mem.bytes_at_mut(md, 28).copy_from_slice(&digest[..]);
     md
 }
 
@@ -141,13 +151,7 @@ fn CC_SHA1_Init(env: &mut Environment, c: MutPtr<CC_SHA1_CTX>) -> i32 {
     env.mem.write(
         c,
         CC_SHA1_CTX {
-            hash: [
-                0x67452301,
-                0xefcdab89,
-                0x98badcfe,
-                0x10325476,
-                0xc3d2e1f0,
-            ],
+            hash: [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0],
             count: [0; 2],
             data: [0; 64],
             num: 0,
@@ -491,7 +495,8 @@ fn CCCrypt(
         .bytes_at_mut(data_out.cast(), output.len().try_into().unwrap())
         .copy_from_slice(&output);
     if !data_out_moved.is_null() {
-        env.mem.write(data_out_moved, output.len().try_into().unwrap());
+        env.mem
+            .write(data_out_moved, output.len().try_into().unwrap());
     }
     K_CC_SUCCESS
 }
@@ -502,6 +507,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CC_MD5_Final(_, _)),
     export_c_func!(CC_MD5(_, _, _)),
     export_c_func!(CC_SHA1(_, _, _)),
+    export_c_func!(CC_SHA224(_, _, _)),
     export_c_func!(CC_SHA1_Init(_)),
     export_c_func!(CC_SHA1_Update(_, _, _)),
     export_c_func!(CC_SHA1_Final(_, _)),
@@ -521,23 +527,54 @@ mod tests {
     fn incremental_sha1_uses_guest_copyable_historical_context() {
         assert_eq!(std::mem::size_of::<CC_SHA1_CTX>(), 96);
         let mut env = Environment::new_fake_for_test();
-        let ctx = env.mem.alloc(std::mem::size_of::<CC_SHA1_CTX>() as u32).cast();
-        let copy = env.mem.alloc(std::mem::size_of::<CC_SHA1_CTX>() as u32).cast();
+        let ctx = env
+            .mem
+            .alloc(std::mem::size_of::<CC_SHA1_CTX>() as u32)
+            .cast();
+        let copy = env
+            .mem
+            .alloc(std::mem::size_of::<CC_SHA1_CTX>() as u32)
+            .cast();
         let data = env.mem.alloc(3).cast::<u8>();
         env.mem.bytes_at_mut(data, 3).copy_from_slice(b"abc");
         let digest = env.mem.alloc(20).cast::<u8>();
 
         assert_eq!(CC_SHA1_Init(&mut env, ctx), 1);
-        assert_eq!(CC_SHA1_Update(&mut env, ctx, data.cast_const().cast(), 1), 1);
+        assert_eq!(
+            CC_SHA1_Update(&mut env, ctx, data.cast_const().cast(), 1),
+            1
+        );
         let copied_context = env.mem.read(ctx);
         env.mem.write(copy, copied_context);
-        assert_eq!(CC_SHA1_Update(&mut env, copy, (data + 1).cast_const().cast(), 2), 1);
+        assert_eq!(
+            CC_SHA1_Update(&mut env, copy, (data + 1).cast_const().cast(), 2),
+            1
+        );
         assert_eq!(CC_SHA1_Final(&mut env, digest, copy), 1);
         assert_eq!(
             env.mem.bytes_at(digest, 20),
             &[
-                0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a, 0xba, 0x3e,
-                0x25, 0x71, 0x78, 0x50, 0xc2, 0x6c, 0x9c, 0xd0, 0xd8, 0x9d,
+                0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a, 0xba, 0x3e, 0x25, 0x71, 0x78, 0x50,
+                0xc2, 0x6c, 0x9c, 0xd0, 0xd8, 0x9d,
+            ]
+        );
+    }
+
+    #[test]
+    fn one_shot_sha224_matches_standard_vector() {
+        let mut env = Environment::new_fake_for_test();
+        let data = env.mem.alloc(3).cast::<u8>();
+        env.mem.bytes_at_mut(data, 3).copy_from_slice(b"abc");
+        let digest = env.mem.alloc(28).cast::<u8>();
+        assert_eq!(
+            CC_SHA224(&mut env, data.cast_const().cast(), 3, digest),
+            digest
+        );
+        assert_eq!(
+            env.mem.bytes_at(digest, 28),
+            &[
+                0x23, 0x09, 0x7d, 0x22, 0x34, 0x05, 0xd8, 0x22, 0x86, 0x42, 0xa4, 0x77, 0xbd, 0xa2,
+                0x55, 0xb3, 0x2a, 0xad, 0xbc, 0xe4, 0xbd, 0xa0, 0xb3, 0xf7, 0xe3, 0x6c, 0x9d, 0xa7,
             ]
         );
     }

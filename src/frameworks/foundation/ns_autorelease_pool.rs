@@ -5,8 +5,8 @@
  */
 //! `NSAutoreleasePool`.
 
-use crate::objc::{id, msg, objc_classes, release, ClassExports, HostObject, NSZonePtr};
 use crate::cpu::Cpu;
+use crate::objc::{id, msg, objc_classes, release, ClassExports, HostObject, NSZonePtr};
 use crate::{Environment, ThreadId};
 use std::num::NonZeroU32;
 
@@ -67,6 +67,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())addObject:(id)obj {
+    env.diagnostic_autorelease_pool_enqueue(this, obj);
     env.objc.borrow_mut::<NSAutoreleasePoolHostObject>(this).objects.push(obj);
 }
 

@@ -56,7 +56,10 @@ pub fn CGBitmapContextCreate(
     assert!(bits_per_component == 8); // TODO: support other bit depths
 
     let color_space = if color_space.is_null() {
-        assert_eq!(bitmap_info, kCGImageAlphaOnly, "NULL color space requires alpha-only bitmap");
+        assert_eq!(
+            bitmap_info, kCGImageAlphaOnly,
+            "NULL color space requires alpha-only bitmap"
+        );
         // Internal marker only; this is not a fabricated guest color space.
         "alpha-only"
     } else {
@@ -152,12 +155,25 @@ pub fn CGBitmapContextCreateImage(env: &mut Environment, context: CGContextRef) 
     let CGContextSubclass::CGBitmapContext(bitmap_data) = host_obj.subclass;
     if bitmap_data.alpha_info == kCGImageAlphaOnly {
         let mut pixels = Vec::new();
-        for row in env.mem.bytes_at(bitmap_data.data.cast(), bitmap_data.bytes_per_row.checked_mul(bitmap_data.height).unwrap()).chunks(bitmap_data.bytes_per_row as usize) {
+        for row in env
+            .mem
+            .bytes_at(
+                bitmap_data.data.cast(),
+                bitmap_data
+                    .bytes_per_row
+                    .checked_mul(bitmap_data.height)
+                    .unwrap(),
+            )
+            .chunks(bitmap_data.bytes_per_row as usize)
+        {
             for &alpha in &row[..bitmap_data.width as usize] {
                 pixels.extend([0, 0, 0, alpha]);
             }
         }
-        return cg_image::from_image(env, Image::from_pixel_vec(pixels, (bitmap_data.width, bitmap_data.height)));
+        return cg_image::from_image(
+            env,
+            Image::from_pixel_vec(pixels, (bitmap_data.width, bitmap_data.height)),
+        );
     }
     assert!(
         bitmap_data.bits_per_component == 8
@@ -582,6 +598,30 @@ impl CGBitmapContextDrawer<'_> {
             gamma_decode(self.rgb_fill_color.2 * multiply_by),
             self.rgb_fill_color.3, // alpha is always linear
         )
+    }
+    /// Convert an sRGB Core Graphics color into this bitmap's linear storage
+    /// convention, including premultiplication when required.
+    pub fn linear_color(
+        &self,
+        color: (CGFloat, CGFloat, CGFloat, CGFloat),
+    ) -> (CGFloat, CGFloat, CGFloat, CGFloat) {
+        let multiply_by = match self.bitmap_info.alpha_info {
+            kCGImageAlphaPremultipliedLast | kCGImageAlphaPremultipliedFirst => color.3,
+            _ => 1.0,
+        };
+        (
+            gamma_decode(color.0 * multiply_by),
+            gamma_decode(color.1 * multiply_by),
+            gamma_decode(color.2 * multiply_by),
+            color.3,
+        )
+    }
+
+    pub fn user_point_at_pixel(&self, x: i32, y: i32) -> CGPoint {
+        self.transform.invert().apply_to_point(CGPoint {
+            x: x as CGFloat + 0.5,
+            y: y as CGFloat + 0.5,
+        })
     }
     /// Set the pixel at `coords` to `color`. `color` must be linear RGB, not
     /// sRGB! Note that `coords` are absolute: you must do transformation

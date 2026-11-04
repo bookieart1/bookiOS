@@ -290,35 +290,62 @@ fn enumerate_apps(
     // Put the current focused device-test batch first, in alphabetical order,
     // so a full round can be exercised without repeatedly paging through the
     // library. Everything else remains alphabetical.
-    // Normalized display names cover the mixed archive naming in this batch;
-    // matching is exact or a version-suffixed prefix, never a substring.
-    const DEV_227_TEST_NAMES: &[&str] = &[
+    // Normalized display names, bundle identifiers and archive filenames cover
+    // the mixed naming in this batch. In particular, the Super Hexagon archive
+    // has an empty display name, so identity fallback is required to pin it.
+    const DEV_228_TEST_NAMES: &[&str] = &[
         "100CHAMBERS",
         "BIKERACEPRO",
+        "CANNONCADETS",
         "CARNIVAL",
+        "CLOWNINGAROUND",
+        "CURRENT",
         "DISMOUNT",
         "FIELDRUNNERS",
         "FIELDRUNNERS2",
+        "JELLYCAR154",
+        "KICKTHEBUDDY",
+        "LABYRINTH2",
         "LEGENDSOFOOO",
         "MXMAYHEM",
         "NINJUMP",
         "PARAPANICHD",
+        "PEGGLE",
+        "PERFECTCELL",
         "SCRIBBLENAUTS",
+        "SPOING",
+        "SUPERFALL",
         "SUPERHEXAGON",
         "THESIMS3",
+        "TIKITOTEMS2",
+        "TRAINYARD",
+        "TRISM",
         "WIREWAY",
     ];
     apps.sort_by_key(|app| {
-        let display_name: String = app
-            .display_name
-            .to_uppercase()
-            .chars()
-            .filter(|character| character.is_ascii_alphanumeric())
-            .collect();
-        let is_test = DEV_227_TEST_NAMES
+        let normalized = |text: &str| -> String {
+            text.to_uppercase()
+                .chars()
+                .filter(|character| character.is_ascii_alphanumeric())
+                .collect()
+        };
+        let display_name = normalized(&app.display_name);
+        let bundle_identifier = normalized(&app.bundle_identifier);
+        let filename = normalized(
+            app.path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default(),
+        );
+        let rank = DEV_228_TEST_NAMES
             .iter()
-            .any(|&name| display_name == name || display_name.starts_with(name));
-        (!is_test, app.display_name.to_uppercase())
+            .position(|&name| {
+                [&display_name, &bundle_identifier, &filename]
+                    .into_iter()
+                    .any(|identity| identity == name || identity.starts_with(name))
+            })
+            .unwrap_or(usize::MAX);
+        (rank, app.display_name.to_uppercase())
     });
 
     Ok(apps)
@@ -826,7 +853,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.27",
+            "iDared 32bit {}{}{} · Dev 2.28",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""

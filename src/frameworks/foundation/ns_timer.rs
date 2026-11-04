@@ -22,6 +22,8 @@ struct NSTimerHostObject {
     /// Strong reference
     target: id,
     selector: SEL,
+    /// Invocation-based timers call `-invoke` without the timer argument.
+    invokes_invocation: bool,
     /// Strong reference
     user_info: id,
     repeats: bool,
@@ -56,6 +58,7 @@ fn new_timer(
         rust_interval,
         target,
         selector,
+        invokes_invocation: false,
         user_info,
         repeats,
         due_by: Some(due_by),
@@ -79,6 +82,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         rust_interval: Duration::from_secs_f64(0.0001),
         target: nil,
         selector,
+        invokes_invocation: false,
         user_info: nil,
         repeats: false,
         due_by: None,
@@ -137,6 +141,21 @@ pub const CLASSES: ClassExports = objc_classes! {
     timer
 }
 
++ (id)scheduledTimerWithTimeInterval:(NSTimeInterval)interval
+                          invocation:(id)invocation
+                             repeats:(bool)repeats {
+    let selector = env.objc.lookup_selector("invoke").unwrap();
+    let delay = Duration::from_secs_f64(interval.max(0.0001));
+    let due_by = Instant::now().checked_add(delay).unwrap();
+    let timer = new_timer(env, this, interval, invocation, selector, nil, repeats, due_by);
+    env.objc.borrow_mut::<NSTimerHostObject>(timer).invokes_invocation = true;
+    let timer = autorelease(env, timer);
+    let run_loop: id = msg_class![env; NSRunLoop currentRunLoop];
+    let mode: id = ns_string::get_static_str(env, NSDefaultRunLoopMode);
+    let _: () = msg![env; run_loop addTimer:timer forMode:mode];
+    timer
+}
+
 - (id)initWithFireDate:(id)fire_date
               interval:(NSTimeInterval)interval
                 target:(id)target
@@ -155,6 +174,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         rust_interval: Duration::from_secs_f64(interval),
         target,
         selector,
+        invokes_invocation: false,
         user_info,
         repeats,
         due_by: Some(due_by),
@@ -210,13 +230,18 @@ pub const CLASSES: ClassExports = objc_classes! {
         target,
         selector,
         repeats,
+        invokes_invocation,
         ..
     } = env.objc.borrow(this);
 
     let pool: id = msg_class![env; NSAutoreleasePool new];
 
     // Signature should be `- (void)timerDidFire:(NSTimer *)which`.
-    let _: () = msg_send(env, (target, selector, this));
+    if invokes_invocation {
+        let _: () = msg![env; target invoke];
+    } else {
+        let _: () = msg_send(env, (target, selector, this));
+    }
 
     release(env, pool);
 
@@ -257,6 +282,7 @@ pub(super) fn handle_timer(env: &mut Environment, timer: id) -> Option<Instant> 
         target,
         selector,
         repeats,
+        invokes_invocation,
         due_by,
         is_running_callback,
         run_loop,
@@ -329,7 +355,11 @@ pub(super) fn handle_timer(env: &mut Environment, timer: id) -> Option<Instant> 
     let pool: id = msg_class![env; NSAutoreleasePool new];
 
     // Signature should be `- (void)timerDidFire:(NSTimer *)which`.
-    let _: () = msg_send(env, (target, selector, timer));
+    if invokes_invocation {
+        let _: () = msg![env; target invoke];
+    } else {
+        let _: () = msg_send(env, (target, selector, timer));
+    }
 
     env.objc
         .borrow_mut::<NSTimerHostObject>(timer)

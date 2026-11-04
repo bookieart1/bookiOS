@@ -1,9 +1,9 @@
 # iDared 32-bit tested-app compatibility ledger
 
 Last reconciled: November 4, 2026
-Latest device-tested checkpoint: **iDared Dev 2.26**, implementation `eeb7775480cb8bd7b76089fdcdf64d9f16db1b3f`, IPA workflow `41816961881`; three supplied logs cover all thirteen requested launches.
-Latest built checkpoint: **iDared Dev 2.26**, same embedded implementation and workflow. Build verification and physical-device compatibility remain separate evidence categories.
-Current activity: **Dev 2.27 is the user-authorized exact-Foundation batch. Twelve general historical contracts cover fourteen requested games: 100 Chambers, BikeRacePro, Carnival, Dismount, Fieldrunners, Fieldrunners 2, Legends of Ooo, MX Mayhem, NinJump, ParaPanic HD, Scribblenauts, Super Hexagon, The Sims 3 and Wire Way. All fourteen are pinned first in the picker. No physical result is claimed before device testing.**
+Latest device-tested checkpoint: **iDared Dev 2.27**, implementation `4b4b3bd8abd91aa1bd65153624ed8071bd40be11`, IPA workflow `41837856742`; three supplied logs cover all fourteen requested launches.
+Latest built checkpoint: **iDared Dev 2.27**, same embedded implementation and workflow. Build verification and physical-device compatibility remain separate evidence categories.
+Current activity: **Dev 2.28 is the user-authorized locked 27-title follow-up: fourteen general compatibility corrections, twelve bounded diagnostic experiments and Spoing as the sole healthy control. All 27 are pinned first in strict alphabetical order through display/bundle/file identity. No physical result is claimed before device testing.**
 
 The maintainer review at the end of this ledger qualifies earlier implementation claims. In particular, Dev 1.47's font fallback is provisional, its arc implementation is approximate, and its date formatter is not locale/time-zone complete. Earlier sections are historical checkpoints, not a claim that all listed work is currently complete.
 
@@ -4287,3 +4287,49 @@ The exact contract, implementation boundary, prediction and falsifier for each
 title are preserved in `dev-2.27-exact-foundation-contracts.md`. Source and host
 tests are implementation evidence only. The ledger must not promote any title
 until the verified artifact is exercised on the physical device.
+
+## Dev 2.27 physical-device result — November 4, 2026
+
+Three returned logs verify implementation `4b4b3bd8abd91aa1bd65153624ed8071bd40be11`
+and workflow `41837856742`; the universal recorder was active. Every Dev 2.27
+contract crossed its former first blocker. Wire Way is the meaningful functional
+advance: gameplay and input were smooth for about 124 seconds, with 10,070 main
+loops and 3,679 presentations, but its pause and post-level states are black
+despite continued rendering and delivered touches. It is therefore partial,
+not fully compatible.
+
+BikeRacePro and Legends of Ooo now share missing
+`NSURL URLByAppendingPathComponent:`; MX Mayhem reaches missing recursive
+directory enumeration; ParaPanic HD reaches real SHA-224; Dismount reaches
+dynamic `printf` width/precision; The Sims 3 reaches `CGContextBeginPath`;
+100 Chambers reaches block-backed operation queues; and Carnival reaches the
+Darwin notification center. Those are later general contracts, not repetitions
+of the old blockers.
+
+Fieldrunners, NinJump, Scribblenauts and Super Hexagon now end in strict null or
+invalid-value consumption whose origin is not yet proven. Fieldrunners 2 enters
+a guest initialization wait: six threads continue running but the application
+main loop never starts, no frame presents, and queued Home events cannot be
+handled. These require bounded provenance/thread diagnostics rather than relaxed
+memory behavior. Super Hexagon's valid IPA also has an empty display name, so
+the title-based front pin missed it; bundle-identifier/filename fallback is the
+correct picker fix.
+
+Complete evidence hashes, per-title boundaries and the recommended next batch
+are preserved in `dev-2.27-device-result.md`. This review updates evidence only;
+it does not authorize a new implementation, push or IPA.
+
+## Dev 2.28 locked 27-title implementation — November 4, 2026
+
+The user hard-locked the complete batch. Fourteen later general contracts are
+implemented for 100 Chambers, Bike Race Pro, Cannon Cadets, Carnival, Dismount,
+Kick the Buddy, Labyrinth 2, Legends of Ooo, MX Mayhem, ParaPanic HD, Perfect
+Cell, The Sims 3, Trainyard and Trism. Twelve unresolved titles receive bounded
+nil-producer, autorelease-enqueue, input, presentation or invocation evidence:
+Clowning Around, Current, Fieldrunners, Fieldrunners 2, JellyCar 1.5.4, NinJump,
+Peggle, Scribblenauts, SUPERFALL, Super Hexagon, Tiki Totems 2 and Wire Way.
+Spoing is the only unchanged regression control.
+
+Exact implementation boundaries, per-title predictions and safety limits are
+in `dev-2.28-locked-27-contracts-and-provenance.md`. Source/tests/build evidence
+must remain separate from the forthcoming physical-device result.

@@ -274,6 +274,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     msg_class![env; NSURL fileURLWithPath:path]
 }
 
+- (id)URLByAppendingPathComponent:(id)path_component { // NSString *
+    msg![env; this URLByAppendingPathComponent:path_component isDirectory:false]
+}
+
 - (id)URLByDeletingLastPathComponent {
     let &NSURLHostObject::FileURL { ns_string, .. } = env.objc.borrow(this) else {
         unimplemented!(); // TODO
@@ -325,8 +329,12 @@ fn percent_decode_utf8(component: &str) -> Option<String> {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' {
-            let high = bytes.get(i + 1).and_then(|byte| (*byte as char).to_digit(16))?;
-            let low = bytes.get(i + 2).and_then(|byte| (*byte as char).to_digit(16))?;
+            let high = bytes
+                .get(i + 1)
+                .and_then(|byte| (*byte as char).to_digit(16))?;
+            let low = bytes
+                .get(i + 2)
+                .and_then(|byte| (*byte as char).to_digit(16))?;
             decoded.push(((high << 4) | low) as u8);
             i += 3;
         } else {

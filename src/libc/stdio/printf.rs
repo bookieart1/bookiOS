@@ -979,6 +979,7 @@ where
     let mut format_char_idx = 0;
 
     let mut matched_args = 0;
+    let mut matched_conversion = false;
 
     'outer: loop {
         let c = env.mem.read(format + format_char_idx);
@@ -1016,6 +1017,12 @@ where
             continue;
         }
 
+        let assignment_suppressed = if env.mem.read(format + format_char_idx) == b'*' {
+            format_char_idx += 1;
+            true
+        } else {
+            false
+        };
         let mut max_width: u32 = 0;
         while let c @ b'0'..=b'9' = env.mem.read(format + format_char_idx) {
             max_width = max_width * 10 + (c - b'0') as u32;
@@ -1100,22 +1107,25 @@ where
                 match res {
                     Ok((val, len)) => {
                         src_char_idx += len;
-                        match length_modifier {
-                            Some("hh") => {
-                                let c_char_ptr: ConstPtr<i8> = args.next(env);
-                                env.mem.write(c_char_ptr.cast_mut(), val as i8);
+                        matched_conversion = true;
+                        if !assignment_suppressed {
+                            match length_modifier {
+                                Some("hh") => {
+                                    let c_char_ptr: ConstPtr<i8> = args.next(env);
+                                    env.mem.write(c_char_ptr.cast_mut(), val as i8);
+                                }
+                                Some("h") => {
+                                    let c_short_ptr: ConstPtr<i16> = args.next(env);
+                                    env.mem.write(c_short_ptr.cast_mut(), val as i16);
+                                }
+                                None => {
+                                    let c_int_ptr: ConstPtr<i32> = args.next(env);
+                                    env.mem.write(c_int_ptr.cast_mut(), val as i32);
+                                }
+                                _ => unimplemented!("length_modifier {:?}", length_modifier),
                             }
-                            Some("h") => {
-                                let c_short_ptr: ConstPtr<i16> = args.next(env);
-                                env.mem.write(c_short_ptr.cast_mut(), val as i16);
-                            }
-                            None => {
-                                let c_int_ptr: ConstPtr<i32> = args.next(env);
-                                env.mem.write(c_int_ptr.cast_mut(), val as i32);
-                            }
-                            _ => unimplemented!("length_modifier {:?}", length_modifier),
+                            matched_args += 1;
                         }
-                        matched_args += 1;
                     }
                     Err(_) => break 'outer,
                 }
@@ -1126,24 +1136,27 @@ where
                 let val = match res {
                     Ok((val, len)) => {
                         src_char_idx += len;
+                        matched_conversion = true;
                         val
                     }
                     Err(_) => break 'outer,
                 };
-                match length_modifier {
-                    None => {
-                        let c_int_ptr: ConstPtr<f32> = args.next(env);
-                        env.mem.write(c_int_ptr.cast_mut(), val as f32);
+                if !assignment_suppressed {
+                    match length_modifier {
+                        None => {
+                            let c_int_ptr: ConstPtr<f32> = args.next(env);
+                            env.mem.write(c_int_ptr.cast_mut(), val as f32);
+                        }
+                        Some("l") => {
+                            let c_int_ptr: ConstPtr<f64> = args.next(env);
+                            env.mem.write(c_int_ptr.cast_mut(), val);
+                        }
+                        Some(modifier) => {
+                            unimplemented!("Length formater '{}' for f", modifier)
+                        }
                     }
-                    Some("l") => {
-                        let c_int_ptr: ConstPtr<f64> = args.next(env);
-                        env.mem.write(c_int_ptr.cast_mut(), val);
-                    }
-                    Some(modifier) => {
-                        unimplemented!("Length formater '{}' for f", modifier)
-                    }
+                    matched_args += 1;
                 }
-                matched_args += 1;
             }
             b'x' | b'X' | b'u' => {
                 let base: u32 = match specifier {
@@ -1171,26 +1184,29 @@ where
                 match res {
                     Ok((val, len)) => {
                         src_char_idx += len;
-                        match length_modifier {
-                            Some("hh") => {
-                                let c_char_ptr: ConstPtr<u8> = args.next(env);
-                                env.mem.write(c_char_ptr.cast_mut(), val as u8);
+                        matched_conversion = true;
+                        if !assignment_suppressed {
+                            match length_modifier {
+                                Some("hh") => {
+                                    let c_char_ptr: ConstPtr<u8> = args.next(env);
+                                    env.mem.write(c_char_ptr.cast_mut(), val as u8);
+                                }
+                                Some("h") => {
+                                    let c_short_ptr: ConstPtr<u16> = args.next(env);
+                                    env.mem.write(c_short_ptr.cast_mut(), val as u16);
+                                }
+                                None => {
+                                    let c_u32_ptr: ConstPtr<u32> = args.next(env);
+                                    env.mem.write(c_u32_ptr.cast_mut(), val as u32);
+                                }
+                                Some("ll") => {
+                                    let c_u64_ptr: ConstPtr<u64> = args.next(env);
+                                    env.mem.write(c_u64_ptr.cast_mut(), val);
+                                }
+                                _ => unimplemented!("length_modifier {:?}", length_modifier),
                             }
-                            Some("h") => {
-                                let c_short_ptr: ConstPtr<u16> = args.next(env);
-                                env.mem.write(c_short_ptr.cast_mut(), val as u16);
-                            }
-                            None => {
-                                let c_u32_ptr: ConstPtr<u32> = args.next(env);
-                                env.mem.write(c_u32_ptr.cast_mut(), val as u32);
-                            }
-                            Some("ll") => {
-                                let c_u64_ptr: ConstPtr<u64> = args.next(env);
-                                env.mem.write(c_u64_ptr.cast_mut(), val);
-                            }
-                            _ => unimplemented!("length_modifier {:?}", length_modifier),
+                            matched_args += 1;
                         }
-                        matched_args += 1;
                     }
                     Err(_) => break 'outer,
                 }
@@ -1225,7 +1241,11 @@ where
                     c = env.mem.read(format + format_char_idx);
                     format_char_idx += 1;
                 }
-                let mut dst_ptr: MutPtr<u8> = args.next(env);
+                let mut dst_ptr: MutPtr<u8> = if assignment_suppressed {
+                    MutPtr::null()
+                } else {
+                    args.next(env)
+                };
                 let mut matched = false;
                 // Consume `src` while chars are in the set
                 // (or not in the set if inverted)
@@ -1237,8 +1257,10 @@ where
                 let mut match_count = 0;
                 while set.contains(&cc) ^ inverted && cc != b'\0' {
                     matched = true;
-                    env.mem.write(dst_ptr, cc);
-                    dst_ptr += 1;
+                    if !assignment_suppressed {
+                        env.mem.write(dst_ptr, cc);
+                        dst_ptr += 1;
+                    }
                     match_count += 1;
                     if max_width > 0 && match_count == max_width {
                         break;
@@ -1255,15 +1277,22 @@ where
                     src_char_idx -= 1;
                 }
                 if matched {
-                    env.mem.write(dst_ptr, b'\0');
-                    matched_args += 1;
+                    matched_conversion = true;
+                    if !assignment_suppressed {
+                        env.mem.write(dst_ptr, b'\0');
+                        matched_args += 1;
+                    }
                 } else {
                     break 'outer;
                 }
             }
             b's' => {
                 assert!(length_modifier.is_none());
-                let orig_dst_ptr: MutPtr<u8> = args.next(env);
+                let orig_dst_ptr: MutPtr<u8> = if assignment_suppressed {
+                    MutPtr::null()
+                } else {
+                    args.next(env)
+                };
                 let mut dst_ptr: MutPtr<u8> = orig_dst_ptr;
                 let mut written = 0;
                 let mut matched = false;
@@ -1281,9 +1310,13 @@ where
                             break;
                         }
                         matched = true;
-                        env.mem.write(dst_ptr, cc);
+                        if !assignment_suppressed {
+                            env.mem.write(dst_ptr, cc);
+                        }
                         src_char_idx += 1;
-                        dst_ptr += 1;
+                        if !assignment_suppressed {
+                            dst_ptr += 1;
+                        }
                         written += 1;
                     } else {
                         ungetc_fn(env, subject, cc);
@@ -1293,19 +1326,22 @@ where
                 if !matched {
                     break 'outer;
                 }
-                env.mem.write(dst_ptr, b'\0');
-                matched_args += 1;
-                log_dbg!(
-                    "sscanf_common_generic read %s '{:?}'",
-                    env.mem.cstr_at_utf8(orig_dst_ptr)
-                );
+                matched_conversion = true;
+                if !assignment_suppressed {
+                    env.mem.write(dst_ptr, b'\0');
+                    matched_args += 1;
+                    log_dbg!(
+                        "sscanf_common_generic read %s '{:?}'",
+                        env.mem.cstr_at_utf8(orig_dst_ptr)
+                    );
+                }
             }
             // TODO: more specifiers
             _ => unimplemented!("Format character '{}'", specifier as char),
         }
     }
 
-    if matched_args == 0 {
+    if matched_args == 0 && !matched_conversion {
         if let Ok(cc) = getc_fn(env, subject, src_char_idx) {
             // nothing matched, backtrack one
             ungetc_fn(env, subject, cc.into());

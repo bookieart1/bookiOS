@@ -14,7 +14,7 @@ use crate::Environment;
 /// The fixed header of a 32-bit Apple block literal. Captured variables, if
 /// any, follow this header and are accessed by the block's invoke function.
 #[repr(C)]
-struct BlockLiteral {
+pub(crate) struct BlockLiteral {
     _isa: MutVoidPtr,
     _flags: i32,
     _reserved: i32,
@@ -49,7 +49,7 @@ fn dispatch_group_create(env: &mut Environment) -> MutVoidPtr {
     new_queue_object(env)
 }
 
-fn invoke_block_synchronously(env: &mut Environment, block: MutPtr<BlockLiteral>) {
+pub(crate) fn invoke_block_synchronously(env: &mut Environment, block: MutPtr<BlockLiteral>) {
     assert!(!block.is_null());
     let invoke = env.mem.read(block).invoke;
     assert_ne!(invoke.addr_without_thumb_bit(), 0);
@@ -81,11 +81,7 @@ fn dispatch_group_async(
     invoke_block_synchronously(env, block);
 }
 
-fn dispatch_once(
-    env: &mut Environment,
-    predicate: MutPtr<i32>,
-    block: MutPtr<BlockLiteral>,
-) {
+fn dispatch_once(env: &mut Environment, predicate: MutPtr<i32>, block: MutPtr<BlockLiteral>) {
     // dispatch_once_t is a signed long on 32-bit iOS. Its representation after
     // first use is private, but zero is the public initializer. Keep an
     // explicit in-progress state so a second guest thread cannot observe the

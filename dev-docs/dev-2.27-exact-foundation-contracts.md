@@ -35,3 +35,14 @@ correctly report no daylight saving inside that bounded model.
 Physical testing should launch the fourteen titles alphabetically, stop at the
 first reproducible failure in each, and return one combined log. A later error
 means the old blocker was removed, not that the game is yet fully compatible.
+
+## Physical result
+
+Physical testing is complete for implementation `4b4b3bd8` / workflow
+`41837856742`. All fourteen contracts crossed. Wire Way reached smooth gameplay
+but has invisible pause and post-level states; the other titles exposed later
+contracts or causal investigations. Super Hexagon was launchable only from its
+normal picker position because the valid IPA has an empty display name, while a
+similarly named duplicate is an invalid ZIP. See
+[`dev-2.27-device-result.md`](dev-2.27-device-result.md) for exact evidence,
+hashes and next actions.

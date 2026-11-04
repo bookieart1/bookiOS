@@ -19,20 +19,18 @@ use super::{ns_key_value_observing, NSTimeInterval, NSUInteger};
 use crate::abi::GuestFunction;
 use crate::cpu::Cpu;
 use crate::frameworks::foundation::ns_run_loop::{
-    add_perform_request, cancel_perform_requests, run_loop_for_thread,
+    add_perform_request, cancel_all_perform_requests_for_target, cancel_perform_requests,
+    run_loop_for_thread,
 };
-use crate::frameworks::foundation::ns_thread::{
-    detach_new_thread_inner, thread_id_for_ns_thread,
-};
+use crate::frameworks::foundation::ns_thread::{detach_new_thread_inner, thread_id_for_ns_thread};
 use crate::libc::semaphore::{host_destroy_semaphore, sem_wait};
 use crate::mem::MutVoidPtr;
 use crate::objc::{
     autorelease, id, msg, msg_class, msg_send, msg_send_no_type_checking, nil, objc_classes,
     release, retain, Class, ClassExports, NSZonePtr, ObjC, TrivialHostObject, SEL, TYPE_BOOL,
-    TYPE_CHAR,
-    TYPE_CLASS, TYPE_DOUBLE, TYPE_FLOAT, TYPE_ID, TYPE_INT, TYPE_LONG, TYPE_LONGLONG, TYPE_SEL,
-    TYPE_SHORT, TYPE_UCHAR, TYPE_UINT, TYPE_ULONG, TYPE_ULONGLONG, TYPE_UNDEF, TYPE_USHORT,
-    TYPE_VOID,
+    TYPE_CHAR, TYPE_CLASS, TYPE_DOUBLE, TYPE_FLOAT, TYPE_ID, TYPE_INT, TYPE_LONG, TYPE_LONGLONG,
+    TYPE_SEL, TYPE_SHORT, TYPE_UCHAR, TYPE_UINT, TYPE_ULONG, TYPE_ULONGLONG, TYPE_UNDEF,
+    TYPE_USHORT, TYPE_VOID,
 };
 use crate::Environment;
 
@@ -97,8 +95,7 @@ fn method_type_tokens(types: &str) -> Vec<char> {
     let mut tokens = Vec::new();
     while index < bytes.len() {
         while index < bytes.len()
-            && (bytes[index].is_ascii_digit()
-                || matches!(bytes[index], b'+' | b'-' | b' ' | b'\t'))
+            && (bytes[index].is_ascii_digit() || matches!(bytes[index], b'+' | b'-' | b' ' | b'\t'))
         {
             index += 1;
         }
@@ -121,7 +118,11 @@ fn method_signature(env: &mut Environment, class: Class, sel: SEL) -> id {
         // Host methods carry a compact type encoding generated from their Rust
         // signature. NSMethodSignature copies the encoding, so this temporary
         // guest C string can be released immediately after construction.
-        let Some(types) = env.objc.class_get_method_types(class, sel).map(str::to_owned) else {
+        let Some(types) = env
+            .objc
+            .class_get_method_types(class, sel)
+            .map(str::to_owned)
+        else {
             return nil;
         };
         let sig = env.mem.alloc_and_write_cstr(types.as_bytes()).cast_const();
@@ -232,6 +233,11 @@ pub const CLASSES: ClassExports = objc_classes! {
 + (())cancelPreviousPerformRequestsWithTarget:(id)target selector:(SEL)selector object:(id)arg {
     let run_loop: id = msg_class![env; NSRunLoop currentRunLoop];
     cancel_perform_requests(env, run_loop, target, selector, arg);
+}
+
++ (())cancelPreviousPerformRequestsWithTarget:(id)target {
+    let run_loop: id = msg_class![env; NSRunLoop currentRunLoop];
+    cancel_all_perform_requests_for_target(env, run_loop, target);
 }
 
 + (bool)accessInstanceVariablesDirectly {
@@ -921,8 +927,14 @@ mod tests {
     #[test]
     fn method_type_parser_handles_offsets_and_compound_arguments() {
         assert_eq!(method_type_tokens("v12@0:4i8"), vec!['v', '@', ':', 'i']);
-        assert_eq!(method_type_tokens("v24@0:4{CGPoint=ff}8"), vec!['v', '@', ':', '{']);
-        assert_eq!(method_type_tokens("v@:@\"NSString\""), vec!['v', '@', ':', '@']);
+        assert_eq!(
+            method_type_tokens("v24@0:4{CGPoint=ff}8"),
+            vec!['v', '@', ':', '{']
+        );
+        assert_eq!(
+            method_type_tokens("v@:@\"NSString\""),
+            vec!['v', '@', ':', '@']
+        );
         assert_eq!(method_type_tokens("v16@0:4@?8"), vec!['v', '@', ':', '@']);
     }
 

@@ -53,6 +53,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, new)
 }
 
++ (id)setWithSet:(id)set {
+    let objects: id = msg![env; set allObjects];
+    let new: id = msg![env; this alloc];
+    let new: id = msg![env; new initWithArray:objects];
+    autorelease(env, new)
+}
+
 + (id)setWithObject:(id)object {
     assert!(object != nil);
     let new: id = msg![env; this alloc];
@@ -119,6 +126,13 @@ pub const CLASSES: ClassExports = objc_classes! {
 + (id)setWithCapacity:(NSUInteger)capacity {
     let new: id = msg![env; this alloc];
     let new: id = msg![env; new initWithCapacity:capacity];
+    autorelease(env, new)
+}
+
++ (id)setWithSet:(id)set {
+    let objects: id = msg![env; set allObjects];
+    let new: id = msg![env; this alloc];
+    let new: id = msg![env; new initWithArray:objects];
     autorelease(env, new)
 }
 

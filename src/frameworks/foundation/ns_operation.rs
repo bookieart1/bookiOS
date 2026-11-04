@@ -10,6 +10,8 @@
 //! for older apps that use a queue only to defer small pieces of work.
 
 use super::{ns_array, NSInteger, NSUInteger};
+use crate::libc::dispatch::{invoke_block_synchronously, BlockLiteral};
+use crate::mem::MutPtr;
 use crate::objc::{
     autorelease, id, msg, msg_send_no_type_checking, nil, objc_classes, release, retain,
     ClassExports, HostObject, NSZonePtr, SEL,
@@ -209,6 +211,15 @@ pub const CLASSES: ClassExports = objc_classes! {
     } else {
         run_operation(env, operation);
     }
+}
+
+- (())addOperationWithBlock:(MutPtr<BlockLiteral>)block {
+    // Blocks passed to this convenience method may live on the guest stack.
+    // Until iDared has a general Block_copy implementation, executing before
+    // returning is the lifetime-safe subset of the queue contract and matches
+    // this class's existing deterministic synchronous operation model.
+    log_once!("NSOperationQueue addOperationWithBlock: executes synchronously");
+    invoke_block_synchronously(env, block);
 }
 
 - (())addOperations:(id)operations waitUntilFinished:(bool)_wait {

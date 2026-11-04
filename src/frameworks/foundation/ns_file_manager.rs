@@ -408,6 +408,31 @@ pub const CLASSES: ClassExports = objc_classes! {
     new_directory_enumerator(env, path, 0, false)
 }
 
+- (id)subpathsOfDirectoryAtPath:(id)path // NSString*
+                            error:(MutPtr<id>)error { // NSError**
+    let enumerator: id = msg![env; this enumeratorAtPath:path];
+    if enumerator == nil {
+        if !error.is_null() {
+            let domain = get_static_str(env, NSCocoaErrorDomain);
+            let file_error: id = msg_class![env; NSError errorWithDomain:domain
+                                                             code:NSFileReadNoSuchFileError
+                                                         userInfo:nil];
+            env.mem.write(error, file_error);
+        }
+        return nil;
+    }
+    let mut subpaths = Vec::new();
+    loop {
+        let subpath: id = msg![env; enumerator nextObject];
+        if subpath == nil {
+            break;
+        }
+        subpaths.push(subpath);
+    }
+    let result = ns_array::from_vec(env, subpaths);
+    autorelease(env, result)
+}
+
 - (id)enumeratorAtURL:(id)url // NSURL*
 includingPropertiesForKeys:(id)_keys // NSArray*, only prefetching
                    options:(NSDirectoryEnumerationOptions)options

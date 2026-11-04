@@ -468,7 +468,11 @@ pub(super) fn cancel_perform_requests(
 /// Target matching is by object identity; retained targets and arguments are
 /// released and synchronous waiters are signalled just like the selective
 /// cancellation path.
-fn cancel_all_perform_requests_for_target(env: &mut Environment, run_loop: id, target: id) {
+pub(super) fn cancel_all_perform_requests_for_target(
+    env: &mut Environment,
+    run_loop: id,
+    target: id,
+) {
     let mut kept = VecDeque::new();
     let mut pending = std::mem::take(
         &mut env

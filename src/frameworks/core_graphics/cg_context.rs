@@ -16,11 +16,12 @@ use super::cg_color_space::{
 use super::cg_font::{
     CGFontCreateWithFontName, CGFontHostObject, CGFontRef, CGFontRelease, CGFontRetain, CGGlyph,
 };
+use super::cg_gradient::{CGGradientHostObject, CGGradientRef};
 use super::cg_image::CGImageRef;
 use super::cg_path::{
     kCGLineCapButt, kCGLineCapRound, kCGLineCapSquare, kCGPathElementAddLineToPoint,
-    kCGPathElementCloseSubpath, kCGPathElementMoveToPoint, CGLineCap,
-    CGMutablePathHostObject, CGMutablePathRef, CGPathCreateMutable, CGPathElement,
+    kCGPathElementCloseSubpath, kCGPathElementMoveToPoint, CGLineCap, CGMutablePathHostObject,
+    CGMutablePathRef, CGPathCreateMutable, CGPathElement,
 };
 use super::{cg_bitmap_context, cg_color, CGFloat, CGPoint, CGRect, CGSize};
 use crate::dyld::{export_c_func, FunctionExports};
@@ -33,6 +34,9 @@ use crate::Environment;
 use encoding_rs::Encoding;
 
 type CGInterpolationQuality = i32;
+type CGGradientDrawingOptions = u32;
+const K_CG_GRADIENT_DRAWS_BEFORE_START_LOCATION: CGGradientDrawingOptions = 1;
+const K_CG_GRADIENT_DRAWS_AFTER_END_LOCATION: CGGradientDrawingOptions = 2;
 
 type CGTextDrawingMode = i32;
 pub(super) const kCGTextFill: CGTextDrawingMode = 0;
@@ -307,6 +311,79 @@ pub fn CGContextRetain(env: &mut Environment, c: CGContextRef) -> CGContextRef {
         CFRetain(env, c)
     } else {
         c
+    }
+}
+
+fn CGContextBeginPath(env: &mut Environment, context: CGContextRef) {
+    let new_path = CGPathCreateMutable(env);
+    let old_path = std::mem::replace(
+        &mut env.objc.borrow_mut::<CGContextHostObject>(context).path,
+        new_path,
+    );
+    if !old_path.is_null() {
+        CFRelease(env, old_path);
+    }
+}
+
+fn CGContextDrawLinearGradient(
+    env: &mut Environment,
+    context: CGContextRef,
+    gradient: CGGradientRef,
+    start: CGPoint,
+    end: CGPoint,
+    options: CGGradientDrawingOptions,
+) {
+    assert!(!gradient.is_null());
+    let stops = env
+        .objc
+        .borrow::<CGGradientHostObject>(gradient)
+        .stops
+        .clone();
+    if stops.is_empty() {
+        return;
+    }
+    let dx = end.x - start.x;
+    let dy = end.y - start.y;
+    let length_squared = dx * dx + dy * dy;
+    if length_squared == 0.0 {
+        return;
+    }
+    let mut drawer = CGBitmapContextDrawer::new(&env.objc, &mut env.mem, context);
+    for y in 0..drawer.height() as i32 {
+        for x in 0..drawer.width() as i32 {
+            let point = drawer.user_point_at_pixel(x, y);
+            let raw_t = ((point.x - start.x) * dx + (point.y - start.y) * dy) / length_squared;
+            if (raw_t < 0.0 && options & K_CG_GRADIENT_DRAWS_BEFORE_START_LOCATION == 0)
+                || (raw_t > 1.0 && options & K_CG_GRADIENT_DRAWS_AFTER_END_LOCATION == 0)
+            {
+                continue;
+            }
+            let t = raw_t.clamp(0.0, 1.0);
+            let mut lower = stops[0];
+            let mut upper = stops[stops.len() - 1];
+            for pair in stops.windows(2) {
+                if t >= pair[0].0 && t <= pair[1].0 {
+                    lower = pair[0];
+                    upper = pair[1];
+                    break;
+                }
+            }
+            let span = upper.0 - lower.0;
+            let u = if span > 0.0 {
+                ((t - lower.0) / span).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let lerp = |a: CGFloat, b: CGFloat| a + (b - a) * u;
+            let srgb = (
+                lerp(lower.1 .0, upper.1 .0),
+                lerp(lower.1 .1, upper.1 .1),
+                lerp(lower.1 .2, upper.1 .2),
+                lerp(lower.1 .3, upper.1 .3),
+            );
+            let color = drawer.linear_color(srgb);
+            drawer.put_pixel((x, y), color, true);
+        }
     }
 }
 
@@ -861,10 +938,7 @@ fn CGContextShowGlyphIdsAtPoint(
         // Stroke-only modes are valid, but touchHLE does not rasterize them.
         return;
     }
-    if matches!(
-        text_drawing_mode,
-        kCGTextFillClip | kCGTextFillStrokeClip
-    ) {
+    if matches!(text_drawing_mode, kCGTextFillClip | kCGTextFillStrokeClip) {
         log!("TODO: Core Graphics text clipping");
     }
 
@@ -994,11 +1068,7 @@ fn CGContextAddLineToPoint(env: &mut Environment, context: CGContextRef, x: CGFl
 /// the context must copy the elements rather than retain the source as its
 /// mutable current path. Coordinates remain in user space here; the context's
 /// transform is applied later when the current path is rendered.
-fn CGContextAddPath(
-    env: &mut Environment,
-    context: CGContextRef,
-    path: CGMutablePathRef,
-) {
+fn CGContextAddPath(env: &mut Environment, context: CGContextRef, path: CGMutablePathRef) {
     log_dbg!("CGContextAddPath({:?}, {:?})", context, path);
     assert!(!path.is_null());
 
@@ -1157,11 +1227,9 @@ mod clipping_tests {
                 r#type: kCGPathElementAddLineToPoint,
             },
         ];
-        let clip = clip_path_from_elements(
-            &elements,
-            CGAffineTransform::make_translation(5.0, 7.0),
-        )
-        .unwrap();
+        let clip =
+            clip_path_from_elements(&elements, CGAffineTransform::make_translation(5.0, 7.0))
+                .unwrap();
 
         assert!(clip.contains(point(6.0, 8.0)));
         assert!(!clip.contains(point(1.0, 1.0)));
@@ -1169,6 +1237,8 @@ mod clipping_tests {
 }
 
 pub const FUNCTIONS: FunctionExports = &[
+    export_c_func!(CGContextBeginPath(_)),
+    export_c_func!(CGContextDrawLinearGradient(_, _, _, _, _)),
     export_c_func!(CGContextFlush(_)),
     export_c_func!(CGContextRetain(_)),
     export_c_func!(CGContextSelectFont(_, _, _, _)),

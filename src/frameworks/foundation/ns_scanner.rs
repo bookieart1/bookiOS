@@ -267,27 +267,38 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 
     let st = to_rust_string(env, left);
-    let mut cutoff = st.len();
-    for (i, c) in st.char_indices() {
-        if !c.is_ascii_digit() && c != '+' && c != '-' {
-            cutoff = i;
-            break;
-        }
-    }
-    if cutoff == 0 {
+    let Some((cutoff, value)) = signed_integer_prefix(&st) else {
         log_dbg!("scanInt: no valid int found for '{}'", st);
         *env.objc.borrow_mut::<NSScannerHostObject>(this) = NSScannerHostObject { to_be_skipped, string, len, pos };
         return false;
-    }
+    };
 
     if !result.is_null() {
-        // TODO: handle over/underflow properly
-        let res = st[..cutoff].parse().unwrap_or(0);
+        let res = value.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32;
         log_dbg!("scanInt: from '{}' -> {}", st, res);
         env.mem.write(result, res);
     }
 
     *env.objc.borrow_mut::<NSScannerHostObject>(this) = NSScannerHostObject { to_be_skipped, string, len, pos: pos + cutoff as NSUInteger };
+    true
+}
+
+- (bool)scanLongLong:(MutPtr<i64>)result {
+    skip_characters(env, this);
+    let NSScannerHostObject { string, len, pos, .. } =
+        env.objc.borrow::<NSScannerHostObject>(this).clone();
+    if pos >= len {
+        return false;
+    }
+    let left: id = msg![env; string substringFromIndex:pos];
+    let text = to_rust_string(env, left).into_owned();
+    let Some((cutoff, value)) = signed_integer_prefix(&text) else {
+        return false;
+    };
+    if !result.is_null() {
+        env.mem.write(result, value);
+    }
+    env.objc.borrow_mut::<NSScannerHostObject>(this).pos = pos + cutoff as NSUInteger;
     true
 }
 
@@ -342,6 +353,26 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+fn signed_integer_prefix(text: &str) -> Option<(usize, i64)> {
+    let bytes = text.as_bytes();
+    let mut end = usize::from(matches!(bytes.first(), Some(b'+' | b'-')));
+    let digits_start = end;
+    while end < bytes.len() && bytes[end].is_ascii_digit() {
+        end += 1;
+    }
+    if end == digits_start {
+        return None;
+    }
+    let parsed = text[..end].parse::<i128>().unwrap_or_else(|_| {
+        if bytes.first() == Some(&b'-') {
+            i128::MIN
+        } else {
+            i128::MAX
+        }
+    });
+    Some((end, parsed.clamp(i64::MIN as i128, i64::MAX as i128) as i64))
+}
 
 // Helper functions, skips characters from `charactersToBeSkipped` set
 fn skip_characters(env: &mut Environment, scanner: id) {
@@ -454,6 +485,17 @@ mod tests {
         assert_eq!(floating_point_prefix_len("1.e2!"), Some(4));
         assert_eq!(floating_point_prefix_len("1e+tail"), Some(1));
         assert_eq!(floating_point_prefix_len("+tail"), None);
+    }
+
+    #[test]
+    fn signed_integer_prefix_accepts_one_sign_and_saturates() {
+        assert_eq!(signed_integer_prefix("-42tail"), Some((3, -42)));
+        assert_eq!(signed_integer_prefix("+17"), Some((3, 17)));
+        assert_eq!(signed_integer_prefix("--1"), None);
+        assert_eq!(
+            signed_integer_prefix("999999999999999999999999"),
+            Some((24, i64::MAX))
+        );
     }
 
     #[test]
