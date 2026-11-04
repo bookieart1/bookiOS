@@ -361,6 +361,7 @@ mod tests {
     #[test]
     fn stale_abort_flag_is_reset_by_a_new_parse() {
         let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
         let xml = b"<root />";
         let length = xml.len() as u32;
         let bytes = env.mem.alloc(length);
@@ -368,15 +369,15 @@ mod tests {
             .bytes_at_mut(bytes.cast(), length)
             .copy_from_slice(xml);
         let bytes = bytes.cast::<u8>().cast_const();
-        let data: id = msg_class![&mut env; NSData dataWithBytes:bytes length:length];
-        let parser: id = msg_class![&mut env; NSXMLParser alloc];
-        let parser: id = msg![&mut env; parser initWithData:data];
-        () = msg![&mut env; parser abortParsing];
+        let data: id = msg_class![env; NSData dataWithBytes:bytes length:length];
+        let parser: id = msg_class![env; NSXMLParser alloc];
+        let parser: id = msg![env; parser initWithData:data];
+        () = msg![env; parser abortParsing];
         // A new parse resets a prior, out-of-callback abort just as native
         // NSXMLParser does; callback-triggered abort behavior is exercised by
         // the state checks in the event loop.
-        let parsed: bool = msg![&mut env; parser parse];
+        let parsed: bool = msg![env; parser parse];
         assert!(parsed);
-        release(&mut env, parser);
+        release(env, parser);
     }
 }

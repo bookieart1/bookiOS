@@ -626,9 +626,6 @@ impl Recorder {
             note: "enter",
         };
         self.recent.push(event);
-        if object_result && result[0] == 0 {
-            self.nil_origins.push(event);
-        }
         if call.name.bytes() == b"dealloc" {
             self.forget_provenance(call.receiver);
         }
@@ -670,6 +667,9 @@ impl Recorder {
             },
         };
         self.recent.push(event);
+        if object_result && result[0] == 0 {
+            self.nil_origins.push(event);
+        }
         if object_result && result[0] != 0 {
             self.remember_value_origin(result[0], event);
         }
