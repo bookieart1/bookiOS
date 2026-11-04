@@ -2,7 +2,9 @@
 
 **Dev 2.24 update (2026-11-04):** implementation now underway for the user-expanded batch: ranks 1–4 plus the two framebuffer diagnostic canaries. See [implementation and predictions](dev-2.24-implementation.md). Baseline results below are preserved; no new device pass is claimed.
 
-Updated 2026-11-04. **Phase 1 investigation and corpus map complete. Implementation has not begun.**
+## Preserved phase-1 checkpoint
+
+The remainder below records the completed investigation before Dev 2.24. Statements that implementation had not begun refer to that earlier checkpoint; the current implementation and validation are recorded above and in the linked Dev 2.24 record.
 
 ## Exact baseline and scope
 

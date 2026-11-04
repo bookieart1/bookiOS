@@ -2,7 +2,9 @@
 
 **Dev 2.24 update (2026-11-04):** implementation now underway for the user-expanded batch: ranks 1–4 plus the two framebuffer diagnostic canaries. See [implementation and predictions](dev-2.24-implementation.md). Baseline results below are preserved; no new device pass is claimed.
 
-Phase 1 completed 2026-11-04. **All items below are proposals; no emulator code has been changed for this audit.** The objective is correct shared Apple behavior, not replacing cocos2d or suppressing strict failures.
+## Preserved phase-1 proposal
+
+Phase 1 completed 2026-11-04. The ranking and proposal below are the historical audit baseline. The Dev 2.24 update above records which proposals were subsequently implemented. The objective is correct shared Apple behavior, not replacing cocos2d or suppressing strict failures.
 
 ## Ranked opportunities
 
