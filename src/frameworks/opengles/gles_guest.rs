@@ -837,7 +837,7 @@ fn probe_framebuffer_before_draw(env: &mut Environment, call: &str) {
             if framebuffer != 0 {
                 for (i, attachment) in [gles11::COLOR_ATTACHMENT0_OES, gles11::DEPTH_ATTACHMENT_OES, gles11::STENCIL_ATTACHMENT_OES].into_iter().enumerate() {
                     gles.GetFramebufferAttachmentParameterivOES(gles11::FRAMEBUFFER_OES, attachment, gles11::FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE_OES, &mut attachments[i * 2]);
-                    if attachments[i * 2] != gles11::NONE as i32 {
+                    if attachments[i * 2] != 0 { // GL_NONE
                         gles.GetFramebufferAttachmentParameterivOES(gles11::FRAMEBUFFER_OES, attachment, gles11::FRAMEBUFFER_ATTACHMENT_OBJECT_NAME_OES, &mut attachments[i * 2 + 1]);
                     }
                 }

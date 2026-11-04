@@ -32,7 +32,8 @@ const CONSTANTS: ConstantExports = &[
 #[derive(Default)]
 struct Banner {
     superclass: UIViewHostObject,
-    // iOS 4 assign semantics: the owner must clear the delegate before teardown.
+    // iOS 4 assign semantics: the owner must clear the delegate before
+    // teardown.
     delegate: id,
     required: id,
     current: id,

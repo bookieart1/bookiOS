@@ -48,7 +48,10 @@ fn cocos_contract_unsigned_byte_boxing_round_trips() {
 #[test]
 fn cocos_contract_kvc_keeps_object_identity_for_guest_setter() {
     let mut env = Environment::new_fake_for_test_with_thread();
-    let class: id = msg_class![&mut env; NSObject class];
+    let class: id = {
+        let env = &mut env;
+        msg_class![env; NSObject class]
+    };
     let select = api(&mut env, "_sel_registerName");
     let name = env.mem.alloc_and_write_cstr(b"setPayload:").cast_const();
     let selector: SEL = select.call_from_host(&mut env, (name,));
@@ -177,7 +180,8 @@ fn cocos_contract_offline_stream_callback_abi_and_lifetime() {
     let words = [0xe592_3000u32, 0xe283_3001, 0xe582_3000, 0xe582_0004, 0xe582_1008, 0xe12f_ff1e];
     let code = env.mem.alloc(24).cast::<u32>();
     for (i, word) in words.into_iter().enumerate() { env.mem.write(code + i as u32, word); }
-    // Context retain/release callbacks update distinct counters; retain returns info.
+    // Context retain/release callbacks update distinct counters; retain returns
+    // info.
     let retain_code = env.mem.alloc(16).cast::<u32>();
     let release_code = env.mem.alloc(16).cast::<u32>();
     for (address, offset) in [(retain_code, 12u32), (release_code, 16u32)] {
@@ -193,7 +197,10 @@ fn cocos_contract_offline_stream_callback_abi_and_lifetime() {
     let ok: bool = client.call_from_host(&mut env, (stream, 8u32, GuestFunction::from_addr_with_thumb_bit(code.to_bits()), context.cast::<std::ffi::c_void>()));
     assert!(ok);
     assert_eq!(env.mem.read(output + 3), 1);
-    let run_loop: id = msg_class![&mut env; NSRunLoop currentRunLoop];
+    let run_loop: id = {
+        let env = &mut env;
+        msg_class![env; NSRunLoop currentRunLoop]
+    };
     let mode = from_rust_string(&mut env, "kCFRunLoopDefaultMode".into());
     let schedule = api(&mut env, "_CFReadStreamScheduleWithRunLoop");
     let _: () = schedule.call_from_host(&mut env, (stream, run_loop, mode));

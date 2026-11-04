@@ -9,10 +9,10 @@ use crate::frameworks::foundation::ns_run_loop::add_perform_request;
 use crate::frameworks::foundation::ns_string::{get_static_str, to_rust_string};
 use crate::libc::errno::ENETUNREACH;
 use crate::mem::{MutPtr, MutVoidPtr, SafeRead};
-use crate::objc::{id, msg, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject};
+use crate::objc::{id, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject};
 use crate::{impl_GuestRet_for_large_struct, Environment};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 #[repr(C, packed)]
 pub struct StreamError { pub domain: i32, pub error: i32 }
 unsafe impl SafeRead for StreamError {}
@@ -47,7 +47,8 @@ pub fn is_socket(env: &Environment, stream: id) -> bool {
 }
 
 pub fn create_pair(env: &mut Environment, host: id, port: u32, read: MutPtr<id>, write: MutPtr<id>) {
-    // Validate the actual host object rather than accepting an arbitrary pointer.
+    // Validate the actual host object rather than accepting an arbitrary
+    // pointer.
     assert_ne!(host, nil);
     let name = to_rust_string(env, host).into_owned();
     assert!(port <= 65535);
@@ -63,8 +64,9 @@ pub fn create_pair(env: &mut Environment, host: id, port: u32, read: MutPtr<id>,
 
 fn release_client(env: &mut Environment, client: Option<Client>) {
     if let Some(client) = client {
-        if !client.context.release.to_ptr().is_null() {
-            let _: () = client.context.release.call_from_host(env, (client.context.info,));
+        let callback = client.context.release;
+        if !callback.to_ptr().is_null() {
+            let _: () = callback.call_from_host(env, (client.context.info,));
         }
     }
 }
@@ -77,8 +79,9 @@ pub fn set_client(env: &mut Environment, stream: id, events: u32, callback: Gues
         if context.is_null() { return false; }
         let mut context: ClientContext = env.mem.read(context.cast());
         if context.version != 0 { return false; }
-        if !context.retain.to_ptr().is_null() {
-            context.info = context.retain.call_from_host(env, (context.info,));
+        let retain_callback = context.retain;
+        if !retain_callback.to_ptr().is_null() {
+            context.info = retain_callback.call_from_host(env, (context.info,));
         }
         Some(Client { events, callback, context })
     };
@@ -164,15 +167,18 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
     let Some(client) = state.client.filter(|c| c.events & 8 != 0) else { return; };
     state.delivered = true;
-    // Client code may close/release the stream or replace its client recursively.
+    // Client code may close/release the stream or replace its client
+    // recursively.
     let mut info = client.context.info;
-    if !client.context.retain.to_ptr().is_null() {
-        info = client.context.retain.call_from_host(env, (info,));
+    let retain_callback = client.context.retain;
+    let release_callback = client.context.release;
+    if !retain_callback.to_ptr().is_null() {
+        info = retain_callback.call_from_host(env, (info,));
     }
     log!("Offline socket stream error delivered: stream={this:?}, event=8, POSIX ENETUNREACH");
     let _: () = client.callback.call_from_host(env, (this, 8u32, info));
-    if !client.context.retain.to_ptr().is_null() && !client.context.release.to_ptr().is_null() {
-        let _: () = client.context.release.call_from_host(env, (info,));
+    if !retain_callback.to_ptr().is_null() && !release_callback.to_ptr().is_null() {
+        let _: () = release_callback.call_from_host(env, (info,));
     }
 }
 - (())dealloc {

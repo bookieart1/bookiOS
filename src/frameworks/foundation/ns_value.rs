@@ -596,7 +596,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)initWithUnsignedChar:(u8)value {
-    // NSNumber is a class cluster: reuse unsigned storage without sign extension.
+    // NSNumber is a class cluster: reuse unsigned storage without sign
+    // extension.
     // As with the other integer initializers, objCType describes storage.
     msg![env; this initWithUnsignedShort:(u16::from(value))]
 }
