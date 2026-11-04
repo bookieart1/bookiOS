@@ -665,6 +665,17 @@ pub const CLASSES: ClassExports = objc_classes! {
     this
 }
 
+- (id)initWithObjects:(ConstPtr<id>)objects_ptr count:(NSUInteger)count {
+    let mut objects = Vec::new();
+    for i in 0..count {
+        let object: id = env.mem.read(objects_ptr + i);
+        retain(env, object);
+        objects.push(object);
+    }
+    env.objc.borrow_mut::<ArrayHostObject>(this).array = objects;
+    this
+}
+
 - (id)initWithArray:(id)array { // NSArray*
     let mut objects = Vec::new();
     let enumerator: id = msg![env; array objectEnumerator];
@@ -1228,6 +1239,27 @@ mod tests {
         release(env, mutable);
         release(env, first);
         release(env, second);
+    }
+
+    #[test]
+    fn mutable_array_accepts_pointer_count_initializer() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let first: id = msg_class![env; NSObject new];
+        let second: id = msg_class![env; NSObject new];
+        let objects: crate::mem::MutPtr<id> = env.mem.alloc(8).cast();
+        env.mem.write(objects, first);
+        env.mem.write(objects + 1, second);
+        let array: id = msg_class![env; NSMutableArray alloc];
+        let array: id = msg![env; array initWithObjects:objects.cast_const() count:2u32];
+        let count: NSUInteger = msg![env; array count];
+        assert_eq!(count, 2);
+        let actual: id = msg![env; array objectAtIndex:1u32];
+        assert_eq!(actual, second);
+        release(env, array);
+        release(env, second);
+        release(env, first);
+        env.mem.free(objects.cast());
     }
 
     #[test]

@@ -19,6 +19,8 @@ use plist::{to_writer_binary, Dictionary, Uid, Value};
 use crate::frameworks::foundation::ns_keyed_unarchiver::NSKeyedArchiveRootObjectKey;
 use crate::frameworks::foundation::ns_string::{get_static_str, to_rust_string};
 use crate::frameworks::foundation::{NSInteger, NSUInteger};
+use crate::frameworks::core_graphics::CGPoint;
+use crate::frameworks::uikit::ui_geometry::NSStringFromCGPoint;
 use crate::mem::{ConstPtr, GuestUSize};
 use crate::objc::{
     id, msg, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject, NSZonePtr,
@@ -136,6 +138,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     let scope = get_value_to_encode_for_current_key(env, this);
     assert!(!scope.contains_key(&key));
     scope.insert(key, Value::Real(val));
+}
+
+- (())encodeCGPoint:(CGPoint)point
+              forKey:(id)key {
+    let point_string = NSStringFromCGPoint(env, point);
+    () = msg![env; this encodeObject:point_string forKey:key];
 }
 
 - (())encodeBytes:(ConstPtr<u8>)bytes
@@ -317,4 +325,26 @@ fn encode_object_for_key(env: &mut Environment, archiver: id, object: id, normal
     let scope = get_value_to_encode_for_current_key(env, archiver);
     assert!(!scope.contains_key(&normalized_key));
     scope.insert(normalized_key, Value::Uid(uid));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frameworks::core_graphics::CGPoint;
+
+    #[test]
+    fn cgpoint_category_round_trips_through_keyed_archive() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let key = get_static_str(&mut env, "point");
+        let archiver: id = msg_class![&mut env; NSKeyedArchiver new];
+        let expected = CGPoint { x: 1.5, y: -2.25 };
+        () = msg![&mut env; archiver encodeCGPoint:expected forKey:key];
+        let data: id = msg![&mut env; archiver encodedData];
+        let unarchiver: id = msg_class![&mut env; NSKeyedUnarchiver alloc];
+        let unarchiver: id = msg![&mut env; unarchiver initForReadingWithData:data];
+        let actual: CGPoint = msg![&mut env; unarchiver decodeCGPointForKey:key];
+        assert_eq!(actual, expected);
+        release(&mut env, unarchiver);
+        release(&mut env, archiver);
+    }
 }

@@ -21,6 +21,7 @@ const NSApplicationDirectory: NSSearchPathDirectory = 1;
 const NSLibraryDirectory: NSSearchPathDirectory = 5;
 const NSDocumentDirectory: NSSearchPathDirectory = 9;
 const NSCachesDirectory: NSSearchPathDirectory = 13;
+const NSApplicationSupportDirectory: NSSearchPathDirectory = 14;
 const NSAllApplicationsDirectory: NSSearchPathDirectory = 100;
 
 type NSSearchPathDomainMask = NSUInteger;
@@ -88,6 +89,11 @@ fn NSSearchPathForDirectoriesInDomains(
         NSDocumentDirectory => env.fs.home_directory().join("Documents"),
         NSLibraryDirectory => env.fs.home_directory().join("Library"),
         NSCachesDirectory => env.fs.home_directory().join("Library").join("Caches"),
+        NSApplicationSupportDirectory => env
+            .fs
+            .home_directory()
+            .join("Library")
+            .join("Application Support"),
         _ => todo!("NSSearchPathDirectory {}", directory),
     };
     let dir = ns_string::from_rust_string(env, String::from(dir));
@@ -535,6 +541,51 @@ includingPropertiesForKeys:(id)_keys // NSArray*, only prefetching
     attributes
 }
 
+- (bool)setAttributes:(id)attributes // NSDictionary *
+       ofItemAtPath:(id)path // NSString *
+                error:(MutPtr<id>)error { // NSError **
+    if !error.is_null() {
+        env.mem.write(error, nil);
+    }
+    if path == nil || attributes == nil {
+        return false;
+    }
+    let path_string = ns_string::to_rust_string(env, path);
+    if !env.fs.exists(GuestPath::new(&path_string)) {
+        return false;
+    }
+
+    // The virtual filesystem currently has fixed Unix metadata.  Validate the
+    // historical attributes that old games use and accept them for existing
+    // nodes, just as createDirectoryAtPath:attributes: already does for mode
+    // bits.  Unknown attributes remain visible as a failure.
+    let keys: id = msg![env; attributes allKeys];
+    let count: NSUInteger = msg![env; keys count];
+    for index in 0..count {
+        let key: id = msg![env; keys objectAtIndex:index];
+        let known = [NSFilePosixPermissions, NSFileModificationDate, NSFileCreationDate]
+            .iter()
+            .any(|name| {
+                let known_key = get_static_str(env, name);
+                msg![env; key isEqual:known_key]
+            });
+        if !known {
+            log!("Warning: setAttributes:ofItemAtPath:error: unsupported attribute {:?}", key);
+            return false;
+        }
+        let value: id = msg![env; attributes objectForKey:key];
+        if value == nil {
+            return false;
+        }
+    }
+    log_dbg!(
+        "setAttributes:ofItemAtPath:error: validated {} fixed-metadata attributes for {}",
+        count,
+        path_string,
+    );
+    true
+}
+
 // Deprecated in iPhone OS 2.0.
 - (id)fileSystemAttributesAtPath:(id)path { // NSString*
     msg![env; this attributesOfFileSystemForPath:path error:(MutPtr::<id>::null())]
@@ -690,4 +741,22 @@ fn file_attributes_common(env: &mut Environment, guest_path: &GuestPath) -> id {
     let dict_imm = msg![env; dict copy];
     release(env, dict);
     autorelease(env, dict_imm)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn application_support_search_path_uses_the_user_library() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let array = NSSearchPathForDirectoriesInDomains(
+            &mut env,
+            NSApplicationSupportDirectory,
+            NSUserDomainMask,
+            true,
+        );
+        let path: id = msg![&mut env; array objectAtIndex:0u32];
+        assert!(ns_string::to_rust_string(&mut env, path).ends_with("/Library/Application Support"));
+    }
 }

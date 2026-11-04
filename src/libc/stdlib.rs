@@ -309,6 +309,13 @@ fn srandom(env: &mut Environment, seed: u32) {
 
     env.libc_state.stdlib.random = seed;
 }
+fn srandomdev(env: &mut Environment) {
+    let time = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    srandom(env, (time ^ (time >> 32)) as u32);
+}
 fn random(env: &mut Environment) -> i32 {
     // TODO: handle errno properly
     set_errno(env, 0);
@@ -776,6 +783,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(lrand48()),
     export_c_func!(mrand48()),
     export_c_func!(srandom(_)),
+    export_c_func!(srandomdev()),
     export_c_func!(random()),
     export_c_func!(arc4random()),
     export_c_func!(div(_, _)),
@@ -816,6 +824,14 @@ mod tests {
         let mut env = Environment::new_fake_for_test();
         let input = env.mem.alloc_and_write_cstr(b"");
         assert!(strtol_inner(&mut env, input.cast_const(), 0).is_err());
+    }
+
+    #[test]
+    fn srandomdev_seeds_the_random_generator() {
+        let mut env = Environment::new_fake_for_test();
+        set_errno(&mut env, crate::libc::errno::EINVAL);
+        srandomdev(&mut env);
+        assert_eq!(crate::libc::errno::get_errno(&mut env), 0);
     }
 }
 

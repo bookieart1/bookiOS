@@ -422,27 +422,33 @@ impl Environment {
                     // TODO: Overwriting the options might not be ideal;
                     //       do we need to distinguish this kind of
                     //       orientation change from others?
-                    options.initial_orientation = match non_portrait_orientation {
+                    let requested_orientation = match non_portrait_orientation {
                         // UIInterfaceOrientation values are flipped relative to
                         // (UI)DeviceOrientation values (content has to rotate
                         // in the opposite direction to how the device rotates).
                         "UIInterfaceOrientationPortraitUpsideDown" => {
-                            window::DeviceOrientation::PortraitUpsideDown
+                            Some(window::DeviceOrientation::PortraitUpsideDown)
                         }
                         "UIInterfaceOrientationLandscapeLeft" => {
-                            window::DeviceOrientation::LandscapeRight
+                            Some(window::DeviceOrientation::LandscapeRight)
                         }
                         "UIInterfaceOrientationLandscapeRight" => {
-                            window::DeviceOrientation::LandscapeLeft
+                            Some(window::DeviceOrientation::LandscapeLeft)
                         }
                         // This appears to be an older way set the orientation.
                         // From testing, it seems to correspond to left.
                         "UIInterfaceOrientationLandscape" => {
-                            window::DeviceOrientation::LandscapeLeft
+                            Some(window::DeviceOrientation::LandscapeLeft)
                         }
-                        other => unimplemented!("Unsupported startup orientation: {:?}", other),
+                        other => {
+                            log!("Warning: ignoring unrecognized startup orientation {:?}; retaining portrait default", other);
+                            None
+                        }
                     };
-                    log!("App needs non-portrait user interface orientation {:?}, applying device orientation {:?}.", non_portrait_orientation, options.initial_orientation);
+                    if let Some(requested_orientation) = requested_orientation {
+                        options.initial_orientation = requested_orientation;
+                        log!("App needs non-portrait user interface orientation {:?}, applying device orientation {:?}.", non_portrait_orientation, options.initial_orientation);
+                    }
                 }
             }
         }

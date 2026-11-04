@@ -182,6 +182,13 @@ pub const CLASSES: ClassExports = objc_classes! {
         .unwrap_or(nil)
 }
 
+// Historical UIPasteboard also exposed the typed value directly.  The
+// currently modelled pasteboard representation is NSData, so this is the same
+// retained value returned non-owningly rather than an invented conversion.
+- (id)valueForPasteboardType:(id)pasteboard_type {
+    msg![env; this dataForPasteboardType:pasteboard_type]
+}
+
 - (())setData:(id)data forPasteboardType:(id)pasteboard_type {
     assert_ne!(pasteboard_type, nil, "UIPasteboard type must not be nil");
     assert_ne!(data, nil, "UIPasteboard data must not be nil");
@@ -258,6 +265,8 @@ mod tests {
         () = msg![env; board setData:data forPasteboardType:pasteboard_type];
         let actual: id = msg![env; board dataForPasteboardType:pasteboard_type];
         assert_eq!(actual, data);
+        let value: id = msg![env; board valueForPasteboardType:pasteboard_type];
+        assert_eq!(value, data);
         let change_count: NSInteger = msg![env; board changeCount];
         assert_eq!(change_count, 1);
         release(env, pasteboard_type);

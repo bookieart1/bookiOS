@@ -36,6 +36,79 @@ use crate::objc::{
 };
 use crate::Environment;
 
+/// Decode the top-level Objective-C type tokens in a method encoding while
+/// ignoring stack offsets and the contents of compound types.  Old games use
+/// both compact encodings (v@:@) and offset-bearing encodings (v12@0:4i8).
+fn method_type_tokens(types: &str) -> Vec<char> {
+    fn skip_balanced(bytes: &[u8], index: &mut usize, open: u8, close: u8) {
+        let mut depth = 1usize;
+        while *index < bytes.len() && depth != 0 {
+            match bytes[*index] {
+                b'"' => {
+                    *index += 1;
+                    while *index < bytes.len() && bytes[*index] != b'"' {
+                        *index += 1;
+                    }
+                }
+                value if value == open => depth += 1,
+                value if value == close => depth -= 1,
+                _ => {}
+            }
+            *index += 1;
+        }
+    }
+
+    fn consume_type(bytes: &[u8], index: &mut usize) -> Option<char> {
+        while *index < bytes.len() && b"rnNoORV".contains(&bytes[*index]) {
+            *index += 1;
+        }
+        let first = *bytes.get(*index)?;
+        *index += 1;
+        match first {
+            b'@' => {
+                if bytes.get(*index) == Some(&b'?') {
+                    *index += 1;
+                } else if bytes.get(*index) == Some(&b'"') {
+                    *index += 1;
+                    while *index < bytes.len() && bytes[*index] != b'"' {
+                        *index += 1;
+                    }
+                    *index += usize::from(*index < bytes.len());
+                }
+            }
+            b'^' => {
+                let _ = consume_type(bytes, index);
+            }
+            b'[' => skip_balanced(bytes, index, b'[', b']'),
+            b'{' => skip_balanced(bytes, index, b'{', b'}'),
+            b'(' => skip_balanced(bytes, index, b'(', b')'),
+            b'b' => {
+                while *index < bytes.len() && bytes[*index].is_ascii_digit() {
+                    *index += 1;
+                }
+            }
+            _ => {}
+        }
+        Some(first as char)
+    }
+
+    let bytes = types.as_bytes();
+    let mut index = 0usize;
+    let mut tokens = Vec::new();
+    while index < bytes.len() {
+        while index < bytes.len()
+            && (bytes[index].is_ascii_digit()
+                || matches!(bytes[index], b'+' | b'-' | b' ' | b'\t'))
+        {
+            index += 1;
+        }
+        if let Some(token) = consume_type(bytes, &mut index) {
+            tokens.push(token);
+        }
+    }
+    tokens
+}
+
 /// The `NSMethodSignature*` of an instance method of `class`, or nil if
 /// there's no such method.
 fn method_signature(env: &mut Environment, class: Class, sel: SEL) -> id {
@@ -554,26 +627,12 @@ pub const CLASSES: ClassExports = objc_classes! {
             // If value is a NSValue, it must be unwrapped
             // Find the selector's first (and only) argument type:
             let types = env.objc.get_class_method(class, sel).types.clone();
-            let mut type_index = 0;
-            let mut argument_type = None;
-            assert_ne!(types.len(), 0);
-            for character in types.chars() {
-                // TODO: Handle arrays, structs, unions, bitfields, pointers
-                // and other types that span multiple chars
-                if matches!(character, TYPE_ID | TYPE_CLASS | TYPE_SEL | TYPE_CHAR | TYPE_UCHAR | TYPE_SHORT | TYPE_USHORT | TYPE_INT | TYPE_UINT | TYPE_LONG | TYPE_ULONG | TYPE_LONGLONG | TYPE_ULONGLONG | TYPE_FLOAT | TYPE_DOUBLE | TYPE_BOOL | TYPE_VOID | TYPE_CHAR_PTR | TYPE_UNDEF) {
-                    match type_index {
-                        // First type is the return type
-                        0 => assert_eq!(character, TYPE_VOID),
-                        // Second type in methods must be the selector
-                        1 => assert_eq!(character, TYPE_SEL),
-                        // Third type is the method's first argument type
-                        2 => argument_type = Some(character),
-                        // Panic if there's more than one type
-                        _ => panic!(),
-                    }
-                    type_index += 1;
-                }
-            }
+            let tokens = method_type_tokens(&types);
+            assert_eq!(tokens.first(), Some(&TYPE_VOID));
+            assert!(matches!(tokens.get(1), Some(&TYPE_ID | &TYPE_CLASS)));
+            assert_eq!(tokens.get(2), Some(&TYPE_SEL));
+            let argument_type = tokens.get(3).copied();
+            assert_eq!(tokens.len(), 4, "KVC setter must have exactly one explicit argument");
 
             match argument_type.unwrap() {
                 TYPE_BOOL => {
@@ -849,6 +908,14 @@ forUndefinedKey:(id)key { // NSString*
 mod tests {
     use super::*;
     use crate::objc::release;
+
+    #[test]
+    fn method_type_parser_handles_offsets_and_compound_arguments() {
+        assert_eq!(method_type_tokens("v12@0:4i8"), vec!['v', '@', ':', 'i']);
+        assert_eq!(method_type_tokens("v24@0:4{CGPoint=ff}8"), vec!['v', '@', ':', '{']);
+        assert_eq!(method_type_tokens("v@:@\"NSString\""), vec!['v', '@', ':', '@']);
+        assert_eq!(method_type_tokens("v16@0:4@?8"), vec!['v', '@', ':', '@']);
+    }
 
     #[test]
     fn instance_description_is_inherited_without_replacing_overrides() {

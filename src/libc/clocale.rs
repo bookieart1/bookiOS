@@ -26,6 +26,7 @@ const LC_GLOBAL_LOCALE: MutVoidPtr = Ptr::from_bits(u32::MAX);
 pub struct State {
     locale: std::collections::HashMap<LocaleCategory, MutPtr<u8>>,
     thread_locale: std::collections::HashMap<usize, MutVoidPtr>,
+    langinfo: std::collections::HashMap<i32, MutPtr<u8>>,
 }
 
 pub fn setlocale(
@@ -104,10 +105,64 @@ fn uselocale(env: &mut Environment, locale: MutVoidPtr) -> MutVoidPtr {
     current
 }
 
+fn nl_langinfo(env: &mut Environment, item: i32) -> MutPtr<u8> {
+    if let Some(&cached) = env.libc_state.clocale.langinfo.get(&item) {
+        return cached;
+    }
+    // Darwin's C/POSIX-locale values and numeric constants from _langinfo.h.
+    // Locale selection is not yet modelled beyond C, so these deterministic
+    // fallbacks are more accurate than guessing from the host locale.
+    const DAYS: [&[u8]; 7] = [b"Sunday", b"Monday", b"Tuesday", b"Wednesday", b"Thursday", b"Friday", b"Saturday"];
+    const ABDAYS: [&[u8]; 7] = [b"Sun", b"Mon", b"Tue", b"Wed", b"Thu", b"Fri", b"Sat"];
+    const MONTHS: [&[u8]; 12] = [b"January", b"February", b"March", b"April", b"May", b"June", b"July", b"August", b"September", b"October", b"November", b"December"];
+    const ABMONTHS: [&[u8]; 12] = [b"Jan", b"Feb", b"Mar", b"Apr", b"May", b"Jun", b"Jul", b"Aug", b"Sep", b"Oct", b"Nov", b"Dec"];
+    let value: &[u8] = match item {
+        0 => b"US-ASCII",
+        1 => b"%a %b %e %H:%M:%S %Y",
+        2 => b"%m/%d/%y",
+        3 => b"%H:%M:%S",
+        4 => b"%I:%M:%S %p",
+        5 => b"AM",
+        6 => b"PM",
+        7..=13 => DAYS[(item - 7) as usize],
+        14..=20 => ABDAYS[(item - 14) as usize],
+        21..=32 => MONTHS[(item - 21) as usize],
+        33..=44 => ABMONTHS[(item - 33) as usize],
+        50 => b".",
+        52 => b"^[yY]",
+        53 => b"^[nN]",
+        54 => b"yes",
+        55 => b"no",
+        57 => b"md",
+        _ => b"",
+    };
+    let guest = env.mem.alloc_and_write_cstr(value);
+    env.libc_state.clocale.langinfo.insert(item, guest);
+    guest
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(setlocale(_, _)),
     export_c_func!(newlocale(_, _, _)),
     export_c_func!(duplocale(_)),
     export_c_func!(freelocale(_)),
     export_c_func!(uselocale(_)),
+    export_c_func!(nl_langinfo(_)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn c_locale_langinfo_is_stable_and_uses_darwin_item_numbers() {
+        let mut env = Environment::new_fake_for_test();
+        let codeset = nl_langinfo(&mut env, 0);
+        assert_eq!(env.mem.cstr_at(codeset.cast_const()), b"US-ASCII");
+        assert_eq!(nl_langinfo(&mut env, 0), codeset);
+        let sunday = nl_langinfo(&mut env, 7);
+        assert_eq!(env.mem.cstr_at(sunday.cast_const()), b"Sunday");
+        let invalid = nl_langinfo(&mut env, 999);
+        assert_eq!(env.mem.cstr_at(invalid.cast_const()), b"");
+    }
+}

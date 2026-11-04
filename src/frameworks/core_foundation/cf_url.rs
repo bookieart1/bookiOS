@@ -251,6 +251,18 @@ pub fn CFURLCopyPathExtension(env: &mut Environment, url: CFURLRef) -> CFStringR
     msg![env; ext copy]
 }
 
+fn CFURLCopyPath(env: &mut Environment, url: CFURLRef) -> CFStringRef {
+    if url.is_null() {
+        return url;
+    }
+    let path: id = msg![env; url path];
+    if path.is_null() {
+        path
+    } else {
+        msg![env; path copy]
+    }
+}
+
 fn CFURLCopyFileSystemPath(
     env: &mut Environment,
     url: CFURLRef,
@@ -313,8 +325,26 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFURLCreateWithString(_, _, _)),
     export_c_func!(CFURLCreateStringByAddingPercentEscapes(_, _, _, _, _)),
     export_c_func!(CFURLCopyPathExtension(_)),
+    export_c_func!(CFURLCopyPath(_)),
     export_c_func!(CFURLCopyFileSystemPath(_, _)),
     export_c_func!(CFURLCreateCopyAppendingPathComponent(_, _, _, _)),
     export_c_func!(CFURLCreateCopyDeletingLastPathComponent(_, _)),
     export_c_func!(CFURLHasDirectoryPath(_)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copy_path_obeys_create_ownership_and_nil_contract() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let path = from_rust_string(&mut env, "/tmp/example".to_owned());
+        let url: id = msg_class![&mut env; NSURL fileURLWithPath:path];
+        let copied = CFURLCopyPath(&mut env, url);
+        assert_eq!(to_rust_string(&mut env, copied), "/tmp/example");
+        release(&mut env, copied);
+        release(&mut env, path);
+        assert_eq!(CFURLCopyPath(&mut env, nil), nil);
+    }
+}

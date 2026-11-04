@@ -805,6 +805,18 @@ fn __vsnprintf_chk(
     vsnprintf(env, dest, bounded_n, format, args)
 }
 
+fn __snprintf_chk(
+    env: &mut Environment,
+    dest: MutPtr<u8>,
+    n: GuestUSize,
+    flags: i32,
+    dest_len: GuestUSize,
+    format: ConstPtr<u8>,
+    args: DotDotDot,
+) -> i32 {
+    __vsnprintf_chk(env, dest, n, flags, dest_len, format, args.start())
+}
+
 fn sprintf(env: &mut Environment, dest: MutPtr<u8>, format: ConstPtr<u8>, args: DotDotDot) -> i32 {
     // TODO: handle errno properly
     set_errno(env, 0);
@@ -1460,6 +1472,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(vsscanf(_, _, _)),
     export_c_func!(fscanf(_, _, _)),
     export_c_func!(snprintf(_, _, _, _)),
+    export_c_func!(__snprintf_chk(_, _, _, _, _, _)),
     export_c_func!(vasprintf(_, _, _)),
     export_c_func!(vprintf(_, _)),
     export_c_func!(vsnprintf(_, _, _, _)),

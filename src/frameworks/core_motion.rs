@@ -11,6 +11,25 @@ use crate::frameworks::foundation::NSTimeInterval;
 use crate::frameworks::uikit::ui_accelerometer::{
     sample_acceleration, DEFAULT_UPDATE_INTERVAL,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objc::{msg, msg_class, release};
+
+    #[test]
+    fn device_motion_interval_is_stable_without_claiming_motion_availability() {
+        let mut env = crate::Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let manager: id = msg_class![env; CMMotionManager new];
+        () = msg![env; manager setDeviceMotionUpdateInterval:0.25f64];
+        let interval: NSTimeInterval = msg![env; manager deviceMotionUpdateInterval];
+        assert_eq!(interval, 0.25);
+        let available: bool = msg![env; manager isDeviceMotionAvailable];
+        assert!(!available);
+        release(env, manager);
+    }
+}
 use crate::mem::SafeRead;
 use crate::objc::{
     id, impl_HostObject_with_superclass, nil, objc_classes, release, ClassExports, HostObject,
@@ -45,6 +64,7 @@ struct CMMotionManagerHostObject {
     accelerometer_update_interval: NSTimeInterval,
     /// Strong reference to the latest polling sample while active.
     accelerometer_data: id,
+    device_motion_update_interval: NSTimeInterval,
 }
 impl Default for CMMotionManagerHostObject {
     fn default() -> Self {
@@ -52,6 +72,7 @@ impl Default for CMMotionManagerHostObject {
             accelerometer_active: false,
             accelerometer_update_interval: DEFAULT_UPDATE_INTERVAL,
             accelerometer_data: nil,
+            device_motion_update_interval: DEFAULT_UPDATE_INTERVAL,
         }
     }
 }
@@ -125,6 +146,23 @@ const CLASSES: ClassExports = objc_classes! {
     // According to docs, this is functionally equivalent to `isGyroAvailable`
     // method. (All devices have accelerometer, but only some do have gyro).
     false
+}
+
+- (NSTimeInterval)deviceMotionUpdateInterval {
+    env.objc
+        .borrow::<CMMotionManagerHostObject>(this)
+        .device_motion_update_interval
+}
+
+- (())setDeviceMotionUpdateInterval:(NSTimeInterval)interval {
+    let interval = if interval <= 0.0 {
+        DEFAULT_UPDATE_INTERVAL
+    } else {
+        interval.max(DEFAULT_UPDATE_INTERVAL)
+    };
+    env.objc
+        .borrow_mut::<CMMotionManagerHostObject>(this)
+        .device_motion_update_interval = interval;
 }
 - (bool)isAccelerometerAvailable {
     // According to https://developer.apple.com/documentation/coremotion/getting-raw-accelerometer-events?language=objc,

@@ -9,6 +9,7 @@
 //! but here it is the same type.
 
 use super::cf_array::CFArrayRef;
+use super::cf_allocator::{kCFAllocatorDefault, CFAllocatorRef};
 use super::cf_dictionary::CFDictionaryRef;
 use super::cf_string::CFStringRef;
 use super::cf_url::CFURLRef;
@@ -34,6 +35,23 @@ pub const CONSTANTS: ConstantExports = &[
 ];
 
 pub type CFBundleRef = CFTypeRef;
+
+fn CFBundleCreate(
+    env: &mut Environment,
+    allocator: CFAllocatorRef,
+    bundle_url: CFURLRef,
+) -> CFBundleRef {
+    assert!(allocator == kCFAllocatorDefault || env.mem.read(allocator).is_system_default());
+    if bundle_url.is_null() {
+        return bundle_url;
+    }
+    let path: id = msg![env; bundle_url path];
+    if path.is_null() {
+        return path;
+    }
+    let bundle: id = msg_class![env; NSBundle alloc];
+    msg![env; bundle initWithPath:path]
+}
 
 fn CFBundleGetMainBundle(env: &mut Environment) -> CFBundleRef {
     msg_class![env; NSBundle mainBundle]
@@ -189,6 +207,7 @@ fn CFBundleCopyLocalizedString(
 }
 
 pub const FUNCTIONS: FunctionExports = &[
+    export_c_func!(CFBundleCreate(_, _)),
     export_c_func!(CFBundleGetMainBundle()),
     export_c_func!(CFBundleGetInfoDictionary(_)),
     export_c_func!(CFBundleGetValueForInfoDictionaryKey(_, _)),

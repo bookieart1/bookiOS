@@ -30,7 +30,7 @@
 use crate::dyld::{export_c_func, FunctionExports};
 use crate::libc::errno::{
     set_errno, EAFNOSUPPORT, EAGAIN, EBADF, ECONNREFUSED, ECONNRESET, EHOSTUNREACH, EINVAL,
-    ENETUNREACH, EPROTONOSUPPORT, ETIMEDOUT,
+    ENETUNREACH, ENOTSUP, EPROTONOSUPPORT, ETIMEDOUT,
 };
 use crate::libc::posix_io::{
     close, find_or_create_socket, is_nonblocking, is_socket, FileDescriptor,
@@ -544,7 +544,12 @@ fn listen(env: &mut Environment, socket: i32, backlog: i32) -> i32 {
         return -1;
     };
     let type_ = socket_host_object.type_;
-    assert!(type_ == SOCK_STREAM);
+    if type_ != SOCK_STREAM {
+        // Darwin listen(2) rejects datagram sockets with EOPNOTSUPP (the same
+        // numeric value as ENOTSUP) rather than terminating the process.
+        set_errno(env, ENOTSUP);
+        return -1;
+    }
 
     log!(
         "Warning: listen(socket: {}, backlog: {}), ignoring",
@@ -1356,6 +1361,15 @@ mod tests {
             crate::libc::errno::get_errno(&mut env),
             EPROTONOSUPPORT
         );
+    }
+
+    #[test]
+    fn listen_on_datagram_socket_reports_operation_not_supported() {
+        let mut env = Environment::new_fake_for_test();
+        let fd = socket(&mut env, AF_INET, SOCK_DGRAM, 0);
+        assert!(fd >= 0);
+        assert_eq!(listen(&mut env, fd, 1), -1);
+        assert_eq!(crate::libc::errno::get_errno(&mut env), ENOTSUP);
     }
 
     #[test]

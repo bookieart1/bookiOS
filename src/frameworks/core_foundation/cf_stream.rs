@@ -109,8 +109,22 @@ fn CFStreamCreatePairWithSocketToHost(
     }
 }
 
+/// Callback delivery requires scheduled network streams, which this first
+/// network-stream contract does not implement. Report registration failure
+/// instead of panicking at the missing symbol or fabricating events.
+fn CFWriteStreamSetClient(
+    _env: &mut Environment,
+    _stream: CFWriteStreamRef,
+    _events: u32,
+    _callback: MutVoidPtr,
+    _context: MutVoidPtr,
+) -> bool {
+    false
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFStreamCreatePairWithSocketToHost(_, _, _, _, _)),
+    export_c_func!(CFWriteStreamSetClient(_, _, _, _)),
     export_c_func!(CFReadStreamCreateWithFile(_, _)),
     export_c_func!(CFReadStreamOpen(_)),
     export_c_func!(CFReadStreamRead(_, _, _)),
@@ -143,6 +157,13 @@ mod tests {
             CFReadStreamCreateWithFile(env, kCFAllocatorDefault, remote_url),
             nil
         );
+        assert!(!CFWriteStreamSetClient(
+            env,
+            nil,
+            u32::MAX,
+            MutVoidPtr::null(),
+            MutVoidPtr::null(),
+        ));
         // Balance the Create Rule of from_rust_string. The URL convenience
         // results are autoreleased by NSURL itself.
         release(env, path);
