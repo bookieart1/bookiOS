@@ -339,12 +339,13 @@ mod tests {
     #[test]
     fn copy_path_obeys_create_ownership_and_nil_contract() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let path = from_rust_string(&mut env, "/tmp/example".to_owned());
-        let url: id = msg_class![&mut env; NSURL fileURLWithPath:path];
-        let copied = CFURLCopyPath(&mut env, url);
-        assert_eq!(to_rust_string(&mut env, copied), "/tmp/example");
-        release(&mut env, copied);
-        release(&mut env, path);
-        assert_eq!(CFURLCopyPath(&mut env, nil), nil);
+        let env = &mut env;
+        let path = from_rust_string(env, "/tmp/example".to_owned());
+        let url: id = msg_class![env; NSURL fileURLWithPath:path];
+        let copied = CFURLCopyPath(env, url);
+        assert_eq!(to_rust_string(env, copied), "/tmp/example");
+        release(env, copied);
+        release(env, path);
+        assert_eq!(CFURLCopyPath(env, nil), nil);
     }
 }

@@ -335,16 +335,17 @@ mod tests {
     #[test]
     fn cgpoint_category_round_trips_through_keyed_archive() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let key = get_static_str(&mut env, "point");
-        let archiver: id = msg_class![&mut env; NSKeyedArchiver new];
+        let env = &mut env;
+        let key = get_static_str(env, "point");
+        let archiver: id = msg_class![env; NSKeyedArchiver new];
         let expected = CGPoint { x: 1.5, y: -2.25 };
-        () = msg![&mut env; archiver encodeCGPoint:expected forKey:key];
-        let data: id = msg![&mut env; archiver encodedData];
-        let unarchiver: id = msg_class![&mut env; NSKeyedUnarchiver alloc];
-        let unarchiver: id = msg![&mut env; unarchiver initForReadingWithData:data];
-        let actual: CGPoint = msg![&mut env; unarchiver decodeCGPointForKey:key];
+        () = msg![env; archiver encodeCGPoint:expected forKey:key];
+        let data: id = msg![env; archiver encodedData];
+        let unarchiver: id = msg_class![env; NSKeyedUnarchiver alloc];
+        let unarchiver: id = msg![env; unarchiver initForReadingWithData:data];
+        let actual: CGPoint = msg![env; unarchiver decodeCGPointForKey:key];
         assert_eq!(actual, expected);
-        release(&mut env, unarchiver);
-        release(&mut env, archiver);
+        release(env, unarchiver);
+        release(env, archiver);
     }
 }
