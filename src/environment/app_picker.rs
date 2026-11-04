@@ -291,38 +291,24 @@ fn enumerate_apps(
     // so a full round can be exercised without repeatedly paging through the
     // library. Everything else remains alphabetical.
     // Bundle identifiers avoid depending on localized or truncated names.
-    const DEV_223_TEST_BATCH: &[&str] = &[
-        "BATTLEBEARS",
-        "CORDY",
-        "CURRENT",
-        "DUNGEONRAID",
-        "FREEBALLIN",
-        "GUERRILLABOB",
-        "KAMIRETRO",
-        "KICKTHEBUDDY",
-        "LABYRINTH2",
-        "MAMC",
-        "MUFFINKNIGHT",
-        "PIGSHOT",
-        "ROBOTUNICORN",
-        "SONICDASH",
-        "SPOING",
-        "TRENCHRUN",
-        "ZAXXON",
+    const DEV_224_TEST_BATCH: &[&str] = &[
+        "com.manucorporat.abstractwar2.0",
+        "com.getsetgames.addicus",
+        "com.continuitygame.continuity2",
+        "com.BrokenKings.CaveCarver",
+        "com.bigduckgames.flow",
+        "com.chillingo.infinityfieldiphone",
+        "com.fabulapps.kiko",
+        "com.chadtowns.da2",
+        "com.rsz.StickStuntBiker",
+        "com.noodlecake.superstickgolf",
+        "com.joystickgenerals.STActionPig",
+        "com.spokko.TikiPremium",
+        "9X8UEF6RBG.com.GrumpyFace.Wispin",
     ];
     apps.sort_by_key(|app| {
-        let normalized_name: String = app
-            .display_name
-            .chars()
-            .filter(|character| character.is_ascii_alphanumeric())
-            .flat_map(char::to_uppercase)
-            .collect();
-        let focus_index = DEV_223_TEST_BATCH
-            .iter()
-            .position(|name| normalized_name == *name || normalized_name.starts_with(*name))
-            .map(|idx| (0, idx));
-        let priority = focus_index.unwrap_or((1, 0));
-        (priority, app.display_name.to_uppercase())
+        let is_test = DEV_224_TEST_BATCH.contains(&app.bundle_identifier.as_str());
+        (!is_test, app.display_name.to_uppercase())
     });
 
     Ok(apps)
@@ -830,7 +816,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.23",
+            "iDared 32bit {}{}{} · Dev 2.24",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""

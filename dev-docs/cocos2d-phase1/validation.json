@@ -1,0 +1,76 @@
+{
+  "games": 37,
+  "ipas": 37,
+  "launches": 37,
+  "raw_logs": 3,
+  "encrypted": 2,
+  "crc_valid": 37,
+  "recorder_enabled": 35,
+  "working_controls": [
+    "Dirt",
+    "Moonlights",
+    "Tiki Totems Premium"
+  ],
+  "cluster_counts": {
+    "Alpha-only bitmap": 1,
+    "Offline CFStream lifecycle": 2,
+    "Invalid error receiver": 1,
+    "UIKit transaction API": 1,
+    "UIKit alert lifecycle": 1,
+    "Foundation value contracts": 7,
+    "Optional dynamic-library lookup": 1,
+    "Working controls": 3,
+    "Host orientation transition": 1,
+    "Unavailable advertising lifecycle": 2,
+    "Name-entry interaction": 1,
+    "Table-controller root view": 1,
+    "Encrypted executable": 2,
+    "Immutable plist / KVC": 1,
+    "White presentation / guest state": 1,
+    "Unresolved pointer producer": 1,
+    "Orientation / coordinate conversion": 2,
+    "Profile-array producer": 1,
+    "Invalid object origin": 1,
+    "GL error provenance candidate": 2,
+    "Invalid string origin": 1,
+    "Run-loop source lifecycle": 1,
+    "Mutation during selector iteration": 1,
+    "CommonCrypto incremental digest": 1
+  },
+  "identity_warnings": {
+    "Dirt": [
+      "IPA filename says 1.5; actual bundle/log version 2.5."
+    ],
+    "iStunt Reloaded Pro": [
+      "LevelTable/root-view diagnosis is stronger than treating setRowHeight as an absent UIView API."
+    ],
+    "Robokill: Rescue Titan Prime": [
+      "Filename says iPad; bundle identifier says robokilliphone. Device family in plist is authoritative."
+    ],
+    "ZombieSmash (originally listed as Zombie Shock)": [
+      "User confirmed ZombieSmash name and supplied missing IPA during audit. No longer log-only."
+    ]
+  },
+  "checks": "Index cardinality, bundle uniqueness, embedded build/workflow and recorder eligibility assertions passed. No emulator tests/builds run.",
+  "original_log_hashes_verified": {
+    "1-Log.txt": "92befec3f45cd9e2c70d47bcebf5b702e749fa4d09e914fa4d7e69af4013cf32",
+    "2-Log.txt": "450ceee9621a3a06939ad98b8523d1733688745995de05ad64e9feb8a8b65a5d",
+    "3-Clowning-Around-Log.txt": "08279a2bad3d71506de631f7112043b2b560d0ad270d1eb67bf5d000b334e77c"
+  },
+  "research_validation": [
+    "37 unique bundle IDs mapped to 37 IPA records and 37 launch records",
+    "All original log byte hashes match the supplied files",
+    "All reviewed source paths exist",
+    "All local Markdown document links resolve",
+    "Inspection and curation scripts parse successfully",
+    "37 archives pass streamed CRC verification",
+    "35 of 35 CPU-eligible launches enable recorder; 2 encrypted copies rejected pre-CPU",
+    "No bundle version mismatches between local IPA metadata and device logs"
+  ],
+  "limitations": [
+    "No device-side IPA hashes to prove byte identity",
+    "No emulator compilation or execution in this phase",
+    "No claim of fully passing Dev 2.23 hosted test matrix",
+    "Pre-existing user changes preserved"
+  ]
+}

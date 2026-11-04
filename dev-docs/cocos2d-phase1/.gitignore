@@ -1,0 +1,5 @@
+# Raw user evidence stays local; curated metadata and hashes are tracked.
+/logs/
+/ipa-index.json.gz
+/log-index.json
+/__pycache__/

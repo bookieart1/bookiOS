@@ -442,6 +442,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, new)
 }
 
++ (id)numberWithUnsignedChar:(u8)value {
+    let new: id = msg![env; this alloc];
+    let new: id = msg![env; new initWithUnsignedChar:value];
+    autorelease(env, new)
+}
+
 // TODO: types other than booleans and long longs
 
 // NSCoding implementation
@@ -587,6 +593,16 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
     *env.objc.borrow_mut(this) = NSNumberHostObject::Char(value);
     this
+}
+
+- (id)initWithUnsignedChar:(u8)value {
+    // NSNumber is a class cluster: reuse unsigned storage without sign extension.
+    // As with the other integer initializers, objCType describes storage.
+    msg![env; this initWithUnsignedShort:(u16::from(value))]
+}
+
+- (u8)unsignedCharValue {
+    env.objc.borrow::<NSNumberHostObject>(this).as_unsigned_int() as u8
 }
 
 - (bool)boolValue {

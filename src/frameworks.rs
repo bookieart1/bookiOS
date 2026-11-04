@@ -34,6 +34,7 @@ pub mod core_motion;
 pub mod core_telephony;
 pub mod foundation;
 pub mod game_kit;
+pub mod iad;
 pub mod media_player;
 pub mod message_ui;
 pub mod openal;
@@ -42,6 +43,9 @@ pub mod store_kit;
 pub mod system_configuration;
 pub mod twitter;
 pub mod uikit;
+
+#[cfg(test)]
+mod cocos_contract_tests;
 
 /// Container for state of various child modules
 #[derive(Default)]

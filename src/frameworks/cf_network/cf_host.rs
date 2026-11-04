@@ -182,11 +182,7 @@ fn CFHostGetReachability(
 
 fn CFHostCancelInfoResolution(_env: &mut Environment, _host: CFHostRef, _info: CFHostInfoType) {}
 
-/// Socket-backed CFStream objects are not implemented. Report a creation
-/// failure through the API's documented NULL outputs, as the existing
-/// CFStreamCreatePairWithSocketToHost implementation does. This preserves the
-/// CFHost object's lifetime and gives optional network clients a normal failure
-/// path without claiming that a socket or resolver is available.
+/// Share the offline socket-stream lifecycle with the string-host variant.
 fn CFStreamCreatePairWithSocketToCFHost(
     env: &mut Environment,
     allocator: CFAllocatorRef,
@@ -197,24 +193,8 @@ fn CFStreamCreatePairWithSocketToCFHost(
 ) {
     assert!(allocator == kCFAllocatorDefault || env.mem.read(allocator).is_system_default());
 
-    let host_name = if host == nil {
-        "(null)".to_string()
-    } else {
-        let name = env.objc.borrow::<CFHostHostObject>(host).name;
-        to_rust_string(env, name).into_owned()
-    };
-    log!(
-        "Warning: CFStreamCreatePairWithSocketToCFHost({}, {}) is unavailable; returning NULL streams",
-        host_name,
-        port
-    );
-
-    if !read_stream.is_null() {
-        env.mem.write(read_stream, nil);
-    }
-    if !write_stream.is_null() {
-        env.mem.write(write_stream, nil);
-    }
+    let name = env.objc.borrow::<CFHostHostObject>(host).name;
+    crate::frameworks::core_foundation::cf_socket_stream::create_pair(env, name, port.try_into().unwrap(), read_stream, write_stream);
 }
 
 pub const FUNCTIONS: FunctionExports = &[
@@ -264,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn socket_stream_pair_reports_offline_creation_failure() {
+    fn socket_stream_pair_creates_owned_objects_before_offline_open() {
         let mut env = Environment::new_fake_for_test();
         let name = ns_string::from_rust_string(&mut env, "analytics.example".to_string());
         let host = CFHostCreateWithName(&mut env, kCFAllocatorDefault, name);
@@ -280,8 +260,14 @@ mod tests {
             write_stream,
         );
 
-        assert_eq!(env.mem.read(read_stream), nil);
-        assert_eq!(env.mem.read(write_stream), nil);
+        let read = env.mem.read(read_stream);
+        let write = env.mem.read(write_stream);
+        assert_ne!(read, nil);
+        assert_ne!(write, nil);
+        assert_ne!(read, write);
+        assert!(crate::frameworks::core_foundation::cf_socket_stream::is_socket(&env, read));
+        crate::objc::release(&mut env, read);
+        crate::objc::release(&mut env, write);
 
         // Either output pointer may be omitted independently.
         CFStreamCreatePairWithSocketToCFHost(

@@ -624,7 +624,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         .or_else(|| env.objc.lookup_selector(&format!("_set{camel_case_key_string}:"))).filter(|&sel| env.objc.class_has_method(class, sel)
     ) {
         if is_ns_value {
-            // If value is a NSValue, it must be unwrapped
+            // NSValue is also an object. Only scalar destinations unbox it.
             // Find the selector's first (and only) argument type:
             let types = env.objc.get_class_method(class, sel).types.clone();
             let tokens = method_type_tokens(&types);
@@ -635,6 +635,9 @@ pub const CLASSES: ClassExports = objc_classes! {
             assert_eq!(tokens.len(), 4, "KVC setter must have exactly one explicit argument");
 
             match argument_type.unwrap() {
+                TYPE_ID | TYPE_CLASS => {
+                    () = msg_send(env, (this, sel, value));
+                },
                 TYPE_BOOL => {
                     let value: bool = msg![env; value boolValue];
                     () = msg_send(env, (this, sel, value));
@@ -688,6 +691,12 @@ pub const CLASSES: ClassExports = objc_classes! {
             if is_ns_value {
                 // If value is a NSValue, it must be unwrapped
                 match ivar_type.chars().next().unwrap() {
+                    TYPE_ID | TYPE_CLASS => {
+                        let old: id = env.mem.read(ivar_ptr.cast());
+                        retain(env, value);
+                        env.mem.write(ivar_ptr.cast(), value);
+                        release(env, old);
+                    },
                     TYPE_BOOL => {
                         let value: bool = msg![env; value boolValue];
                         env.mem.write(ivar_ptr.cast(), value);

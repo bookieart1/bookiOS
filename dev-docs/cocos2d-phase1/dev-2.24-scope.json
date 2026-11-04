@@ -1,0 +1,93 @@
+[
+  {
+    "game": "AbstractWar 2.0",
+    "bundle_id": "com.manucorporat.abstractwar2.0",
+    "classification": "compatibility",
+    "change": "NULL-color-space, 8-bit alpha bitmap creation, drawing and image conversion",
+    "baseline_signature": "C2D-ALPHA-01"
+  },
+  {
+    "game": "Addicus",
+    "bundle_id": "com.getsetgames.addicus",
+    "classification": "partial contract",
+    "change": "owned offline socket streams; scheduled POSIX ENETUNREACH instead of NULL scheduling",
+    "baseline_signature": "C2D-STREAM-01"
+  },
+  {
+    "game": "Continuity 2",
+    "bundle_id": "com.continuitygame.continuity2",
+    "classification": "compatibility",
+    "change": "KVC object-typed destinations retain/pass NSNumber and NSValue identities instead of scalar unboxing",
+    "baseline_signature": "C2D-KVC-01"
+  },
+  {
+    "game": "Dirt",
+    "bundle_id": "com.BrokenKings.CaveCarver",
+    "classification": "regression control",
+    "change": "unchanged compatibility behavior: existing color textures, input, audio and save/relaunch",
+    "baseline_signature": "C2D-CONTROL-01"
+  },
+  {
+    "game": "Flow Free",
+    "bundle_id": "com.bigduckgames.flow",
+    "classification": "partial contract",
+    "change": "iOS 4 ADBannerView sizing/configuration and deferred unavailable-service callback",
+    "baseline_signature": "C2D-IAD-01"
+  },
+  {
+    "game": "Infinity Field",
+    "bundle_id": "com.chillingo.infinityfieldiphone",
+    "classification": "compatibility",
+    "change": "unsigned-byte NSNumber creation and retrieval without sign extension",
+    "baseline_signature": "C2D-NUMBER-01"
+  },
+  {
+    "game": "Kiko: The Last Totem",
+    "bundle_id": "com.fabulapps.kiko",
+    "classification": "partial contract",
+    "change": "owned offline socket streams; scheduled POSIX ENETUNREACH instead of NULL scheduling",
+    "baseline_signature": "C2D-STREAM-01"
+  },
+  {
+    "game": "Mini Militia",
+    "bundle_id": "com.chadtowns.da2",
+    "classification": "partial contract",
+    "change": "iOS 4 ADBannerView sizing/configuration and deferred unavailable-service callback",
+    "baseline_signature": "C2D-IAD-01"
+  },
+  {
+    "game": "Stick Stunt Biker",
+    "bundle_id": "com.rsz.StickStuntBiker",
+    "classification": "compatibility",
+    "change": "signed Gregorian conversion including pre-1970 dates and negative fractions",
+    "baseline_signature": "C2D-DATE-01"
+  },
+  {
+    "game": "Super Stick Golf",
+    "bundle_id": "com.noodlecake.superstickgolf",
+    "classification": "compatibility",
+    "change": "primitive Boolean objects in keyed archives, with cached UID identity",
+    "baseline_signature": "C2D-ARCHIVE-01"
+  },
+  {
+    "game": "Super Turbo Action Pig",
+    "bundle_id": "com.joystickgenerals.STActionPig",
+    "classification": "diagnostic-only",
+    "change": "first incomplete guest draw/clear framebuffer snapshot within 512 calls, no glGetError consumption",
+    "baseline_signature": "C2D-FBO-01"
+  },
+  {
+    "game": "Tiki Totems Premium",
+    "bundle_id": "com.spokko.TikiPremium",
+    "classification": "regression control",
+    "change": "unchanged compatibility behavior: UIKit/run-loop scene transitions and save/relaunch",
+    "baseline_signature": "C2D-CONTROL-01"
+  },
+  {
+    "game": "Wispin",
+    "bundle_id": "9X8UEF6RBG.com.GrumpyFace.Wispin",
+    "classification": "diagnostic-only",
+    "change": "first incomplete guest draw/clear framebuffer snapshot within 512 calls, no glGetError consumption",
+    "baseline_signature": "C2D-FBO-01"
+  }
+]

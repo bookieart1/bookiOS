@@ -83,6 +83,9 @@ fn CFReadStreamSetProperty(
     property_name: CFStringRef,
     property_value: CFTypeRef,
 ) -> bool {
+    if crate::frameworks::core_foundation::cf_socket_stream::is_socket(env, stream) {
+        return false; // Offline transport has no native socket or HTTP properties.
+    }
     if !stream.is_null() {
         todo!(
             "CFReadStreamSetProperty({:?}, {}, {:?})",
@@ -94,28 +97,20 @@ fn CFReadStreamSetProperty(
     false
 }
 fn CFReadStreamSetClient(
-    _env: &mut Environment,
-    stream: CFReadStreamRef,
-    stream_events: CFOptionFlags,
-    client_callback: GuestFunction, // TODO: CFReadStreamClientCallBack
-    client_context: MutVoidPtr,     // TODO: CFStreamClientContext *
+    env: &mut Environment, stream: CFReadStreamRef, events: CFOptionFlags,
+    callback: GuestFunction, context: MutVoidPtr,
 ) -> bool {
-    if !stream.is_null() {
-        todo!(
-            "CFReadStreamSetClient({:?}, {}, {:?}, {:?})",
-            stream,
-            stream_events,
-            client_callback,
-            client_context
-        );
-    }
-    false
+    crate::frameworks::core_foundation::cf_socket_stream::set_client(env, stream, events, callback, context)
 }
+
 fn CFReadStreamCopyProperty(
     env: &mut Environment,
     stream: CFReadStreamRef,
     property_name: CFStringRef,
 ) -> CFTypeRef {
+    if crate::frameworks::core_foundation::cf_socket_stream::is_socket(env, stream) {
+        return Ptr::null(); // Offline transport has no native socket or HTTP properties.
+    }
     if !stream.is_null() {
         todo!(
             "CFReadStreamCopyProperty({:?}, {})",

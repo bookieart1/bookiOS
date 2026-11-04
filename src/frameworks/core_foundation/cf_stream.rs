@@ -6,9 +6,10 @@
 //! Minimal Core Foundation stream compatibility.
 
 use crate::dyld::{export_c_func, FunctionExports};
+use crate::abi::GuestFunction;
+use super::cf_socket_stream;
 use crate::frameworks::core_foundation::cf_allocator::{kCFAllocatorDefault, CFAllocatorRef};
 use crate::frameworks::core_foundation::CFIndex;
-use crate::frameworks::foundation::ns_string::to_rust_string;
 use crate::frameworks::foundation::NSUInteger;
 use crate::mem::{MutPtr, MutVoidPtr};
 use crate::objc::{id, msg, msg_class, nil};
@@ -85,41 +86,53 @@ fn CFReadStreamClose(env: &mut Environment, stream: CFReadStreamRef) {
     }
 }
 
-/// Network-backed NSStream objects are not implemented yet. Returning null
-/// stream references matches a failed stream-pair creation and lets callers
-/// gracefully disable optional services such as analytics and cloud profiles.
+/// Allocate real offline stream objects; opening reports a network error.
 fn CFStreamCreatePairWithSocketToHost(
     env: &mut Environment,
-    _allocator: id,
+    allocator: CFAllocatorRef,
     host: CFStringRef,
     port: u32,
     read_stream: MutPtr<CFReadStreamRef>,
     write_stream: MutPtr<CFWriteStreamRef>,
 ) {
-    log!(
-        "Warning: CFStreamCreatePairWithSocketToHost({}, {}) is unavailable; returning NULL streams",
-        to_rust_string(env, host),
-        port
-    );
-    if !read_stream.is_null() {
-        env.mem.write(read_stream, nil);
-    }
-    if !write_stream.is_null() {
-        env.mem.write(write_stream, nil);
-    }
+    assert!(allocator == kCFAllocatorDefault || env.mem.read(allocator).is_system_default());
+    cf_socket_stream::create_pair(env, host, port, read_stream, write_stream);
 }
 
-/// Callback delivery requires scheduled network streams, which this first
-/// network-stream contract does not implement. Report registration failure
-/// instead of panicking at the missing symbol or fabricating events.
+/// Register an error-event client for an offline socket stream.
 fn CFWriteStreamSetClient(
-    _env: &mut Environment,
-    _stream: CFWriteStreamRef,
-    _events: u32,
-    _callback: MutVoidPtr,
-    _context: MutVoidPtr,
+    env: &mut Environment, stream: id, events: u32,
+    callback: GuestFunction, context: MutVoidPtr,
 ) -> bool {
-    false
+    cf_socket_stream::set_client(env, stream, events, callback, context)
+}
+
+fn CFWriteStreamOpen(env: &mut Environment, stream: id) -> bool { CFReadStreamOpen(env, stream) }
+fn CFWriteStreamClose(env: &mut Environment, stream: id) { CFReadStreamClose(env, stream) }
+fn CFWriteStreamGetStatus(env: &mut Environment, stream: id) -> u32 { CFReadStreamGetStatus(env, stream) }
+fn CFWriteStreamCanAcceptBytes(env: &mut Environment, stream: id) -> bool {
+    stream != nil && msg![env; stream hasSpaceAvailable]
+}
+fn CFWriteStreamWrite(env: &mut Environment, stream: id, data: MutVoidPtr, length: i32) -> i32 {
+    if stream == nil || length < 0 { return -1; }
+    msg![env; stream write:data maxLength:(length as u32)]
+}
+fn CFReadStreamGetError(env: &mut Environment, stream: id) -> cf_socket_stream::StreamError {
+    cf_socket_stream::error(env, stream)
+}
+fn CFWriteStreamGetError(env: &mut Environment, stream: id) -> cf_socket_stream::StreamError {
+    cf_socket_stream::error(env, stream)
+}
+fn CFReadStreamCopyError(env: &mut Environment, stream: id) -> id { cf_socket_stream::copy_error(env, stream) }
+fn CFWriteStreamSetProperty(env: &mut Environment, stream: id, _property: id, _value: id) -> bool {
+    assert!(stream == nil || cf_socket_stream::is_socket(env, stream), "unsupported write stream property");
+    false // No SSL/native socket properties are implemented.
+}
+fn CFReadStreamScheduleWithRunLoop(env: &mut Environment, stream: id, run_loop: id, mode: id) {
+    CFWriteStreamScheduleWithRunLoop(env, stream, run_loop, mode)
+}
+fn CFReadStreamUnscheduleFromRunLoop(env: &mut Environment, stream: id, run_loop: id, mode: id) {
+    CFWriteStreamUnscheduleFromRunLoop(env, stream, run_loop, mode)
 }
 
 fn CFWriteStreamScheduleWithRunLoop(
@@ -146,6 +159,17 @@ fn CFWriteStreamUnscheduleFromRunLoop(
 
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFStreamCreatePairWithSocketToHost(_, _, _, _, _)),
+    export_c_func!(CFWriteStreamOpen(_)),
+    export_c_func!(CFWriteStreamClose(_)),
+    export_c_func!(CFWriteStreamGetStatus(_)),
+    export_c_func!(CFWriteStreamGetError(_)),
+    export_c_func!(CFWriteStreamCanAcceptBytes(_)),
+    export_c_func!(CFWriteStreamWrite(_, _, _)),
+    export_c_func!(CFWriteStreamSetProperty(_, _, _)),
+    export_c_func!(CFReadStreamGetError(_)),
+    export_c_func!(CFReadStreamCopyError(_)),
+    export_c_func!(CFReadStreamScheduleWithRunLoop(_, _, _)),
+    export_c_func!(CFReadStreamUnscheduleFromRunLoop(_, _, _)),
     export_c_func!(CFWriteStreamSetClient(_, _, _, _)),
     export_c_func!(CFWriteStreamScheduleWithRunLoop(_, _, _)),
     export_c_func!(CFWriteStreamUnscheduleFromRunLoop(_, _, _)),
@@ -185,7 +209,7 @@ mod tests {
             env,
             nil,
             u32::MAX,
-            MutVoidPtr::null(),
+            GuestFunction::from_addr_with_thumb_bit(0),
             MutVoidPtr::null(),
         ));
         CFWriteStreamScheduleWithRunLoop(env, nil, nil, nil);

@@ -9,7 +9,6 @@ use crate::abi::GuestArg;
 use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
 use crate::frameworks::core_foundation::CFTypeRef;
 use crate::frameworks::foundation::NSTimeInterval;
-use crate::libc::time::{time_t, timestamp_to_calendar_date};
 use crate::mem::SafeRead;
 use crate::objc::nil;
 use crate::{impl_GuestRet_for_large_struct, Environment};
@@ -118,20 +117,23 @@ pub fn CFAbsoluteTimeGetGregorianDate(
     tz: CFTimeZoneRef,
 ) -> CFGregorianDate {
     assert!(tz.is_null());
-    let time64 = apple_epoch()
-        .add(Duration::from_secs_f64(at))
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let time = time64 as time_t;
-    let tm = timestamp_to_calendar_date(time);
+    // Absolute time is signed. Floor (not truncate) so -0.25 is the last
+    // quarter second of the preceding day, including dates before Unix time.
+    assert!(at.is_finite(), "non-finite CFAbsoluteTime");
+    let days = (at / DAY_SECONDS).floor();
+    assert!(days >= days_from_date(i32::MIN.into(), 1, 1) as f64);
+    assert!(days < days_from_date(i64::from(i32::MAX) + 1, 1, 1) as f64);
+    let (year, month, day) = date_from_days(days as i64);
+    let within_day = at - days * DAY_SECONDS;
+    let hours = (within_day / 3600.0).floor();
+    let minutes = ((within_day - hours * 3600.0) / 60.0).floor();
     CFGregorianDate {
-        year: 1900 + tm.tm_year,
-        month: (tm.tm_mon + 1) as i8,
-        day: tm.tm_mday as i8,
-        hours: tm.tm_hour as i8,
-        minutes: tm.tm_min as i8,
-        seconds: tm.tm_sec.into(),
+        year: year.try_into().unwrap(),
+        month: month as i8,
+        day: day as i8,
+        hours: hours as i8,
+        minutes: minutes as i8,
+        seconds: within_day - hours * 3600.0 - minutes * 60.0,
     }
 }
 

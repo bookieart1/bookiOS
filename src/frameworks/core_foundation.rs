@@ -27,6 +27,7 @@ pub mod cf_preferences;
 pub mod cf_run_loop;
 pub mod cf_run_loop_timer;
 pub mod cf_socket;
+pub mod cf_socket_stream;
 pub mod cf_stream;
 pub mod cf_string;
 pub mod cf_type;
@@ -40,6 +41,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
     class_exports: &[
         cf_run_loop_timer::CLASSES, // Special internal classes.
         cf_uuid::CLASSES,
+        cf_socket_stream::CLASSES,
     ],
     constant_exports: &[
         CONSTANTS,

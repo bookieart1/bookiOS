@@ -64,6 +64,10 @@ pub struct State {
     gl_visual_history: [GlVisualCall; GL_VISUAL_HISTORY],
     gl_visual_history_written: u64,
     gl_visual_history_dumped: bool,
+    /// Observe at most the first 512 guest draw/clear boundaries; stop on the
+    /// first incomplete FBO. This never reads or consumes the GL error flag.
+    framebuffer_probes: u16,
+    framebuffer_fault_captured: bool,
 }
 impl Default for State {
     fn default() -> Self {
@@ -79,10 +83,19 @@ impl Default for State {
             gl_visual_history: [GlVisualCall::default(); GL_VISUAL_HISTORY],
             gl_visual_history_written: 0,
             gl_visual_history_dumped: false,
+            framebuffer_probes: 0,
+            framebuffer_fault_captured: false,
         }
     }
 }
 impl State {
+    fn take_framebuffer_probe(&mut self) -> Option<u16> {
+        if self.framebuffer_fault_captured || self.framebuffer_probes >= 512 {
+            return None;
+        }
+        self.framebuffer_probes += 1;
+        Some(self.framebuffer_probes)
+    }
     fn current_ctx_for_thread(&mut self, thread: crate::ThreadId) -> &mut Option<crate::objc::id> {
         self.current_ctxs.entry(thread).or_insert(None);
         self.current_ctxs.get_mut(&thread).unwrap()
@@ -188,6 +201,17 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cocos_contract_framebuffer_probes_are_finite_and_freeze() {
+        let mut state = State::default();
+        for i in 1..=512 { assert_eq!(state.take_framebuffer_probe(), Some(i)); }
+        assert_eq!(state.take_framebuffer_probe(), None);
+        let mut state = State::default();
+        assert_eq!(state.take_framebuffer_probe(), Some(1));
+        state.framebuffer_fault_captured = true;
+        assert_eq!(state.take_framebuffer_probe(), None);
+    }
 
     #[test]
     fn gl_error_candidate_history_is_bounded_and_clears_after_a_clean_observation() {

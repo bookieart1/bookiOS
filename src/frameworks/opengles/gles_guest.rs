@@ -819,6 +819,41 @@ fn glWeightPointerOES(
 }
 
 // Drawing
+fn probe_framebuffer_before_draw(env: &mut Environment, call: &str) {
+    if env.diagnostics.is_none() { return; }
+    let context = *env.framework_state.opengles.current_ctx_for_thread(env.current_thread);
+    if context.is_none() { return; }
+    let Some(sample) = env.framework_state.opengles.take_framebuffer_probe() else { return; };
+    let caller = env.cpu.regs()[14];
+    let (status, framebuffer, viewport, attachments) = with_ctx_and_mem(env, |gles, _| unsafe {
+        let status = gles.CheckFramebufferStatusOES(gles11::FRAMEBUFFER_OES);
+        let mut framebuffer = 0;
+        let mut viewport = [0; 4];
+        let mut attachments = [0; 6];
+        // Inspect attachment object types/names only on the failing boundary.
+        if status != gles11::FRAMEBUFFER_COMPLETE_OES {
+            gles.GetIntegerv(gles11::FRAMEBUFFER_BINDING_OES, &mut framebuffer);
+            gles.GetIntegerv(gles11::VIEWPORT, viewport.as_mut_ptr());
+            if framebuffer != 0 {
+                for (i, attachment) in [gles11::COLOR_ATTACHMENT0_OES, gles11::DEPTH_ATTACHMENT_OES, gles11::STENCIL_ATTACHMENT_OES].into_iter().enumerate() {
+                    gles.GetFramebufferAttachmentParameterivOES(gles11::FRAMEBUFFER_OES, attachment, gles11::FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE_OES, &mut attachments[i * 2]);
+                    if attachments[i * 2] != gles11::NONE as i32 {
+                        gles.GetFramebufferAttachmentParameterivOES(gles11::FRAMEBUFFER_OES, attachment, gles11::FRAMEBUFFER_ATTACHMENT_OBJECT_NAME_OES, &mut attachments[i * 2 + 1]);
+                    }
+                }
+            }
+        }
+        (status, framebuffer, viewport, attachments)
+    });
+    if status != gles11::FRAMEBUFFER_COMPLETE_OES {
+        env.framework_state.opengles.framebuffer_fault_captured = true;
+        log!("First incomplete guest framebuffer: sample={sample}, before={call}, caller={caller:#x}, thread={}, context={context:?}, status={status:#x}, fbo={framebuffer}, viewport={viewport:?}, color/depth/stencil type+name={attachments:x?}; GL error flag untouched", env.current_thread);
+        env.framework_state.opengles.log_gl_error_candidates("before incomplete guest draw", 0x506);
+    } else if sample == 1 || sample == 512 {
+        log!("Bounded framebuffer probe: sample={sample}/512, before={call}, context={context:?}, complete; GL error flag untouched");
+    }
+}
+
 unsafe fn log_input_draw_state(
     gles: &mut dyn GLES,
     sample: u8,
@@ -868,6 +903,7 @@ unsafe fn log_input_draw_state(
 }
 
 fn glDrawArrays(env: &mut Environment, mode: GLenum, first: GLint, count: GLsizei) {
+    probe_framebuffer_before_draw(env, "glDrawArrays");
     env.framework_state.opengles.note_visual_call(
         "glDrawArrays",
         [mode, first as u32, count as u32, 0],
@@ -896,6 +932,7 @@ fn glDrawElements(
     type_: GLenum,
     indices: ConstVoidPtr,
 ) {
+    probe_framebuffer_before_draw(env, "glDrawElements");
     env.framework_state.opengles.note_visual_call(
         "glDrawElements",
         [mode, count as u32, type_, indices.to_bits()],
@@ -934,6 +971,7 @@ fn glDrawElements(
 
 // Clearing
 fn glClear(env: &mut Environment, mask: GLbitfield) {
+    probe_framebuffer_before_draw(env, "glClear");
     env.framework_state.opengles.note_visual_call("glClear", [mask, 0, 0, 0]);
     env.framework_state
         .opengles

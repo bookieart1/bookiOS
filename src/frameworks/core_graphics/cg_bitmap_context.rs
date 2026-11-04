@@ -55,9 +55,16 @@ pub fn CGBitmapContextCreate(
 ) -> CGContextRef {
     assert!(bits_per_component == 8); // TODO: support other bit depths
 
-    let color_space = env.objc.borrow::<CGColorSpaceHostObject>(color_space).name;
+    let color_space = if color_space.is_null() {
+        assert_eq!(bitmap_info, kCGImageAlphaOnly, "NULL color space requires alpha-only bitmap");
+        // Internal marker only; this is not a fabricated guest color space.
+        "alpha-only"
+    } else {
+        env.objc.borrow::<CGColorSpaceHostObject>(color_space).name
+    };
 
     let component_count = match color_space {
+        "alpha-only" => 1,
         kCGColorSpaceGenericRGB => components_for_rgb(bitmap_info).unwrap(),
         kCGColorSpaceGenericGray => components_for_gray(bitmap_info).unwrap(),
         _ => unimplemented!("support other color spaces"),
@@ -77,6 +84,7 @@ pub fn CGBitmapContextCreate(
         (data, false, bytes_per_row)
     };
 
+    assert!(bytes_per_row >= width.checked_mul(component_count).unwrap());
     let host_object = CGContextHostObject {
         subclass: CGContextSubclass::CGBitmapContext(CGBitmapContextData {
             data,
@@ -142,6 +150,15 @@ pub fn CGBitmapContextCreateImage(env: &mut Environment, context: CGContextRef) 
     // support any bitmap format.
     let host_obj = env.objc.borrow::<CGContextHostObject>(context);
     let CGContextSubclass::CGBitmapContext(bitmap_data) = host_obj.subclass;
+    if bitmap_data.alpha_info == kCGImageAlphaOnly {
+        let mut pixels = Vec::new();
+        for row in env.mem.bytes_at(bitmap_data.data.cast(), bitmap_data.bytes_per_row.checked_mul(bitmap_data.height).unwrap()).chunks(bitmap_data.bytes_per_row as usize) {
+            for &alpha in &row[..bitmap_data.width as usize] {
+                pixels.extend([0, 0, 0, alpha]);
+            }
+        }
+        return cg_image::from_image(env, Image::from_pixel_vec(pixels, (bitmap_data.width, bitmap_data.height)));
+    }
     assert!(
         bitmap_data.bits_per_component == 8
             && bitmap_data.color_space == kCGColorSpaceGenericRGB
@@ -233,6 +250,7 @@ fn bytes_per_pixel(data: &CGBitmapContextData) -> GuestUSize {
     } = data;
     assert!(bits_per_component == 8);
     match color_space {
+        "alpha-only" => 1,
         kCGColorSpaceGenericRGB => components_for_rgb(alpha_info).unwrap(),
         kCGColorSpaceGenericGray => components_for_gray(alpha_info).unwrap(),
         _ => unimplemented!("support other color spaces"),
@@ -366,6 +384,7 @@ fn pixel_offsets(data: &CGBitmapContextData) -> (usize, usize, usize, Option<usi
 
 fn pixel_offsets_big_endian(data: &CGBitmapContextData) -> (usize, usize, usize, Option<usize>) {
     match data.color_space {
+        "alpha-only" => (0, 0, 0, Some(0)),
         kCGColorSpaceGenericRGB => {
             match data.alpha_info {
                 kCGImageAlphaNone => (0, 1, 2, None),
@@ -454,11 +473,10 @@ fn put_pixel(
             kCGImageAlphaPremultipliedLast | kCGImageAlphaPremultipliedFirst => {
                 blend_premultiplied(bg_pixel, pixel, blend_mode)
             }
-            kCGImageAlphaOnly => (
-                pixel.0,
-                pixel.1,
-                pixel.2,
-                pixel.3 + bg_pixel.3 * (1.0 - pixel.3),
+            kCGImageAlphaOnly => blend_premultiplied(
+                (0.0, 0.0, 0.0, bg_pixel.3),
+                (0.0, 0.0, 0.0, pixel.3),
+                blend_mode,
             ),
             _ => {
                 assert_eq!(blend_mode, kCGBlendModeNormal); // TODO

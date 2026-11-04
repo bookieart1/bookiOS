@@ -345,6 +345,11 @@ fn unarchive_key(env: &mut Environment, unarchiver: id, key: Uid) -> id {
                 unreachable!(); // according to plist crate docs
             }
         }
+        Value::Boolean(val) => {
+            let val = *val;
+            let number: id = msg_class![env; NSNumber alloc];
+            msg![env; number initWithBool:val]
+        }
         Value::Real(val) => {
             let val = *val;
             let number: id = msg_class![env; NSNumber alloc];
