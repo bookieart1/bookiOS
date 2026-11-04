@@ -411,7 +411,8 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
     let start: MutPtr<u8> = host.bytes.cast();
     let start: ConstVoidPtr = (start + range.location).cast_const().cast();
-    msg_class![env; NSData dataWithBytes:start length:range.length]
+    let length = range.length;
+    msg_class![env; NSData dataWithBytes:start length:length]
 }
 
 - (bool)isEqualToData:(id)other {
@@ -668,8 +669,13 @@ mod tests {
         env.mem
             .bytes_at_mut(bytes.cast(), 4)
             .copy_from_slice(&[1, 2, 3, 4]);
-        let data: id = msg_class![env; NSData dataWithBytes:bytes.cast_const() length:4u32];
-        let subdata: id = msg![env; data subdataWithRange:NSRange { location: 1, length: 2 }];
+        let bytes_const = bytes.cast_const();
+        let data: id = msg_class![env; NSData dataWithBytes:bytes_const length:4u32];
+        let range = NSRange {
+            location: 1,
+            length: 2,
+        };
+        let subdata: id = msg![env; data subdataWithRange:range];
         assert_eq!(to_rust_slice(env, subdata), &[2, 3]);
         env.mem.free(bytes.cast());
     }

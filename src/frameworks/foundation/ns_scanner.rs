@@ -160,7 +160,8 @@ pub const CLASSES: ClassExports = objc_classes! {
     let mut cursor = pos;
     if cursor + 2 <= len {
         let zero: unichar = msg![env; string characterAtIndex:cursor];
-        let x: unichar = msg![env; string characterAtIndex:cursor + 1];
+        let next = cursor + 1;
+        let x: unichar = msg![env; string characterAtIndex:next];
         if zero == b'0' as unichar && (x == b'x' as unichar || x == b'X' as unichar) {
             cursor += 2;
         }
@@ -465,7 +466,8 @@ mod tests {
         let first: bool = msg![env; scanner scanHexInt:output];
         assert!(first);
         assert_eq!(env.mem.read(output), 31);
-        let second: bool = msg![env; scanner scanHexInt:MutPtr::<u32>::null()];
+        let null_output = MutPtr::<u32>::null();
+        let second: bool = msg![env; scanner scanHexInt:null_output];
         assert!(second);
         let location: NSUInteger = msg![env; scanner scanLocation];
         assert_eq!(location, 16);
