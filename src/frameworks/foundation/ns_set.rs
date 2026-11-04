@@ -599,18 +599,19 @@ mod tests {
     #[test]
     fn counted_factory_reads_exact_count_and_deduplicates() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let one: id = msg_class![&mut env; NSObject new];
-        let two: id = msg_class![&mut env; NSObject new];
+        let env = &mut env;
+        let one: id = msg_class![env; NSObject new];
+        let two: id = msg_class![env; NSObject new];
         let objects: MutPtr<id> = env.mem.alloc(3 * guest_size_of::<id>()).cast();
         env.mem.write(objects, one);
         env.mem.write(objects + 1, two);
         env.mem.write(objects + 2, one);
         let objects = objects.cast_const();
-        let set: id = msg_class![&mut env; NSSet setWithObjects:objects count:3u32];
-        let count: NSUInteger = msg![&mut env; set count];
+        let set: id = msg_class![env; NSSet setWithObjects:objects count:3u32];
+        let count: NSUInteger = msg![env; set count];
         assert_eq!(count, 2);
-        release(&mut env, one);
-        release(&mut env, two);
+        release(env, one);
+        release(env, two);
     }
 
     #[test]
