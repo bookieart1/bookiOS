@@ -15,6 +15,7 @@ pub mod ui_label;
 pub mod ui_navigation_bar;
 pub mod ui_page_control;
 pub mod ui_picker_view;
+pub mod ui_progress_view;
 pub mod ui_scroll_view;
 pub mod ui_table_view_cell;
 pub mod ui_toolbar;
@@ -22,6 +23,7 @@ pub mod ui_web_view;
 pub mod ui_window;
 
 use core::panic;
+use std::collections::VecDeque;
 
 use super::ui_graphics::{UIGraphicsPopContext, UIGraphicsPushContext};
 use crate::frameworks::core_animation::ca_animation::{
@@ -77,6 +79,21 @@ pub struct State {
     pub animation_block_count: usize,
     /// Set by `+[UIView setAnimationsEnabled:NO]`.
     pub animations_disabled: bool,
+    /// Last UIKit lifecycle mutations. This is diagnostic-only, bounded, and
+    /// intentionally stores no strong object references.
+    recent_view_transitions: VecDeque<ViewTransitionDiagnostic>,
+}
+
+#[derive(Clone, Debug)]
+struct ViewTransitionDiagnostic {
+    action: &'static str,
+    view: id,
+    class_name: String,
+    superview: id,
+    controller: id,
+    detail: String,
+    pc: u32,
+    lr: u32,
 }
 
 pub struct UIViewHostObject {
@@ -231,6 +248,62 @@ pub(crate) fn log_bounded_view_hierarchy(env: &mut Environment, reason: &str) {
     log!(
         "UIKit bounded hierarchy ({reason}) complete: emitted {emitted} view(s), cap {MAX_VIEWS}"
     );
+}
+
+fn record_view_transition(env: &mut Environment, action: &'static str, view: id, detail: String) {
+    const CAPACITY: usize = 32;
+    let Some(host) = env
+        .objc
+        .get_host_object(view)
+        .and_then(|object| object.as_any().downcast_ref::<UIViewHostObject>())
+    else {
+        return;
+    };
+    let superview = host.superview;
+    let controller = host.view_controller;
+    let class_name = ObjC::try_read_isa(view, &env.mem)
+        .and_then(|class| env.objc.try_get_class_name(class))
+        .unwrap_or("<invalid-view>")
+        .to_owned();
+    let transition = ViewTransitionDiagnostic {
+        action,
+        view,
+        class_name,
+        superview,
+        controller,
+        detail,
+        pc: env.cpu.regs()[crate::cpu::Cpu::PC],
+        lr: env.cpu.regs()[crate::cpu::Cpu::LR],
+    };
+    let history = &mut env.framework_state.uikit.ui_view.recent_view_transitions;
+    if history.len() == CAPACITY {
+        history.pop_front();
+    }
+    history.push_back(transition);
+}
+
+/// Dump the last UIKit attachment/visibility mutations when a title is left.
+/// This identifies the producer and expected dismissal path of a blocking
+/// overlay without changing hit testing or keeping guest objects alive.
+pub(crate) fn log_bounded_view_transition_history(env: &Environment, reason: &str) {
+    let history = &env.framework_state.uikit.ui_view.recent_view_transitions;
+    log!(
+        "UIKit bounded transition history ({reason}): newest {}, cap 32",
+        history.len()
+    );
+    for (index, event) in history.iter().enumerate() {
+        log!(
+            "UIKit transition #{index}: action={} view={:?} class={} superview={:?} controller={:?} detail={} pc={:#010x} lr={:#010x}",
+            event.action,
+            event.view,
+            event.class_name,
+            event.superview,
+            event.controller,
+            event.detail,
+            event.pc,
+            event.lr,
+        );
+    }
 }
 
 /// Lay out the views in the windows that need it, as UIKit does before
@@ -745,6 +818,8 @@ pub const CLASSES: ClassExports = objc_classes! {
         return;
     }
 
+    record_view_transition(env, "add-subview", view, format!("destination={this:?}"));
+
     if env.objc.borrow::<UIViewHostObject>(view).superview == this {
         () = msg![env; this bringSubviewToFront:view];
     } else {
@@ -892,6 +967,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())removeFromSuperview {
+    record_view_transition(env, "remove-from-superview", this, String::new());
     let &mut UIViewHostObject {
         ref mut superview,
         layer: this_layer,
@@ -954,6 +1030,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     msg![env; layer isHidden]
 }
 - (())setHidden:(bool)hidden {
+    record_view_transition(env, "set-hidden", this, format!("hidden={hidden}"));
     let layer = env.objc.borrow::<UIViewHostObject>(this).layer;
     msg![env; layer setHidden:hidden]
 }
@@ -979,6 +1056,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     msg![env; layer opacity]
 }
 - (())setAlpha:(CGFloat)alpha {
+    record_view_transition(env, "set-alpha", this, format!("alpha={alpha}"));
     let layer = env.objc.borrow::<UIViewHostObject>(this).layer;
     msg![env; layer setOpacity:alpha]
 }

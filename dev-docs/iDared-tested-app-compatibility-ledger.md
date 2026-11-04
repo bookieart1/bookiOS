@@ -4115,3 +4115,99 @@ limitations are in
 `cocos2d-phase1/dev-2.25-exact-system-contracts.md`. The universal recorder is
 unchanged, and unrelated invalid-object, graphics, input and package clusters
 remain outside this build.
+
+## Dev 2.24 broader-library retrospective — November 4, 2026
+
+Three later-supplied logs all embed implementation `fb810996` and workflow
+`41796486938`, proving that this was a **Dev 2.24** sweep even though the picker
+still displayed Dev 2.23. This survey was performed after Dev 2.25 had already
+been delivered, so it is historical device evidence rather than a new build
+request.
+
+### Verified or strongly supported advances
+
+| App | Current observed reach | Causal assessment |
+|---|---|---|
+| A Monster Ate My Homework | User reports working gameplay; clean Home return after 28.5 s, 1,360 loops and 548 presentations. | **Genuine broad-fix gain.** The old Dev 1.90 terminal path stopped immediately after `UILabel` shadow setters. Dev 2.10 later implemented retained shadow color/offset and drawing. Crossing that exact boundary and sustaining gameplay strongly implicates the general UILabel correction, although no one-change bisection proves sole causality. |
+| FallDown! | Gameplay runs smoothly until death/name entry; the log then ends without an emulator panic. | **Genuine Dev 2.24 advance, still partial.** The former startup blocker was unimplemented `ADBannerView`; Dev 2.24's bounded offline iAd lifecycle now reports server failure and lets the game run. The score-name path appears to terminate the native host and needs a matching iOS `.ips` report; it is not yet a normal emulator panic or a full pass. |
+| Rope'n'Fly 2 | User reports working gameplay; clean Home return after 30.0 s, 1,783 loops and 1,782 presentations. | **High-confidence Dev 2.24 fix.** The old terminal error was conversion of negative Apple-epoch seconds into an unsigned Duration. The signed historical date correction directly removes that blocker. |
+| Mini Militia | Reaches visible horizontal content, but in the wrong orientation, then stops at missing `NSMutableSet member:` after 288 loops / 144 presentations. | **Real later-stage progress.** Dev 2.24's offline iAd path removed the earlier banner-allocation boundary. The exact set membership contract is implemented in Dev 2.25; orientation remains independent. |
+| Super Stick Golf | Menus work; selecting a level reaches a later nil mutable-string consumer after 658 loops / 333 presentations. | **Verified Dev 2.24 boundary removal.** Primitive Boolean keyed-unarchive support explains the menu advance. Gameplay remains blocked by a separate string/lifetime origin. |
+| Stick Stunt Biker | Reaches an intro/game frame and 93 presentations, then stops at the ASCII-only NSString guard. | **Verified Dev 2.24 boundary removal.** Signed Apple-epoch handling removes the earlier negative-duration failure and exposes a distinct non-ASCII string limitation. |
+| Cordy | Runs 12.2 s / 762 loops / 254 presentations, then sends `statusCode` to a generic `NSURLResponse`. | **Genuine stream-path advance.** Dev 2.24 offline read-stream scheduling crosses the previous stream boundary. Correct HTTP-response typing or failure delivery is next; a fake status is not justified. |
+| Trism | Runs 6.4 s / 226 loops, but presents no EAGL frame in this launch; stops at missing `+[NSObject cancelPreviousPerformRequestsWithTarget:]`. | **Cumulative earlier progress, not a Dev 2.24 win.** Prior UIButton-shadow and formatter corrections already advanced this title. The delayed-selector cancellation contract is new exact evidence. |
+| Perfect Cell | Runs 11.4 s / 544 loops / 319 presentations, then stops at missing `NSScanner scanLongLong:`. | **Genuine late-stage reach, attribution not isolated to Dev 2.24.** Older ad/framework corrections likely enabled the path. The scanner method is an exact small general-contract candidate. |
+
+### Inconsistent or not established as progress
+
+| App | Current evidence | Interpretation |
+|---|---|---|
+| QuickHook | Fails at 160 ms because immutable `_touchHLE_NSDictionary` receives `setObject:forKey:`; user previously observed one working run. | Intermittent/restored-state-sensitive, not a stable pass. Preserve strict mutability; compare fresh and restored state before another semantic change. |
+| Arcade Claw | Runs 11.9 s / 761 loops / 542 presentations, then calls guest `___assert_rtn`. | Substantial runtime is verified, but no like-for-like recent baseline proves Dev 2.24 caused it. The assertion endpoint is downstream; capture assertion text/caller before patching. |
+| Gravity Guy | 47 loops / 26 presentations, wrong orientation, then nil `NSData`. | No verified later stage. Loading imagery alone is insufficient; orientation and the nil producer are separate. |
+| JellyCar 3 | 46 loops / 85 presentations, wrong orientation, then the known null-page read at `0x54`. | Existing unresolved failure, not a verified gain. |
+| Monsters Ate My Condo | Null-page read at `0x0` after 108 ms, no loops or presentations. | **Confirmed unchanged** from Dev 2.22/2.23; the purple flash is not compatibility progress. |
+| Modern Combat 2 / Sandstorm2 | Stops at unimplemented `GKSession alloc` after 141 ms, two loops, no presentations. | Logo flash only; exact GameKit session blocker, no meaningful gameplay progress. |
+| Moonsters | Receiver `isa` is nil at `componentsSeparatedByString:` after 1.7 s, 15 loops and one presentation. | No reliable gain; invalid-object origin remains required. |
+| Paper Pilot | Guest `___assert_rtn` after 2.7 s, with no loops or presentations. | Menu flash is not proof of progression; caller/assertion provenance is needed. |
+| Pig Rush | Manual Home return after 2.3 s, one loop and no presentations. | No crash in this short run, but no presented gameplay and no basis to reverse the historical guest-`exit(1)` result. |
+| Pudding Panic | Reproduces the same null-page read at `0x18` twice (112/120 ms), no loops or presentations. | **Confirmed unchanged and deterministic.** |
+| Ramps | 276 loops / 212 presentations, then unimplemented `GKLeaderboardViewController alloc`. | Exact GameKit UI blocker; the loading screen alone is not new progress. |
+| Red Ball of Goo | Stops at missing `_SecCertificateCreateWithData` after 153 ms, four loops and no presentations. | Logo flash only; exact certificate/service blocker, no meaningful progress. |
+| Scarecrow | `UIApplication` incorrectly receives `domain` after 124 ms and no presentation. | Likely wrong receiver/dispatch origin; the flashed frame is not proof of improvement. |
+| SPYmouse | Reaches 368 loops / 87 presentations, then the known nil mutable-string resource/path consumer. | Same later blocker as prior focused runs; no new producer identified. |
+| Tentacle | Stops at the existing NSString internal assertion after 285 ms, no loops or presentations. | Logo flash only; no verified progression. |
+
+The broad pattern is therefore not that the recorder itself made games work.
+General framework corrections accumulated across builds: UILabel rendering
+state most likely explains A Monster Ate My Homework; Dev 2.24 iAd, signed-date,
+keyed-archive and offline-stream contracts directly explain FallDown,
+Rope'n'Fly 2, Mini Militia, Super Stick Golf, Stick Stunt Biker and Cordy.
+Other splash-frame differences are either older cumulative progress, uncertain,
+or demonstrably unchanged. No new build or compatibility patch is authorized by
+this retrospective alone.
+
+## Dev 2.25 physical-device result — November 4, 2026
+
+Both returned logs identify implementation `18719b57629070ee53c8775402f1851eeb346d6c`
+and unsigned IPA workflow `41808379942`; this is the verified Dev 2.25 artifact,
+not an archive-label inference. All ten changed contracts crossed their former
+first blocker. Spoing remains working in the tested scope. No other title is
+promoted to fully compatible from this pass.
+
+| App | Furthest verified result | New first boundary / interpretation |
+|---|---|---|
+| Cannon Cadets | Startup advances beyond the animation-state export. | Missing `_CGGradientCreateWithColorComponents`; exact later Core Graphics contract. |
+| Clowning Around | Seven main-loop/frame presentations occur beyond alert dismissal. | `UIProgressView` class is absent; exact later UIKit contract. |
+| Cordy | 12.9 s, 732 loops, 283 presentations. | Local-file transport constructs generic `NSURLResponse`, then guest asks for `statusCode`; known later response-typing contract. |
+| Current | Clean manual return after 3,634 loops and 416 presentations. | No emulator failure in the log, but no visual/gameplay observation was supplied; status remains uncertain rather than working. |
+| Guerrilla Bob | 31.9 s and 1,507 presentations; menu is visible beneath a dark layer but cannot be controlled. | A full-screen, visible, interactive `UIView` at alpha 0.4 receives every recorded touch. Need bounded overlay/controller creation and dismissal provenance; global hit-test changes are unsafe. |
+| Kick the Buddy | Advances beyond texture-parameter querying. | `UIImage` rejects unknown bytes after missing `Dust_03b.png` and `particleTexture.png`; capture exact failing resource path/header before adding format support. |
+| Labyrinth 2 | 145 loops and 74 presentations. | Missing `UITableView cellForRowAtIndexPath:`; exact later UIKit contract. |
+| Mini Militia | 62 loops and 31 presentations. | Property-list serialization rejects `NSMutableData`; exact later Foundation class-cluster/output contract. |
+| Muffin Knight | Black screen; the emulator Home control cannot return to the picker. | Four frames and 82 main loops occur, then the main thread remains in guest PCs `0x15b3b50..0x15b3bdc` after offline connect failure while Home events queue unhandled. Symbolize the loop and record bounded socket retry results; do not fabricate network success. |
+| Sonic Dash | Advances beyond vacant-descriptor `F_GETFD`. | A later vacant-descriptor `fcntl(F_GETFL)` unwrap panics; all descriptor-dependent commands need historical `EBADF` behavior. |
+| Trainyard | Advances through CFRunLoop source scheduling and begins rendering. | `NSMutableData` receives `initWithBytes:length:` through an incompatible host method signature; correct the mutable-data initializer/class-cluster contract, not strict dispatch. |
+| ZombieSmash | SHA-1 startup completes. | Missing `NSXMLParser abortParsing`; exact parser cancellation contract. |
+| Spoing | User reports normal play; clean return after 1,176 loops and 480 presentations. | Relevant regression control passes. |
+
+Dev 2.25 therefore removed its intended first blockers but mostly revealed the
+next layer. The strongest next direct-contract candidates are gradient creation,
+`UIProgressView`, table-cell lookup, mutable-data/property-list behavior,
+descriptor-wide `fcntl` error handling and XML-parser cancellation. Guerrilla
+Bob and Muffin Knight now have bounded causal investigations rather than generic
+"overlay" or "black screen" labels. No new IPA is authorized by this log review.
+
+## Dev 2.26 authorized later-contract batch — November 4, 2026
+
+The user authorized one build containing every title from the Dev 2.25 pass.
+The batch implements general later contracts for Cannon Cadets, Clowning
+Around, Kick the Buddy, Labyrinth 2, Mini Militia, Sonic Dash, Trainyard and
+ZombieSmash. It adds bounded causal evidence for Cordy's non-HTTP file response,
+Guerrilla Bob's blocking overlay lifecycle and Muffin Knight's offline connect
+caller/retry pattern. Current is retained only as the relevant URL-loading
+control and Spoing as the general healthy control. No title is promoted before
+physical testing, and none of the diagnostics changes guest behavior.
+
+The exact implementation boundary, prediction and falsifier for each title are
+in `cocos2d-phase1/dev-2.26-later-contracts-and-causal-probes.md`.

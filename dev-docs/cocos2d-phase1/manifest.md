@@ -44,6 +44,35 @@
 | Wispin | 1.1.2 / 4.0 | armv6 | panic after two presentations | C2D-FBO-01 | confirmed GL error; possible shared cause |
 | ZombieSmash (originally listed as Zombie Shock) | 2.0 / 3.1.3 | armv6, armv7 | panic | C2D-SHA1-01 | confirmed |
 
+## Later physical evidence: Dev 2.25
+
+The table above remains the dated phase-1 baseline. The exact Dev 2.25 device
+pass (`18719b5`, workflow `41808379942`) updates the five corpus members in that
+batch as follows:
+
+| Game | Dev 2.25 status | Current first boundary |
+|---|---|---|
+| Cannon Cadets | Later panic; original animation blocker removed | `_CGGradientCreateWithColorComponents` |
+| Clowning Around | Seven presentations; original alert-dismissal blocker removed | missing `UIProgressView` class |
+| Mini Militia | 62 loops / 31 presentations; original set-membership blocker removed | property-list output rejects `NSMutableData` |
+| Trainyard | Source0 scheduling reached; original run-loop-source blocker removed | mutable-data `initWithBytes:length:` typed-dispatch mismatch |
+| ZombieSmash | SHA-1 startup reached; original digest blocker removed | `NSXMLParser abortParsing` |
+
+These are blocker removals, not full-game passes. Spoing, outside this 37-title
+corpus, passed as the Dev 2.25 general control. Complete evidence and the other
+eight titles are recorded in
+[the Dev 2.25 result](dev-2.25-exact-system-contracts.md).
+
+## Planned follow-up: Dev 2.26
+
+All thirteen titles from the Dev 2.25 pass remain represented. Cannon Cadets,
+Clowning Around, Kick the Buddy, Labyrinth 2, Mini Militia, Sonic Dash,
+Trainyard and ZombieSmash have later general contract work. Cordy, Guerrilla
+Bob and Muffin Knight have narrowly bounded causal probes where a compatibility
+change would currently be unsafe. Current is the URL-loading control and Spoing
+is the general control. Exact changes and non-goals are recorded in
+[the Dev 2.26 scope](dev-2.26-later-contracts-and-causal-probes.md).
+
 ## Exact IPA mapping
 
 | Game | Local IPA filename | Bundle identifier |

@@ -33,6 +33,7 @@ struct NSXMLParserHostObject {
     should_process_namespaces: bool,
     should_report_namespace_prefixes: bool,
     should_resolve_external_entities: bool,
+    aborted: bool,
 }
 impl HostObject for NSXMLParserHostObject {}
 
@@ -49,6 +50,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         should_process_namespaces: false,
         should_report_namespace_prefixes: false,
         should_resolve_external_entities: false,
+        aborted: false,
     });
     env.objc.alloc_object(this, host_object, &mut env.mem)
 }
@@ -98,7 +100,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.borrow::<NSXMLParserHostObject>(this).should_report_namespace_prefixes
 }
 
+- (())abortParsing {
+    env.objc.borrow_mut::<NSXMLParserHostObject>(this).aborted = true;
+}
+
 - (bool)parse {
+    env.objc.borrow_mut::<NSXMLParserHostObject>(this).aborted = false;
     let data = env.objc.borrow::<NSXMLParserHostObject>(this).data;
     assert_ne!(data, nil);
     let bytes: ConstVoidPtr = msg![env; data bytes];
@@ -133,6 +140,9 @@ pub const CLASSES: ClassExports = objc_classes! {
     if responds {
         () = msg![env; delegate parserDidStartDocument:this];
     }
+    if env.objc.borrow::<NSXMLParserHostObject>(this).aborted {
+        return false;
+    }
     for event in events {
         match event {
             Event::Empty(e) => {
@@ -158,6 +168,9 @@ pub const CLASSES: ClassExports = objc_classes! {
                                       namespaceURI:nil
                                      qualifiedName:nil
                                         attributes:dict];
+                }
+                if env.objc.borrow::<NSXMLParserHostObject>(this).aborted {
+                    return false;
                 }
                 let sel: SEL = env
                     .objc
@@ -277,6 +290,9 @@ pub const CLASSES: ClassExports = objc_classes! {
             }
             e => unimplemented!("{:?}", e)
         }
+        if env.objc.borrow::<NSXMLParserHostObject>(this).aborted {
+            return false;
+        }
     }
     let sel: SEL = env
         .objc
@@ -340,5 +356,23 @@ mod tests {
         let resolve: bool = msg![env; parser shouldResolveExternalEntities];
         assert!(process && report && resolve);
         release(env, parser);
+    }
+
+    #[test]
+    fn stale_abort_flag_is_reset_by_a_new_parse() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let xml = b"<root />";
+        let bytes = env.mem.alloc_and_write(xml);
+        let data: id = msg_class![&mut env; NSData dataWithBytes:bytes.cast_const()
+                                                        length:xml.len() as u32];
+        let parser: id = msg_class![&mut env; NSXMLParser alloc];
+        let parser: id = msg![&mut env; parser initWithData:data];
+        () = msg![&mut env; parser abortParsing];
+        // A new parse resets a prior, out-of-callback abort just as native
+        // NSXMLParser does; callback-triggered abort behavior is exercised by
+        // the state checks in the event loop.
+        let parsed: bool = msg![&mut env; parser parse];
+        assert!(parsed);
+        release(&mut env, parser);
     }
 }

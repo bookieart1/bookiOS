@@ -283,6 +283,7 @@ fn serialize_plist(env: &mut Environment, plist: id) -> Value {
     let dict_class = env.objc.get_known_class("NSDictionary", &mut env.mem);
     let arr_class = env.objc.get_known_class("NSArray", &mut env.mem);
     let str_class = env.objc.get_known_class("NSString", &mut env.mem);
+    let data_class = env.objc.get_known_class("NSData", &mut env.mem);
 
     if env.objc.class_is_subclass_of(class, dict_class) {
         // only our internal implementation is supported
@@ -343,7 +344,7 @@ fn serialize_plist(env: &mut Environment, plist: id) -> Value {
             NSNumberHostObject::Char(c) => Value::from(*c),
             _ => todo!("num {:?}", num),
         }
-    } else if class == env.objc.get_known_class("NSData", &mut env.mem) {
+    } else if env.objc.class_is_subclass_of(class, data_class) {
         let data = env.objc.borrow::<NSDataHostObject>(plist);
         let buffer_slice = env.mem.bytes_at(data.bytes.cast(), data.length);
         Value::Data(buffer_slice.to_vec())
@@ -391,5 +392,22 @@ mod tests {
         assert_ne!(data, nil);
         assert_eq!(env.mem.read(error_string), nil);
         assert!(ns_data::to_rust_slice(env, data).starts_with(b"<?xml"));
+    }
+
+    #[test]
+    fn mutable_data_leaf_serializes_as_data() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let _pool: id = msg_class![env; NSAutoreleasePool new];
+        let bytes = env.mem.alloc_and_write(&[0xdeu8, 0xad, 0xbe, 0xef]);
+        let leaf: id = msg_class![env; NSMutableData dataWithBytes:bytes.cast_const() length:4u32];
+        let array: id = msg_class![env; NSMutableArray new];
+        () = msg![env; array addObject:leaf];
+        let data: id = msg_class![env; NSPropertyListSerialization
+            dataFromPropertyList:array
+            format:NSPropertyListBinaryFormat_v1_0
+            errorDescription:MutPtr::<id>::null()];
+        assert_ne!(data, nil);
+        assert!(!ns_data::to_rust_slice(env, data).is_empty());
     }
 }

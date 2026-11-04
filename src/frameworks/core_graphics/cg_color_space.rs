@@ -163,7 +163,10 @@ pub fn CGColorSpaceGetModel(env: &mut Environment, cs: CGColorSpaceRef) -> CGCol
     }
 }
 
-fn CGColorSpaceGetNumberOfComponents(env: &mut Environment, cs: CGColorSpaceRef) -> GuestUSize {
+pub(super) fn CGColorSpaceGetNumberOfComponents(
+    env: &mut Environment,
+    cs: CGColorSpaceRef,
+) -> GuestUSize {
     match CGColorSpaceGetModel(env, cs) {
         kCGColorSpaceModelMonochrome => 1,
         kCGColorSpaceModelRGB => 3,

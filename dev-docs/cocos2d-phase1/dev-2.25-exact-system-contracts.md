@@ -77,5 +77,36 @@ directory, contains no provisioning profile, uses
 `com.bookieart1.idared32bit.dev`, embeds the final commit and workflow run, and
 retains the universal flight-recorder default. IPA SHA-256:
 `e07f8f4631b217533f3d4b27abea3e4e7ae8f8555bacc92584c337111e40bad8`.
-Physical-device status remains pending; no affected title is promoted to
-working by compilation or package verification.
+## Physical-device result
+
+The two returned logs both embed implementation `18719b5` and workflow
+`41808379942`, so this result belongs to the verified artifact above. Every
+former first blocker addressed by Dev 2.25 is absent. That establishes blocker
+removal, not complete compatibility.
+
+Exact evidence is preserved outside the source checkout at
+`outputs/device-logs/iDared-Dev-2.25-exact-contracts-part1-2026-11-04.txt`
+(SHA-256 `a9bce207e2c1d8967ebb28d64b6bbde841e201807111c5485473a446212269cc`)
+and `outputs/device-logs/iDared-Dev-2.25-exact-contracts-part2-2026-11-04.txt`
+(SHA-256 `8893021ffb7c825005d47992bc79a72bf077e4428b81be418a0ef623736a3568`).
+
+| Title | Dev 2.25 result | Classification and next discriminating action |
+|---|---|---|
+| Cannon Cadets | Reaches `_CGGradientCreateWithColorComponents`. | Later exact Core Graphics contract; implement historical gradient creation and focused component/location tests. |
+| Clowning Around | Presents seven frames, then requests `UIProgressView`. | Later exact UIKit class; implement bounded historical progress/style/value state rather than a title stub. |
+| Cordy | Runs 12.9 seconds, 732 loops and 283 presentations, then sends `statusCode` to a local-file `NSURLResponse`. | Offline stream scheduling passed; correct response typing/failure delivery remains the known next contract. |
+| Current | Returns cleanly after 3,634 loops and 416 presentations. | No terminal emulator error, but no visual/gameplay report; obtain a short functional observation before promotion. |
+| Guerrilla Bob | Runs 31.9 seconds and presents 1,507 frames; user sees a dark overlay and cannot use the menu. | Recorder confirms a full-screen interactive `UIView` at alpha 0.4 receives every touch. Capture its creation, controller ownership, attachment and expected dismissal. Do not disable hit testing globally. |
+| Kick the Buddy | Crosses texture-query startup, then `UIImage` rejects an unknown byte format after missing `Dust_03b.png` and `particleTexture.png`. | Identify the exact resource path and magic bytes at the failing `initWithData:` before implementing any image-format support. |
+| Labyrinth 2 | Reaches `UITableView cellForRowAtIndexPath:` after 145 loops and 74 presentations. | Later exact UIKit lookup contract with focused table lifecycle tests. |
+| Mini Militia | Reaches property-list serialization with `NSMutableData` after 62 loops and 31 presentations. | Later exact Foundation output/class-cluster contract; retain strict property-list validation. |
+| Muffin Knight | Black screen; emulator Home cannot exit. Four frames are presented, then main-loop count freezes at 82 while one runnable guest thread repeatedly executes around `0x15b3b50..0x15b3bdc` after an offline connection failure. | Deterministic guest loop, not a crash. Symbolize that image-relative region and add bounded adjacent socket-return/retry history; do not fake connectivity. The unimplemented intro movie remains a secondary visual limitation. |
+| Sonic Dash | Reaches a later `fcntl(F_GETFL)` vacant-descriptor unwrap. | Dev 2.25 `F_GETFD` fix passed; apply the same historical `EBADF` discipline to all descriptor-dependent `fcntl` branches with tests. |
+| Trainyard | Allocates `NSMutableData`, then hits a typed-dispatch mismatch for `initWithBytes:length:`. | Source lifecycle passed; repair the real mutable-data class-cluster initializer/dispatch contract, not typed-message enforcement. |
+| ZombieSmash | Reaches `NSXMLParser abortParsing`. | SHA-1 passed; implement parser cancellation state and callback termination semantics. |
+| Spoing | User reports normal operation; clean Home return after 1,176 loops and 480 presentations. | Relevant healthy control passed. |
+
+No title is marked fully fixed solely because the previous panic disappeared.
+The result creates eight direct contract candidates, preserves Cordy's known
+response issue, leaves Current awaiting visual confirmation, and converts the
+two visual stalls into specific bounded investigations.

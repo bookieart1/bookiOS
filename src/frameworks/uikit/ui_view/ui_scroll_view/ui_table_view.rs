@@ -255,6 +255,35 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, cell)
 }
 
+- (id)cellForRowAtIndexPath:(id)index_path {
+    if index_path == nil {
+        return nil;
+    }
+    let section: NSInteger = msg![env; index_path section];
+    let row: NSInteger = msg![env; index_path row];
+    if section < 0 || row < 0 {
+        return nil;
+    }
+    let host = env.objc.borrow::<UITableViewHostObject>(this);
+    let Some(&row_count) = host.section_row_counts.get(section as usize) else {
+        return nil;
+    };
+    if row >= row_count {
+        return nil;
+    }
+    let preceding_rows: NSInteger = host.section_row_counts[..section as usize]
+        .iter()
+        .copied()
+        .sum();
+    // This partial table implementation eagerly materializes up to a bounded
+    // number of cells. Native UITableView returns nil when a valid row is not
+    // currently visible/materialized.
+    host.visible_cells
+        .get((preceding_rows + row) as usize)
+        .copied()
+        .unwrap_or(nil)
+}
+
 - (())dealloc {
     let reusable_cells = std::mem::take(
         &mut env.objc.borrow_mut::<UITableViewHostObject>(this).reusable_cells,
@@ -386,6 +415,31 @@ mod tests {
         assert_eq!(index_path_for_flat_row(&rows, 2), Some((2, 0)));
         assert_eq!(index_path_for_flat_row(&rows, 4), Some((2, 2)));
         assert_eq!(index_path_for_flat_row(&rows, 5), None);
+    }
+
+    #[test]
+    fn looks_up_materialized_cell_by_section_and_row() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack_size = 0x1000;
+        let stack = env.mem.alloc(stack_size);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + stack_size;
+        let table: id = msg_class![env; UITableView new];
+        let first: id = msg_class![env; UITableViewCell new];
+        let second: id = msg_class![env; UITableViewCell new];
+        retain(env, first);
+        retain(env, second);
+        {
+            let host = env.objc.borrow_mut::<UITableViewHostObject>(table);
+            host.section_row_counts = vec![1, 1];
+            host.visible_cells = vec![first, second];
+        }
+        let index_path: id = msg_class![env; NSIndexPath indexPathForRow:0i32 inSection:1i32];
+        let found: id = msg![env; table cellForRowAtIndexPath:index_path];
+        assert_eq!(found, second);
+        release(env, table);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 
     #[test]

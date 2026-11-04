@@ -486,6 +486,60 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, new)
 }
 
++ (id)dataWithBytes:(ConstVoidPtr)bytes length:(NSUInteger)length {
+    let new: id = msg![env; this alloc];
+    let new: id = msg![env; new initWithBytes:bytes length:length];
+    autorelease(env, new)
+}
+
++ (id)dataWithBytesNoCopy:(MutVoidPtr)bytes length:(NSUInteger)length {
+    let new: id = msg![env; this alloc];
+    let new: id = msg![env; new initWithBytesNoCopy:bytes length:length];
+    autorelease(env, new)
+}
+
++ (id)dataWithData:(id)data {
+    let new: id = msg![env; this alloc];
+    let new: id = msg![env; new initWithData:data];
+    autorelease(env, new)
+}
+
+// Define the inherited byte initializers on the concrete mutable class as
+// well. The guest ABI is identical, while the receiver keeps the mutable
+// NSData backing store used by all subsequent mutation methods.
+- (id)initWithBytes:(ConstVoidPtr)bytes length:(NSUInteger)length {
+    let host_object = env.objc.borrow_mut::<NSDataHostObject>(this);
+    assert!(host_object.bytes.is_null() && host_object.length == 0 && host_object.capacity == 0);
+    let alloc = env.mem.alloc(length);
+    env.mem.memmove(alloc, bytes, length);
+    host_object.bytes = alloc;
+    host_object.length = length;
+    host_object.capacity = length;
+    this
+}
+
+- (id)initWithBytesNoCopy:(MutVoidPtr)bytes length:(NSUInteger)length {
+    msg![env; this initWithBytesNoCopy:bytes length:length freeWhenDone:true]
+}
+
+- (id)initWithBytesNoCopy:(MutVoidPtr)bytes
+                   length:(NSUInteger)length
+             freeWhenDone:(bool)free_when_done {
+    let host_object = env.objc.borrow_mut::<NSDataHostObject>(this);
+    assert!(host_object.bytes.is_null() && host_object.length == 0 && host_object.capacity == 0);
+    host_object.bytes = bytes;
+    host_object.length = length;
+    host_object.capacity = length;
+    host_object.free_when_done = free_when_done;
+    this
+}
+
+- (id)initWithData:(id)data {
+    let bytes: ConstVoidPtr = msg![env; data bytes];
+    let length: NSUInteger = msg![env; data length];
+    msg![env; this initWithBytes:bytes length:length]
+}
+
 - (id)initWithCapacity:(NSUInteger)capacity {
     let host_object = env.objc.borrow_mut::<NSDataHostObject>(this);
     assert!(host_object.bytes.is_null() && host_object.length == 0 && host_object.capacity == 0);
@@ -687,5 +741,17 @@ mod tests {
         release(env, pool);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);
+    }
+
+    #[test]
+    fn mutable_data_accepts_standard_byte_initializer() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let bytes = env.mem.alloc_and_write(&[1u8, 2, 3, 4]);
+        let data: id = msg_class![&mut env; NSMutableData alloc];
+        let data: id = msg![&mut env; data initWithBytes:bytes.cast_const() length:4u32];
+        let length: NSUInteger = msg![&mut env; data length];
+        assert_eq!(length, 4);
+        assert_eq!(to_rust_slice(&mut env, data), &[1, 2, 3, 4]);
+        release(&mut env, data);
     }
 }

@@ -71,6 +71,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
         ui_view::ui_navigation_bar::CLASSES,
         ui_view::ui_page_control::CLASSES,
         ui_view::ui_picker_view::CLASSES,
+        ui_view::ui_progress_view::CLASSES,
         ui_view::ui_scroll_view::CLASSES,
         ui_view::ui_scroll_view::ui_table_view::CLASSES,
         ui_view::ui_scroll_view::ui_text_view::CLASSES,
@@ -171,6 +172,7 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
                     log!("Handling HomeButton event: returning to app picker.");
                     if !env.is_app_picker {
                         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            ui_view::log_bounded_view_transition_history(env, "HomeButton");
                             ui_view::log_bounded_view_hierarchy(env, "HomeButton")
                         }));
                         // iOS kills apps that take more than a few seconds.

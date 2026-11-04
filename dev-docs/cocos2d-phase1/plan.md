@@ -1,13 +1,32 @@
 # Cocos2d compatibility project: implementation roadmap
 
-**Dev 2.25 current milestone (2026-11-04):** the complete exact-contract batch
-is implemented, hosted-validated and packaged; the remaining step is its
-physical test documented in
-[dev-2.25-exact-system-contracts.md](dev-2.25-exact-system-contracts.md). This
-advances twelve affected titles with ten independently attributable contracts
-and uses Spoing as the only general control. The next milestone must be chosen
-from the new first boundaries in that phone result; do not replay the same
-missing-selector/import hypotheses if the contracts cross them.
+**Dev 2.26 active milestone (2026-11-04):** implement the eight evidence-backed
+later contracts exposed by Dev 2.25 and pair them with three bounded causal
+probes. Cordy remains standards-correctly non-HTTP for local files; Guerrilla
+Bob keeps normal hit testing; Muffin Knight stays honestly offline. Current and
+Spoing are the smallest sufficient controls. The batch is intentionally broad
+but attribution remains per contract. Full predictions and retirement criteria
+are in [the Dev 2.26 record](dev-2.26-later-contracts-and-causal-probes.md).
+
+**Dev 2.25 completed milestone (2026-11-04):** the exact delivered build was
+physically tested. Every changed contract crossed its former boundary and
+Spoing passed, but the pass exposed later work rather than a newly verified
+fully compatible title. The highest-confidence next batch is the small general
+contracts now named exactly: `CGGradientCreateWithColorComponents`,
+`UIProgressView`, `UITableView cellForRowAtIndexPath:`, mutable-data property
+list/output initialization, vacant-descriptor `F_GETFL`, and
+`NSXMLParser abortParsing`. Before including Kick the Buddy, identify the exact
+resource/header rejected by `UIImage`; do not add a decoder based only on
+"unknown image type." Cordy's HTTP-response typing remains a separate known
+contract, not a Dev 2.25 regression. Current needs a short visual/gameplay
+observation before it is treated as either fixed or still blocked.
+
+Two bounded investigations should remain separate from that contract batch:
+record the creation/attachment/dismissal producer of Guerrilla Bob's
+full-screen alpha-0.4 interactive overlay, and symbolize Muffin Knight's fixed
+guest loop around `0x15b3b50..0x15b3bdc` while recording only the adjacent
+socket retry results. Neither result supports a global input change, network
+success fabrication, or watchdog-style escape.
 
 **Dev 2.24 update (2026-11-04):** expanded implementation built and downloaded at `fb810996`; all eight new tests pass on Windows and macOS. Both full suites are 292/293 because of the unchanged XML plist fixture failure. Eleven affected games and two controls await physical testing. See [implementation and predictions](dev-2.24-implementation.md) and [exact validation](dev-2.24-validation.json). Baseline results below are preserved; no new device pass is claimed.
 

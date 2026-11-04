@@ -1,19 +1,41 @@
 # Cocos2d project resume point
 
-**Dev 2.25 delivered; physical test pending (2026-11-04):** the full "exact
-missing system contracts" batch is implemented as general framework, libc,
-OpenGL and CommonCrypto behavior at `18719b57629070ee53c8775402f1851eeb346d6c`.
-Final Windows and macOS library suites each pass 301/302; the only failure is
-the unchanged XML property-list fixture, while all new Dev 2.25 tests pass.
-IPA workflow `41808379942` succeeded and the verified unsigned arm64
-development artifact has SHA-256
-`e07f8f4631b217533f3d4b27abea3e4e7ae8f8555bacc92584c337111e40bad8`.
-The twelve affected titles are Cannon Cadets, Clowning Around, Cordy, Current,
-Guerrilla Bob, Kick the Buddy, Labyrinth 2, Mini Militia, Muffin Knight, Sonic
-Dash, Trainyard and ZombieSmash; Spoing is the sole general control. See
-[scope, changes, validation and limits](dev-2.25-exact-system-contracts.md).
-The universal recorder is unchanged. No title is promoted before the phone
-pass.
+**Dev 2.26 implementation in progress (2026-11-04):** all thirteen Dev 2.25
+titles remain in one interpretable batch. Eight later exact contracts receive
+general corrections (gradient creation, progress-view state, visible table-cell
+lookup, mutable-data/plist class-cluster behavior, standard-descriptor `fcntl`,
+XML-parser cancellation, and failable image decoding). Cordy, Guerrilla Bob and
+Muffin Knight receive bounded diagnostics at their precise unsafe-to-guess
+boundaries; Current validates Cordy's shared URL-loading surface and Spoing is
+the general control. No HTTP success, network service, image format, touch
+bypass, or invalid object is fabricated. See
+[the exact Dev 2.26 scope](dev-2.26-later-contracts-and-causal-probes.md).
+
+**Dev 2.25 physical result (2026-11-04):** both supplied logs embed the exact
+delivered implementation `18719b57629070ee53c8775402f1851eeb346d6c` and IPA
+workflow `41808379942`. All ten changed contracts crossed their prior first
+boundary, and Spoing remains a working control, but no affected title is yet
+promoted to fully compatible. The new exact boundaries are Core Graphics
+gradient creation (Cannon Cadets), `UIProgressView` (Clowning Around), image
+format/path identification before `UIImage` decode (Kick the Buddy), table
+cell lookup (Labyrinth 2), mutable-data property-list output (Mini Militia),
+vacant-descriptor `F_GETFL` handling (Sonic Dash), mutable-data
+`initWithBytes:length:` dispatch (Trainyard), and `NSXMLParser abortParsing`
+(ZombieSmash). Cordy again reaches the later local-file response typing problem
+(`statusCode` sent to `NSURLResponse`). Current returned cleanly after 3,634
+loops and 416 presentations, but no visual/gameplay observation was supplied,
+so its functional status remains unknown.
+
+Guerrilla Bob and Muffin Knight are now causal investigations rather than
+generic visual symptoms. Guerrilla Bob presents 1,507 frames, but a visible,
+interactive, full-screen `UIView` at alpha 0.4 receives every recorded touch;
+the next safe step is bounded creation/attachment/dismissal provenance for that
+overlay, not globally disabling hit testing. Muffin Knight stops at 82 main
+loops and four presentations, then remains in a stable guest loop around
+`0x15b3b50..0x15b3bdc` after the offline connection failure; queued Home events
+cannot be handled. Its next step is offline symbolization plus bounded socket
+retry/return history, not fabricated network success. See
+[the complete per-title result](dev-2.25-exact-system-contracts.md).
 
 **Dev 2.24 physical result (2026-11-04):** the complete requested device pass
 tested implementation `fb810996` from IPA workflow `41796486938`. The user

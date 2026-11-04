@@ -28,6 +28,15 @@ use std::collections::HashMap;
 
 const CACHE_SIZE: usize = 60;
 
+fn image_fingerprint(bytes: &[u8]) -> String {
+    let mut result = String::new();
+    for byte in bytes.iter().take(16) {
+        use std::fmt::Write;
+        write!(&mut result, "{byte:02x}").unwrap();
+    }
+    result
+}
+
 #[derive(Default)]
 pub struct State {
     /// Cache of images for `[UIImage imageNamed:]` method.
@@ -125,19 +134,55 @@ pub const CLASSES: ClassExports = objc_classes! {
         release(env, this);
         return nil;
     };
-    // TODO: Real error handling. For now, most errors are likely to be caused
-    //       by a functionality gap in touchHLE, not the app actually trying to
-    //       load a broken file, so panicking is most useful.
-    let image = Image::from_bytes(&bytes).unwrap();
+    let image = match Image::from_bytes(&bytes) {
+        Ok(image) => image,
+        Err(error) => {
+            // UIImage's failable initializers return nil for undecodable data.
+            // Preserve a bounded fingerprint so unsupported valid formats can
+            // be distinguished from missing/corrupt resources without dumping
+            // asset contents into the log.
+            log!(
+                "UIImage could not decode file {:?}: len={}, prefix={}, error={:?}; returning nil",
+                path,
+                bytes.len(),
+                image_fingerprint(&bytes),
+                error,
+            );
+            release(env, this);
+            return nil;
+        }
+    };
     let cg_image = cg_image::from_image(env, image);
     env.objc.borrow_mut::<UIImageHostObject>(this).cg_image = cg_image;
     this
 }
 
 - (id)initWithData:(id)data { // NSData*
+    if data == nil {
+        release(env, this);
+        return nil;
+    }
+    let length: u32 = msg![env; data length];
+    if length == 0 {
+        log!("UIImage initWithData received empty data; returning nil");
+        release(env, this);
+        return nil;
+    }
     let slice = ns_data::to_rust_slice(env, data);
-    // TODO: refactor common parts
-    let image = Image::from_bytes(slice).unwrap();
+    let image = match Image::from_bytes(slice) {
+        Ok(image) => image,
+        Err(error) => {
+            log!(
+                "UIImage could not decode NSData {:?}: len={}, prefix={}, error={:?}; returning nil",
+                data,
+                slice.len(),
+                image_fingerprint(slice),
+                error,
+            );
+            release(env, this);
+            return nil;
+        }
+    };
     let cg_image = cg_image::from_image(env, image);
     env.objc.borrow_mut::<UIImageHostObject>(this).cg_image = cg_image;
     this

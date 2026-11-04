@@ -292,7 +292,7 @@ fn enumerate_apps(
     // library. Everything else remains alphabetical.
     // Normalized display names cover the mixed archive naming in this batch;
     // matching is exact or a version-suffixed prefix, never a substring.
-    const DEV_225_TEST_NAMES: &[&str] = &[
+    const DEV_226_TEST_NAMES: &[&str] = &[
         "CANNON CADETS",
         "CLOWNING AROUND",
         "CORDY",
@@ -309,7 +309,7 @@ fn enumerate_apps(
     ];
     apps.sort_by_key(|app| {
         let display_name = app.display_name.to_uppercase().replace('’', "'");
-        let is_test = DEV_225_TEST_NAMES
+        let is_test = DEV_226_TEST_NAMES
             .iter()
             .any(|&name| display_name == name || display_name.starts_with(&format!("{name} ")));
         (!is_test, app.display_name.to_uppercase())
@@ -820,7 +820,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.25",
+            "iDared 32bit {}{}{} · Dev 2.26",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""

@@ -794,6 +794,43 @@ fn fcntl(
         return -1;
     }
 
+    // stdin/stdout/stderr are process descriptors even though their host
+    // streams are not stored in the ordinary file table. Darwin permits the
+    // flag queries on them; routing them through file_for_fd would subtract
+    // NORMAL_FILENO_BASE and panic before it could report a result.
+    if fd < NORMAL_FILENO_BASE {
+        return match cmd {
+            F_GETFD => 0,
+            F_SETFD => {
+                let flags: i32 = args.start().next(env);
+                if flags & !FD_CLOEXEC != 0 {
+                    set_errno(env, EINVAL);
+                    -1
+                } else {
+                    0
+                }
+            }
+            F_GETFL => standard_descriptor_status_flags(fd).unwrap(),
+            F_SETFL => {
+                // The guest can set advisory status bits, but the emulator's
+                // console streams are synchronous. Accepting the supported
+                // bits preserves the descriptor contract without claiming
+                // asynchronous host I/O.
+                let flags: i32 = args.start().next(env);
+                if flags & !(O_APPEND | O_NONBLOCK) != 0 {
+                    set_errno(env, EINVAL);
+                    -1
+                } else {
+                    0
+                }
+            }
+            _ => {
+                set_errno(env, EINVAL);
+                -1
+            }
+        };
+    }
+
     if reject_unknown_fd(env, fd) {
         set_errno(env, EBADF);
         return -1;
@@ -894,6 +931,14 @@ fn fcntl(
         _ => unimplemented!(),
     }
     0 // success
+}
+
+fn standard_descriptor_status_flags(fd: FileDescriptor) -> Option<OpenFlag> {
+    match fd {
+        STDIN_FILENO => Some(O_RDONLY),
+        STDOUT_FILENO | STDERR_FILENO => Some(O_WRONLY),
+        _ => None,
+    }
 }
 
 fn reject_negative_fd(env: &mut Environment, fd: FileDescriptor) -> bool {
@@ -1185,5 +1230,13 @@ mod tests {
     fn fcntl_rejects_nonnegative_vacant_descriptor_slot() {
         let env = Environment::new_fake_for_test();
         assert!(reject_unknown_fd(&env, NORMAL_FILENO_BASE));
+    }
+
+    #[test]
+    fn standard_descriptors_are_not_treated_as_file_table_slots() {
+        assert_eq!(standard_descriptor_status_flags(STDIN_FILENO), Some(O_RDONLY));
+        assert_eq!(standard_descriptor_status_flags(STDOUT_FILENO), Some(O_WRONLY));
+        assert_eq!(standard_descriptor_status_flags(STDERR_FILENO), Some(O_WRONLY));
+        assert_eq!(standard_descriptor_status_flags(NORMAL_FILENO_BASE), None);
     }
 }

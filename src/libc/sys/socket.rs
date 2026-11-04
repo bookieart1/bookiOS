@@ -43,7 +43,7 @@ use crate::Environment;
 
 use crate::abi::DotDotDot;
 use crate::libc::netdb::{socklen_t, IPPROTO_TCP, IPPROTO_UDP};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, SocketAddrV4, TcpListener, TcpStream, UdpSocket};
@@ -208,6 +208,18 @@ struct SocketHostObject {
 #[derive(Default)]
 pub struct State {
     sockets: HashMap<i32, SocketHostObject>,
+    connection_history: VecDeque<ConnectionDiagnostic>,
+    connection_sequence: u64,
+}
+
+#[derive(Clone, Debug)]
+struct ConnectionDiagnostic {
+    sequence: u64,
+    socket: i32,
+    destination: SocketAddrV4,
+    result: &'static str,
+    pc: u32,
+    lr: u32,
 }
 impl State {
     fn get(env: &Environment) -> &Self {
@@ -587,6 +599,7 @@ fn connect(
     log_dbg!("connect: socket address {:?}", socket_address);
 
     if is_offline_destination(env, &socket_address) {
+        record_connection_diagnostic(env, socket, socket_address, "ENETUNREACH");
         log!(
             "Network access is off, connect({}) to {} fails with ENETUNREACH",
             socket,
@@ -691,6 +704,40 @@ fn connect(
         .tcp_stream = Some(host_stream);
 
     0 // Success
+}
+
+fn record_connection_diagnostic(
+    env: &mut Environment,
+    socket: i32,
+    destination: SocketAddrV4,
+    result: &'static str,
+) {
+    const CAPACITY: usize = 16;
+    let pc = env.cpu.regs()[crate::cpu::Cpu::PC];
+    let lr = env.cpu.regs()[crate::cpu::Cpu::LR];
+    let state = State::get_mut(env);
+    state.connection_sequence = state.connection_sequence.saturating_add(1);
+    let event = ConnectionDiagnostic {
+        sequence: state.connection_sequence,
+        socket,
+        destination,
+        result,
+        pc,
+        lr,
+    };
+    if state.connection_history.len() == CAPACITY {
+        state.connection_history.pop_front();
+    }
+    state.connection_history.push_back(event.clone());
+    log!(
+        "bounded socket transition #{}: connect({}) to {} -> {} pc={:#010x} lr={:#010x}",
+        event.sequence,
+        event.socket,
+        event.destination,
+        event.result,
+        event.pc,
+        event.lr,
+    );
 }
 
 fn select(

@@ -341,6 +341,13 @@ pub(crate) fn make_url_error_for_url(
 }
 
 fn make_file_response(env: &mut Environment, url: id, expected_content_length: NSInteger) -> id {
+    let absolute_string: id = msg![env; url absoluteString];
+    let absolute_string = ns_string::to_rust_string(env, absolute_string);
+    log!(
+        "NSURLConnection local-file response contract: URL='{}', response-class=NSURLResponse, transport=non-HTTP, expected-length={}",
+        absolute_string,
+        expected_content_length,
+    );
     let response: id = msg_class![env; NSURLResponse alloc];
     msg![env; response initWithURL:url
                          MIMEType:nil
