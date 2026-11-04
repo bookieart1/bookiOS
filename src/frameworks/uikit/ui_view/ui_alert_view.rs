@@ -94,11 +94,15 @@ mod tests {
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + stack_size;
         let title = ns_string::get_static_str(env, "Dismiss");
         let alert: id = msg_class![env; UIAlertView alloc];
+        // Use the non-variadic historical initializer in this host-side test.
+        // The generic Objective-C host-call fixture intentionally cannot issue
+        // a variadic message such as `otherButtonTitles:`.
         let alert: id = msg![env; alert initWithTitle:title
                                              message:nil
                                             delegate:nil
-                                   cancelButtonTitle:title
-                                   otherButtonTitles:nil];
+                                       defaultButton:nil
+                                        cancelButton:title
+                                        otherButtons:nil];
 
         // Dismissing an alert that has not been shown is a no-op.
         () = msg![env; alert dismissWithClickedButtonIndex:0i32 animated:false];
@@ -109,6 +113,7 @@ mod tests {
         assert!(env.objc.borrow::<UIAlertViewHostObject>(alert).dismissal_scheduled);
         () = msg![env; alert dismissWithClickedButtonIndex:0i32 animated:false];
         assert!(env.objc.borrow::<UIAlertViewHostObject>(alert).dismissal_scheduled);
+        release(env, alert);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);
     }
