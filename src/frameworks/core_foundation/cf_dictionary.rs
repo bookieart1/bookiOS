@@ -309,26 +309,27 @@ mod tests {
     #[test]
     fn contains_key_distinguishes_present_and_absent_objects() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let present: id = msg_class![&mut env; NSObject new];
-        let absent: id = msg_class![&mut env; NSObject new];
-        let value: id = msg_class![&mut env; NSObject new];
-        let dict: id = msg_class![&mut env; NSMutableDictionary new];
-        () = msg![&mut env; dict setObject:value forKey:present];
+        let env = &mut env;
+        let present: id = msg_class![env; NSObject new];
+        let absent: id = msg_class![env; NSObject new];
+        let value: id = msg_class![env; NSObject new];
+        let dict: id = msg_class![env; NSMutableDictionary new];
+        () = msg![env; dict setObject:value forKey:present];
 
         assert!(CFDictionaryContainsKey(
-            &mut env,
+            env,
             dict,
             present.cast().cast_const()
         ));
         assert!(!CFDictionaryContainsKey(
-            &mut env,
+            env,
             dict,
             absent.cast().cast_const()
         ));
 
-        release(&mut env, dict);
-        release(&mut env, value);
-        release(&mut env, absent);
-        release(&mut env, present);
+        release(env, dict);
+        release(env, value);
+        release(env, absent);
+        release(env, present);
     }
 }

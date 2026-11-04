@@ -37,8 +37,9 @@ mod tests {
     #[test]
     fn persistent_store_coordinator_has_real_class_identity_and_allocation() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let object: id = msg_class![&mut env; NSPersistentStoreCoordinator new];
+        let env = &mut env;
+        let object: id = msg_class![env; NSPersistentStoreCoordinator new];
         assert!(!object.is_null());
-        release(&mut env, object);
+        release(env, object);
     }
 }

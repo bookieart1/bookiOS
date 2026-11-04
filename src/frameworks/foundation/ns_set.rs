@@ -593,6 +593,7 @@ fn set_from_counted_objects(
 mod tests {
     use super::*;
     use crate::frameworks::foundation::ns_string;
+    use crate::mem::guest_size_of;
     use crate::objc::{release, Class};
 
     #[test]
@@ -600,7 +601,10 @@ mod tests {
         let mut env = Environment::new_fake_for_test_with_thread();
         let one: id = msg_class![&mut env; NSObject new];
         let two: id = msg_class![&mut env; NSObject new];
-        let objects = env.mem.alloc_and_write([one, two, one]);
+        let objects: MutPtr<id> = env.mem.alloc(3 * guest_size_of::<id>()).cast();
+        env.mem.write(objects, one);
+        env.mem.write(objects + 1, two);
+        env.mem.write(objects + 2, one);
         let objects = objects.cast_const();
         let set: id = msg_class![&mut env; NSSet setWithObjects:objects count:3u32];
         let count: NSUInteger = msg![&mut env; set count];
