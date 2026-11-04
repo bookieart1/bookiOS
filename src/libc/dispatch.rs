@@ -64,8 +64,10 @@ pub(crate) fn copy_block_for_later(
         .copy_from_slice(&bytes);
 
     let dispose_helper = if literal._flags & BLOCK_HAS_COPY_DISPOSE != 0 {
-        let copy_helper: GuestFunction = env.mem.read(descriptor + 2);
-        let dispose_helper: GuestFunction = env.mem.read(descriptor + 3);
+        let copy_helper =
+            GuestFunction::from_addr_with_thumb_bit(env.mem.read(descriptor + 2));
+        let dispose_helper =
+            GuestFunction::from_addr_with_thumb_bit(env.mem.read(descriptor + 3));
         assert_ne!(copy_helper.addr_without_thumb_bit(), 0);
         assert_ne!(dispose_helper.addr_without_thumb_bit(), 0);
         () = copy_helper.call_from_host(env, (copied.cast_void(), block.cast_void()));
