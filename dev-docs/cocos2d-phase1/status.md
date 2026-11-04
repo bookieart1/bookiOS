@@ -1,5 +1,31 @@
 # Cocos2d project resume point
 
+**Dev 2.25 implementation pending hosted validation (2026-11-04):** the full
+"exact missing system contracts" batch is implemented as general framework,
+libc, OpenGL and CommonCrypto behavior. The twelve affected titles are Cannon
+Cadets, Clowning Around, Cordy, Current, Guerrilla Bob, Kick the Buddy,
+Labyrinth 2, Mini Militia, Muffin Knight, Sonic Dash, Trainyard and
+ZombieSmash; Spoing is the sole general control. Cordy/Current validate the
+Dev 2.24 owned offline stream lifecycle that they have not yet exercised on a
+device. See [scope, changes, predictions and limits](dev-2.25-exact-system-contracts.md).
+No title is promoted before the phone pass. The universal recorder is
+unchanged.
+
+**Dev 2.24 physical result (2026-11-04):** the complete requested device pass
+tested implementation `fb810996` from IPA workflow `41796486938`. The user
+reports Addicus and Kiko working in the tested scope; Dirt and Tiki Totems
+Premium remain healthy controls. Super Stick Golf now reaches its menus and
+fails only when loading actual gameplay. The remaining compatibility attempts
+crossed their intended first boundaries but exposed later blockers: AbstractWar
+now reaches a later null-page read; Continuity 2 sends `boolValue` to an
+`RTGRoomBorder`; Flow Free consumes an object whose `isa` is nil; Infinity
+Field reaches an NSString assertion; Mini Militia now requires
+`NSMutableSet member:`; and Stick Stunt Biker reaches a non-ASCII NSString
+conversion assertion. Super Turbo Action Pig and Wispin still report sticky GL
+error `0x506`; every sampled framebuffer completeness probe was complete, so
+the incomplete-current-FBO hypothesis is weakened rather than confirmed. No
+title is claimed fully compatible beyond the user's stated test scope.
+
 **Dev 2.24 update (2026-11-04):** expanded implementation built and downloaded at `fb810996`; all eight new tests pass on Windows and macOS. Both full suites are 292/293 because of the unchanged XML plist fixture failure. Eleven affected games and two controls await physical testing. See [implementation and predictions](dev-2.24-implementation.md) and [exact validation](dev-2.24-validation.json). Baseline results below are preserved; no new device pass is claimed.
 
 ## Preserved phase-1 checkpoint

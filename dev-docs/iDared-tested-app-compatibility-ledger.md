@@ -4088,3 +4088,24 @@ This changes only the picker filters and remains deliberately separate from
 the evidence ledger. Full boundaries and predictions are in
 `compatibility-2.19-contracts-provenance-and-picker-status.md`. Physical-device
 status is pending.
+
+## Dev 2.25 exact missing-system-contract batch — November 4, 2026
+
+Dev 2.24 phone evidence is now reconciled in the dedicated cocos2d records.
+Dev 2.25 batches the full exact-contract queue without app-specific branches:
+concrete `NSSet member:` identity (Mini Militia), legacy UIView current-state
+animation (Cannon Cadets), programmatic UIAlertView dismissal (Clowning
+Around), offline read-stream scheduling validation (Cordy/Current), Darwin
+network error text (Guerrilla Bob/Muffin Knight), GLES texture-parameter query
+(Kick the Buddy), UITableViewCell editing-indent state (Labyrinth 2), `EBADF`
+for a vacant nonnegative descriptor (Sonic Dash), version-0 CFRunLoop source
+lifecycle (Trainyard), and copyable 32-bit incremental CommonCrypto SHA-1 state
+(ZombieSmash). Spoing is the sole general control.
+
+Contract tests and hosted build results are still pending at this ledger
+checkpoint. None of the twelve affected titles is promoted to working; each
+prediction is only that its recorded first boundary will be crossed. Detailed
+scope and limitations are in
+`cocos2d-phase1/dev-2.25-exact-system-contracts.md`. The universal recorder is
+unchanged, and unrelated invalid-object, graphics, input and package clusters
+remain outside this build.

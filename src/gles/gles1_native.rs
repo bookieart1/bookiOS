@@ -514,6 +514,9 @@ impl GLES for GLES1Native<'_> {
     unsafe fn TexParameterxv(&mut self, target: GLenum, pname: GLenum, params: *const GLfixed) {
         gles11::TexParameterxv(target, pname, params)
     }
+    unsafe fn GetTexParameteriv(&mut self, target: GLenum, pname: GLenum, params: *mut GLint) {
+        gles11::GetTexParameteriv(target, pname, params)
+    }
     unsafe fn TexImage2D(
         &mut self,
         target: GLenum,

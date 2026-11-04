@@ -317,6 +317,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     () = msg_class![env; CATransaction setAnimationDuration:duration];
 }
 
++ (())setAnimationBeginsFromCurrentState:(bool)begins_from_current_state {
+    log_dbg!("[UIView setAnimationBeginsFromCurrentState:{}]", begins_from_current_state);
+    ca_transaction::ThreadLocalState::current_transaction_mut(env)
+        .set_begins_from_current_state(begins_from_current_state);
+}
+
 + (())setAnimationDelay:(NSTimeInterval)delay {
     log_dbg!("[UIView setAnimationDelay:{:?}]", delay);
     let value: id = msg_class![env; NSNumber numberWithDouble:delay];

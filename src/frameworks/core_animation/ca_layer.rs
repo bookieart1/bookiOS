@@ -820,11 +820,40 @@ fn add_default_implied_basic_animation(
     from_value: id,
     to_value: id,
 ) {
+    let from_value = if ca_transaction::ThreadLocalState::get_current_transaction(env)
+        .is_some_and(|transaction| transaction.begins_from_current_state())
+    {
+        presentation_value(env, layer, key_path)
+    } else {
+        from_value
+    };
     let key_path = get_static_str(env, key_path);
     let animation = msg_class![env; CABasicAnimation animationWithKeyPath:key_path];
     () = msg![env; animation setFromValue: from_value];
     () = msg![env; animation setToValue: to_value];
     ca_transaction::ThreadLocalState::add_animation(env, layer, animation);
+}
+
+/// UIKit's legacy `setAnimationBeginsFromCurrentState:` starts a replacement
+/// animation at the value currently being displayed, rather than at the model
+/// layer's previous destination. Only properties that this CALayer model can
+/// already animate are converted here.
+fn presentation_value(env: &mut Environment, layer: id, key_path: &str) -> id {
+    let presentation = super::animation::State::default().create_presentation_layer(env, layer);
+    match key_path {
+        "bounds" => msg_class![env; NSValue valueWithCGRect:presentation.bounds],
+        "position" => msg_class![env; NSValue valueWithCGPoint:presentation.position],
+        "anchorPoint" => msg_class![env; NSValue valueWithCGPoint:presentation.anchor_point],
+        "hidden" => msg_class![env; NSNumber numberWithBool:presentation.hidden],
+        "opacity" => msg_class![env; NSNumber numberWithFloat:presentation.opacity],
+        "cornerRadius" => msg_class![env; NSNumber numberWithFloat:presentation.corner_radius],
+        "backgroundColor" => presentation.background_color.map_or(nil, |color| {
+            let class = env.objc.get_known_class("_touchHLE_CGColor", &mut env.mem);
+            let object = env.objc.alloc_object(class, Box::new(color), &mut env.mem);
+            autorelease(env, object)
+        }),
+        _ => unreachable!("unsupported implicit animation key path {key_path:?}"),
+    }
 }
 
 // TODO: Remove once CAActions are implemented

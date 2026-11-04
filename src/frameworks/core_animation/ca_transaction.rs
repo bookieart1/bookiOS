@@ -99,6 +99,7 @@ impl ThreadLocalState {
 
 pub struct Transaction {
     disable_actions: bool,
+    begins_from_current_state: bool,
     animation_duration: CFTimeInterval,
     animation_timing_function: id, // CAMediaTimingFunction*
     data: HashMap<String, id>,
@@ -111,6 +112,7 @@ impl Transaction {
             msg_class![env; CAMediaTimingFunction functionWithName:animation_timing_function_name];
         Self {
             disable_actions: false,
+            begins_from_current_state: false,
             animation_duration: 0.25,
             animation_timing_function,
             data: HashMap::default(),
@@ -120,6 +122,14 @@ impl Transaction {
 
     pub fn disables_actions(&self) -> bool {
         self.disable_actions
+    }
+
+    pub fn begins_from_current_state(&self) -> bool {
+        self.begins_from_current_state
+    }
+
+    pub fn set_begins_from_current_state(&mut self, begins: bool) {
+        self.begins_from_current_state = begins;
     }
 
     pub fn get_animations(&self) -> Vec<(id, id)> {
@@ -274,3 +284,31 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn begins_from_current_state_is_scoped_to_the_current_transaction() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        ThreadLocalState::push_explicit_transaction(&mut env);
+        assert!(!ThreadLocalState::get_current_transaction(&mut env)
+            .unwrap()
+            .begins_from_current_state());
+        ThreadLocalState::current_transaction_mut(&mut env).set_begins_from_current_state(true);
+        assert!(ThreadLocalState::get_current_transaction(&mut env)
+            .unwrap()
+            .begins_from_current_state());
+
+        ThreadLocalState::push_explicit_transaction(&mut env);
+        assert!(!ThreadLocalState::get_current_transaction(&mut env)
+            .unwrap()
+            .begins_from_current_state());
+        ThreadLocalState::pop_explicit_transaction(&mut env).commit(&mut env);
+        assert!(ThreadLocalState::get_current_transaction(&mut env)
+            .unwrap()
+            .begins_from_current_state());
+        ThreadLocalState::pop_explicit_transaction(&mut env).commit(&mut env);
+    }
+}

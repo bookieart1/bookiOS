@@ -32,6 +32,7 @@ struct UITableViewCellHostObject {
     selected: bool,
     highlighted: bool,
     editing: bool,
+    should_indent_while_editing: bool,
 }
 impl_HostObject_with_superclass!(UITableViewCellHostObject);
 
@@ -53,6 +54,7 @@ impl Default for UITableViewCellHostObject {
             selected: false,
             highlighted: false,
             editing: false,
+            should_indent_while_editing: true,
         }
     }
 }
@@ -138,6 +140,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         selected: _,
         highlighted: _,
         editing: _,
+        should_indent_while_editing: _,
     } = std::mem::take(env.objc.borrow_mut(this));
     release(env, reuse_identifier);
     release(env, content_view);
@@ -232,6 +235,12 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())setEditing:(bool)editing animated:(bool)_animated {
     env.objc.borrow_mut::<UITableViewCellHostObject>(this).editing = editing;
 }
+- (bool)shouldIndentWhileEditing {
+    env.objc.borrow::<UITableViewCellHostObject>(this).should_indent_while_editing
+}
+- (())setShouldIndentWhileEditing:(bool)should_indent {
+    env.objc.borrow_mut::<UITableViewCellHostObject>(this).should_indent_while_editing = should_indent;
+}
 
 - (())prepareForReuse {
     env.objc.borrow_mut::<UITableViewCellHostObject>(this).selected = false;
@@ -281,6 +290,18 @@ mod tests {
     use super::*;
     use crate::frameworks::foundation::ns_string;
     use crate::Environment;
+
+    #[test]
+    fn should_indent_while_editing_defaults_true_and_round_trips() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let cell: id = msg_class![&mut env; UITableViewCell new];
+        let initial: bool = msg![&mut env; cell shouldIndentWhileEditing];
+        assert!(initial);
+        () = msg![&mut env; cell setShouldIndentWhileEditing:false];
+        let updated: bool = msg![&mut env; cell shouldIndentWhileEditing];
+        assert!(!updated);
+        release(&mut env, cell);
+    }
 
     #[test]
     fn cell_keeps_identity_state_and_standard_subviews() {

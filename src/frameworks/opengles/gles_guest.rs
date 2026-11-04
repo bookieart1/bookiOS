@@ -260,6 +260,20 @@ fn glGetTexEnvfv(env: &mut Environment, target: GLenum, pname: GLenum, params: M
     });
 }
 
+fn glGetTexParameteriv(
+    env: &mut Environment,
+    target: GLenum,
+    pname: GLenum,
+    params: MutPtr<GLint>,
+) {
+    with_ctx_and_mem(env, |gles, mem| {
+        // Every GLES 1.1 texture parameter queried by this entry point is a
+        // single scalar. Keep the guest write bounded accordingly.
+        let params = mem.ptr_at_mut(params, 1);
+        unsafe { gles.GetTexParameteriv(target, pname, params) };
+    });
+}
+
 fn glHint(env: &mut Environment, target: GLenum, mode: GLenum) {
     with_ctx_and_mem(env, |gles, _mem| unsafe { gles.Hint(target, mode) })
 }
@@ -1846,6 +1860,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(glGetPointerv(_, _)),
     export_c_func!(glGetTexEnviv(_, _, _)),
     export_c_func!(glGetTexEnvfv(_, _, _)),
+    export_c_func!(glGetTexParameteriv(_, _, _)),
     export_c_func!(glHint(_, _)),
     export_c_func!(glFinish()),
     export_c_func!(glFlush()),

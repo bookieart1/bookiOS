@@ -794,14 +794,7 @@ fn fcntl(
         return -1;
     }
 
-    if fd >= NORMAL_FILENO_BASE
-        && env
-            .libc_state
-            .posix_io
-            .files
-            .get(fd_to_file_idx(fd))
-            .is_none()
-    {
+    if reject_unknown_fd(env, fd) {
         set_errno(env, EBADF);
         return -1;
     }
@@ -909,6 +902,19 @@ fn reject_negative_fd(env: &mut Environment, fd: FileDescriptor) -> bool {
     }
     set_errno(env, EBADF);
     true
+}
+
+/// Darwin reports EBADF for both descriptors beyond the table and vacant
+/// slots left by close(2). Checking only the vector boundary allowed a
+/// nonnegative closed descriptor through to an unwrap in F_GETFL.
+fn reject_unknown_fd(env: &Environment, fd: FileDescriptor) -> bool {
+    fd >= NORMAL_FILENO_BASE
+        && !env
+            .libc_state
+            .posix_io
+            .files
+            .get(fd_to_file_idx(fd))
+            .is_some_and(Option::is_some)
 }
 
 fn flock(env: &mut Environment, fd: FileDescriptor, operation: FLockFlag) -> i32 {
@@ -1173,5 +1179,11 @@ mod tests {
         let mut env = Environment::new_fake_for_test();
         assert!(reject_negative_fd(&mut env, -1));
         assert_eq!(crate::libc::errno::get_errno(&mut env), EBADF);
+    }
+
+    #[test]
+    fn fcntl_rejects_nonnegative_vacant_descriptor_slot() {
+        let env = Environment::new_fake_for_test();
+        assert!(reject_unknown_fd(&env, NORMAL_FILENO_BASE));
     }
 }

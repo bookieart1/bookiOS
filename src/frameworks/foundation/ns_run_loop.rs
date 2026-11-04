@@ -64,6 +64,9 @@ struct NSRunLoopHostObject {
     /// Mach-message delivery is not emulated yet, but retaining the ports and
     /// keeping the loop alive matches the lifecycle older apps expect.
     ports: Vec<id>,
+    /// Strong references to source-0 `CFRunLoopSource` objects. Mode-specific
+    /// membership and callbacks are kept by the source object itself.
+    sources: Vec<id>,
     /// Set by `CFRunLoopStop`, cleared when the run loop stops.
     stopped: bool,
 }
@@ -445,6 +448,49 @@ pub fn stop_run_loop(env: &mut Environment, run_loop: id) {
     env.objc.borrow_mut::<NSRunLoopHostObject>(run_loop).stopped = true;
 }
 
+pub(crate) fn add_source(env: &mut Environment, run_loop: id, source: id) {
+    let order = crate::frameworks::core_foundation::cf_run_loop::source_order(env, source);
+    let current_sources = env
+        .objc
+        .borrow::<NSRunLoopHostObject>(run_loop)
+        .sources
+        .clone();
+    if !current_sources.contains(&source) {
+        let index = current_sources
+            .iter()
+            .position(|&candidate| {
+                crate::frameworks::core_foundation::cf_run_loop::source_order(env, candidate)
+                    > order
+            })
+            .unwrap_or(current_sources.len());
+        retain(env, source);
+        env.objc
+            .borrow_mut::<NSRunLoopHostObject>(run_loop)
+            .sources
+            .insert(index, source);
+    }
+}
+
+pub(crate) fn contains_source(env: &Environment, run_loop: id, source: id) -> bool {
+    env.objc
+        .borrow::<NSRunLoopHostObject>(run_loop)
+        .sources
+        .contains(&source)
+}
+
+pub(crate) fn remove_source(env: &mut Environment, run_loop: id, source: id) {
+    let removed = {
+        let sources = &mut env.objc.borrow_mut::<NSRunLoopHostObject>(run_loop).sources;
+        sources
+            .iter()
+            .position(|&candidate| candidate == source)
+            .map(|index| sources.remove(index))
+    };
+    if removed.is_some() {
+        release(env, source);
+    }
+}
+
 /// Run the run loop for just a single iteration. This is a special mode just
 /// for the app picker, since we don't have `runMode:beforeDate:` yet.
 /// (TODO: implement those to replace this.)
@@ -477,6 +523,7 @@ pub fn run_run_loop(
     let mut timers_tmp = Vec::new();
     let mut audio_queues_tmp = Vec::new();
     let mut audio_units_tmp = Vec::new();
+    let mut sources_tmp = Vec::new();
 
     fn limit_sleep_time(current: &mut Option<Instant>, new: Option<Instant>) {
         if let Some(new) = new {
@@ -539,6 +586,16 @@ pub fn run_run_loop(
             let next_due = ns_timer::handle_timer(env, timer);
             limit_sleep_time(&mut sleep_until, next_due);
             release(env, timer);
+        }
+
+        assert!(sources_tmp.is_empty());
+        sources_tmp.extend_from_slice(&env.objc.borrow::<NSRunLoopHostObject>(run_loop).sources);
+        for &source in &sources_tmp {
+            retain(env, source);
+        }
+        for source in sources_tmp.drain(..) {
+            crate::frameworks::core_foundation::cf_run_loop::handle_source(env, source);
+            release(env, source);
         }
 
         // TODO: We currently don't properly handle if an audio queue or audio
@@ -680,6 +737,7 @@ pub(super) fn run_loop_for_thread(env: &mut Environment, this: Class, thread_id:
             selector_objects: VecDeque::new(),
             timers: Vec::new(),
             ports: Vec::new(),
+            sources: Vec::new(),
             stopped: false,
         });
         // TODO: is it OK to allocate static object for all threads,

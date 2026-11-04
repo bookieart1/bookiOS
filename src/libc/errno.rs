@@ -138,9 +138,12 @@ fn strerror(env: &mut Environment, err_num: i32) -> ConstPtr<u8> {
             EPROTONOSUPPORT => "Protocol not supported",
             ENOTSUP => "Operation not supported",
             EAFNOSUPPORT => "Address family not supported by protocol family",
+            ENETUNREACH => "Network is unreachable",
             ECONNRESET => "Connection reset by peer",
             ENOTCONN => "Socket is not connected",
             ETIMEDOUT => "Operation timed out",
+            ECONNREFUSED => "Connection refused",
+            EHOSTUNREACH => "No route to host",
             ENOTEMPTY => "Directory not empty",
             EOVERFLOW => "Value too large to be stored in data type",
             EILSEQ => "Illegal byte sequence",
@@ -160,3 +163,20 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(perror(_)),
     export_c_func!(strerror(_)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn network_errors_have_darwin_messages_and_stable_storage() {
+        let mut env = Environment::new_fake_for_test();
+        let first = strerror(&mut env, ENETUNREACH);
+        assert_eq!(env.mem.cstr_at_utf8(first).unwrap(), "Network is unreachable");
+        assert_eq!(strerror(&mut env, ENETUNREACH), first);
+        let refused = strerror(&mut env, ECONNREFUSED);
+        assert_eq!(env.mem.cstr_at_utf8(refused).unwrap(), "Connection refused");
+        let host = strerror(&mut env, EHOSTUNREACH);
+        assert_eq!(env.mem.cstr_at_utf8(host).unwrap(), "No route to host");
+    }
+}

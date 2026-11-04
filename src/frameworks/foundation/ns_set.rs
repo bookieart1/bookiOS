@@ -315,6 +315,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 }
 
+- (id)member:(id)object {
+    find_member(env, this, object)
+}
+
 - (id)allObjects {
     all_objects(env, this)
 }
@@ -397,6 +401,10 @@ pub const CLASSES: ClassExports = objc_classes! {
         Some(object) => object,
         None => nil
     }
+}
+
+- (id)member:(id)object {
+    find_member(env, this, object)
 }
 
 - (id)allObjects {
@@ -490,6 +498,23 @@ fn all_objects(env: &mut Environment, set: id) -> id {
     autorelease(env, array)
 }
 
+/// Return the actual object stored in the set that compares equal to `object`.
+/// `containsObject:` alone is insufficient here: callers rely on the returned
+/// member preserving the identity of the object already owned by the set.
+fn find_member(env: &mut Environment, set: id, object: id) -> id {
+    if object == nil {
+        return nil;
+    }
+    let host = std::mem::take(env.objc.borrow_mut::<SetHostObject>(set));
+    let member = host
+        .dict
+        .iter_keys()
+        .find(|&candidate| candidate == object || msg![env; candidate isEqual:object])
+        .unwrap_or(nil);
+    *env.objc.borrow_mut(set) = host;
+    member
+}
+
 /// Helper method shared between `initWithObjects:` of `_touchHLE_NSSet` and
 /// `_touchHLE_NSMutableSet`
 fn set_from_objects(env: &mut Environment, first_obj: id, args: DotDotDot) -> DictionaryHostObject {
@@ -527,6 +552,27 @@ mod tests {
     use super::*;
     use crate::frameworks::foundation::ns_string;
     use crate::objc::{release, Class};
+
+    #[test]
+    fn concrete_sets_return_the_stored_equal_member() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stored = ns_string::from_rust_string(env, "mini-militia".to_owned());
+        let equal = ns_string::from_rust_string(env, "mini-militia".to_owned());
+        assert_ne!(stored, equal);
+
+        let immutable: id = msg_class![env; NSSet setWithObject:stored];
+        let mutable: id = msg_class![env; NSMutableSet setWithObject:stored];
+        let immutable_member: id = msg![env; immutable member:equal];
+        let mutable_member: id = msg![env; mutable member:equal];
+        assert_eq!(immutable_member, stored);
+        assert_eq!(mutable_member, stored);
+        let missing: id = msg![env; mutable member:nil];
+        assert_eq!(missing, nil);
+
+        release(env, stored);
+        release(env, equal);
+    }
 
     #[test]
     fn counted_set_tracks_multiplicity_and_distinct_count() {

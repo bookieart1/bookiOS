@@ -84,6 +84,29 @@ mod tests {
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);
     }
+
+    #[test]
+    fn programmatic_dismissal_is_bounded_and_idempotent() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let title = ns_string::get_static_str(env, "Dismiss");
+        let alert: id = msg_class![env; UIAlertView alloc];
+        let alert: id = msg![env; alert initWithTitle:title
+                                             message:nil
+                                            delegate:nil
+                                   cancelButtonTitle:title
+                                   otherButtonTitles:nil];
+
+        // Dismissing an alert that has not been shown is a no-op.
+        () = msg![env; alert dismissWithClickedButtonIndex:0i32 animated:false];
+        assert!(!env.objc.borrow::<UIAlertViewHostObject>(alert).dismissal_scheduled);
+
+        env.objc.borrow_mut::<UIAlertViewHostObject>(alert).shown = true;
+        () = msg![env; alert dismissWithClickedButtonIndex:0i32 animated:true];
+        assert!(env.objc.borrow::<UIAlertViewHostObject>(alert).dismissal_scheduled);
+        () = msg![env; alert dismissWithClickedButtonIndex:0i32 animated:false];
+        assert!(env.objc.borrow::<UIAlertViewHostObject>(alert).dismissal_scheduled);
+    }
 }
 
 type NativeTextAlertFn = unsafe extern "C" fn(*const c_char) -> *mut c_char;
@@ -222,6 +245,9 @@ pub struct UIAlertViewHostObject {
     button_titles: Vec<id>,
     default_button_index: NSInteger,
     cancel_button_index: NSInteger,
+    shown: bool,
+    dismissal_scheduled: bool,
+    presentation_owned: bool,
 }
 impl_HostObject_with_superclass!(UIAlertViewHostObject);
 
@@ -230,6 +256,26 @@ fn add_button(env: &mut crate::Environment, this: id, title: id) -> NSInteger {
     let host = env.objc.borrow_mut::<UIAlertViewHostObject>(this);
     host.button_titles.push(title);
     (host.button_titles.len() - 1) as NSInteger
+}
+
+fn schedule_dismissal(env: &mut crate::Environment, this: id, index: NSInteger) {
+    let should_schedule = {
+        let host = env.objc.borrow_mut::<UIAlertViewHostObject>(this);
+        if !host.shown || host.dismissal_scheduled {
+            false
+        } else {
+            host.dismissal_scheduled = true;
+            true
+        }
+    };
+    if !should_schedule {
+        return;
+    }
+    let number: id = msg_class![env; NSNumber numberWithInteger:index];
+    let sel = env
+        .objc
+        .register_host_selector("_touchHLE_clickedButtonAtIndex:".to_string(), &mut env.mem);
+    () = msg![env; this performSelector:sel withObject:number afterDelay:0.0];
 }
 
 pub const CLASSES: ClassExports = objc_classes! {
@@ -383,6 +429,15 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())show {
+    if env.objc.borrow::<UIAlertViewHostObject>(this).shown {
+        return;
+    }
+    {
+        let host = env.objc.borrow_mut::<UIAlertViewHostObject>(this);
+        host.shown = true;
+        host.dismissal_scheduled = false;
+        host.presentation_owned = true;
+    }
     let host = env.objc.borrow::<UIAlertViewHostObject>(this);
     let (title, message) = (host.title, host.message);
     let (button_titles, cancel_index) = (host.button_titles.clone(), host.cancel_button_index);
@@ -402,7 +457,8 @@ pub const CLASSES: ClassExports = objc_classes! {
     // presentation below is synchronous and may yield to another guest run
     // loop/autorelease pool, so take that ownership before crossing into host
     // UI. The delayed delegate callback releases it after dismissal.
-    retain(env, this);
+    retain(env, this); // UIKit presentation ownership.
+    retain(env, this); // Keep the object alive across the synchronous host bridge.
 
     let cancel_button = usize::try_from(cancel_index)
         .ok()
@@ -436,6 +492,15 @@ pub const CLASSES: ClassExports = objc_classes! {
     // Closing the alert without a button counts as the cancel button, like
     // UIKit does when the app is sent to the background.
     let Some(index) = index.or(cancel_button) else {
+        let release_presentation = {
+            let host = env.objc.borrow_mut::<UIAlertViewHostObject>(this);
+            host.shown = false;
+            host.presentation_owned = false;
+            true
+        };
+        if release_presentation {
+            release(env, this);
+        }
         release(env, this);
         return;
     };
@@ -443,16 +508,32 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     // On a device, show returns at once and the delegate hears about the tap
     // later, from the run loop.
-    let number: id = msg_class![env; NSNumber numberWithInteger:(index as NSInteger)];
-    let sel = env
-        .objc
-        .register_host_selector("_touchHLE_clickedButtonAtIndex:".to_string(), &mut env.mem);
-    () = msg![env; this performSelector:sel withObject:number afterDelay:0.0];
+    schedule_dismissal(env, this, index as NSInteger);
+    release(env, this);
+}
+
+- (())dismissWithClickedButtonIndex:(NSInteger)index animated:(bool)_animated {
+    let count = env.objc.borrow::<UIAlertViewHostObject>(this).button_titles.len() as NSInteger;
+    if index < 0 || index >= count {
+        return;
+    }
+    // The host message box itself is synchronous, but the guest-visible
+    // dismissal remains asynchronous and idempotent, with the same delegate
+    // ordering and UIKit ownership as a real button dismissal.
+    schedule_dismissal(env, this, index);
 }
 
 - (())_touchHLE_clickedButtonAtIndex:(id)number { // NSNumber*
     let index: NSInteger = msg![env; number integerValue];
-    let delegate = env.objc.borrow::<UIAlertViewHostObject>(this).delegate;
+    let (delegate, release_presentation) = {
+        let host = env.objc.borrow_mut::<UIAlertViewHostObject>(this);
+        if !host.dismissal_scheduled {
+            return;
+        }
+        host.dismissal_scheduled = false;
+        host.shown = false;
+        (host.delegate, std::mem::take(&mut host.presentation_owned))
+    };
     if delegate != nil {
         for name in [
             "alertView:clickedButtonAtIndex:",
@@ -466,7 +547,9 @@ pub const CLASSES: ClassExports = objc_classes! {
             }
         }
     }
-    release(env, this);
+    if release_presentation {
+        release(env, this);
+    }
 }
 
 @end

@@ -1666,6 +1666,11 @@ impl GLES for GLES1OnGL2<'_> {
             params,
         )
     }
+    unsafe fn GetTexParameteriv(&mut self, target: GLenum, pname: GLenum, params: *mut GLint) {
+        assert!(target == gl21::TEXTURE_2D);
+        TEX_PARAMS.assert_known_param(pname);
+        gl21::GetTexParameteriv(target, pname, params);
+    }
     unsafe fn TexImage2D(
         &mut self,
         target: GLenum,

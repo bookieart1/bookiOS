@@ -290,24 +290,28 @@ fn enumerate_apps(
     // Put the current focused device-test batch first, in alphabetical order,
     // so a full round can be exercised without repeatedly paging through the
     // library. Everything else remains alphabetical.
-    // Bundle identifiers avoid depending on localized or truncated names.
-    const DEV_224_TEST_BATCH: &[&str] = &[
-        "com.manucorporat.abstractwar2.0",
-        "com.getsetgames.addicus",
-        "com.continuitygame.continuity2",
-        "com.BrokenKings.CaveCarver",
-        "com.bigduckgames.flow",
-        "com.chillingo.infinityfieldiphone",
-        "com.fabulapps.kiko",
-        "com.chadtowns.da2",
-        "com.rsz.StickStuntBiker",
-        "com.noodlecake.superstickgolf",
-        "com.joystickgenerals.STActionPig",
-        "com.spokko.TikiPremium",
-        "9X8UEF6RBG.com.GrumpyFace.Wispin",
+    // Normalized display names cover the mixed archive naming in this batch;
+    // matching is exact or a version-suffixed prefix, never a substring.
+    const DEV_225_TEST_NAMES: &[&str] = &[
+        "CANNON CADETS",
+        "CLOWNING AROUND",
+        "CORDY",
+        "CURRENT",
+        "GUERRILLA BOB",
+        "KICK THE BUDDY",
+        "LABYRINTH 2",
+        "MINI MILITIA",
+        "MUFFIN KNIGHT",
+        "SONIC DASH",
+        "SPOING",
+        "TRAINYARD",
+        "ZOMBIESMASH",
     ];
     apps.sort_by_key(|app| {
-        let is_test = DEV_224_TEST_BATCH.contains(&app.bundle_identifier.as_str());
+        let display_name = app.display_name.to_uppercase().replace('’', "'");
+        let is_test = DEV_225_TEST_NAMES
+            .iter()
+            .any(|&name| display_name == name || display_name.starts_with(&format!("{name} ")));
         (!is_test, app.display_name.to_uppercase())
     });
 
@@ -816,7 +820,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.24",
+            "iDared 32bit {}{}{} · Dev 2.25",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""

@@ -1,5 +1,13 @@
 # Cocos2d compatibility project: implementation roadmap
 
+**Dev 2.25 current milestone (2026-11-04):** implement and physically test the
+complete exact-contract batch documented in
+[dev-2.25-exact-system-contracts.md](dev-2.25-exact-system-contracts.md). This
+advances twelve affected titles with ten independently attributable contracts
+and uses Spoing as the only general control. The next milestone must be chosen
+from the new first boundaries in that phone result; do not replay the same
+missing-selector/import hypotheses if the contracts cross them.
+
 **Dev 2.24 update (2026-11-04):** expanded implementation built and downloaded at `fb810996`; all eight new tests pass on Windows and macOS. Both full suites are 292/293 because of the unchanged XML plist fixture failure. Eleven affected games and two controls await physical testing. See [implementation and predictions](dev-2.24-implementation.md) and [exact validation](dev-2.24-validation.json). Baseline results below are preserved; no new device pass is claimed.
 
 ## Preserved phase-1 proposal

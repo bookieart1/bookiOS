@@ -74,6 +74,109 @@ fn CC_SHA1(env: &mut Environment, data: ConstVoidPtr, len: u32, md: MutPtr<u8>) 
     md
 }
 
+/// Historical 32-bit CommonCrypto SHA-1 context. The state deliberately lives
+/// in guest memory: old code copies these structs directly before finalizing.
+#[allow(non_camel_case_types)]
+#[derive(Copy, Clone)]
+#[repr(C, packed)]
+struct CC_SHA1_CTX {
+    hash: [u32; 5],
+    /// Length in bits, low word followed by high word (`Nl`, `Nh`).
+    count: [u32; 2],
+    data: [u8; 64],
+    num: i32,
+}
+unsafe impl SafeRead for CC_SHA1_CTX {}
+
+impl CC_SHA1_CTX {
+    fn len_bits(&self) -> u64 {
+        let count = self.count;
+        (u64::from(count[1]) << 32) | u64::from(count[0])
+    }
+
+    fn update(&mut self, mut input: &[u8]) {
+        let old_bits = self.len_bits();
+        let new_bits = old_bits.wrapping_add((input.len() as u64).wrapping_mul(8));
+        self.count = [new_bits as u32, (new_bits >> 32) as u32];
+
+        let mut used = usize::try_from(self.num).unwrap();
+        let mut hash = self.hash;
+        let mut block = self.data;
+        while !input.is_empty() {
+            let take = (64 - used).min(input.len());
+            block[used..used + take].copy_from_slice(&input[..take]);
+            used += take;
+            input = &input[take..];
+            if used == 64 {
+                let block = sha1::digest::core_api::Block::<sha1::Sha1Core>::clone_from_slice(&block);
+                sha1::compress(&mut hash, &[block]);
+                used = 0;
+                block = [0; 64];
+            }
+        }
+        self.hash = hash;
+        self.data = block;
+        self.num = used as i32;
+    }
+
+    fn finish(mut self) -> [u8; 20] {
+        let message_bits = self.len_bits();
+        let used = usize::try_from(self.num).unwrap();
+        let mut padding = vec![0x80];
+        padding.resize(1 + (119 - used) % 64, 0);
+        padding.extend_from_slice(&message_bits.to_be_bytes());
+        self.update(&padding);
+        debug_assert_eq!(self.num, 0);
+        self.hash
+            .map(u32::to_be_bytes)
+            .as_flattened()
+            .try_into()
+            .unwrap()
+    }
+}
+
+fn CC_SHA1_Init(env: &mut Environment, c: MutPtr<CC_SHA1_CTX>) -> i32 {
+    env.mem.write(
+        c,
+        CC_SHA1_CTX {
+            hash: [
+                0x67452301,
+                0xefcdab89,
+                0x98badcfe,
+                0x10325476,
+                0xc3d2e1f0,
+            ],
+            count: [0; 2],
+            data: [0; 64],
+            num: 0,
+        },
+    );
+    1
+}
+
+fn CC_SHA1_Update(
+    env: &mut Environment,
+    c: MutPtr<CC_SHA1_CTX>,
+    data: ConstVoidPtr,
+    len: u32,
+) -> i32 {
+    let mut ctx = env.mem.read(c);
+    let input = if len == 0 {
+        &[][..]
+    } else {
+        env.mem.bytes_at(data.cast(), len)
+    };
+    ctx.update(input);
+    env.mem.write(c, ctx);
+    1
+}
+
+fn CC_SHA1_Final(env: &mut Environment, md: MutPtr<u8>, c: MutPtr<CC_SHA1_CTX>) -> i32 {
+    let digest = env.mem.read(c).finish();
+    env.mem.bytes_at_mut(md, 20).copy_from_slice(&digest);
+    1
+}
+
 fn CC_SHA256(env: &mut Environment, data: ConstVoidPtr, len: u32, md: MutPtr<u8>) -> MutPtr<u8> {
     let mut hasher = Sha256::new();
     hasher.update(env.mem.bytes_at(data.cast(), len));
@@ -397,6 +500,9 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CC_MD5_Final(_, _)),
     export_c_func!(CC_MD5(_, _, _)),
     export_c_func!(CC_SHA1(_, _, _)),
+    export_c_func!(CC_SHA1_Init(_)),
+    export_c_func!(CC_SHA1_Update(_, _, _)),
+    export_c_func!(CC_SHA1_Final(_, _)),
     export_c_func!(CC_SHA256(_, _, _)),
     export_c_func!(CC_SHA256_Init(_)),
     export_c_func!(CC_SHA256_Update(_, _, _)),
@@ -404,3 +510,32 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CCHmac(_, _, _, _, _, _)),
     export_c_func!(CCCrypt(_, _, _, _, _, _, _, _, _, _, _)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn incremental_sha1_uses_guest_copyable_historical_context() {
+        assert_eq!(std::mem::size_of::<CC_SHA1_CTX>(), 96);
+        let mut env = Environment::new_fake_for_test();
+        let ctx = env.mem.alloc(std::mem::size_of::<CC_SHA1_CTX>() as u32).cast();
+        let copy = env.mem.alloc(std::mem::size_of::<CC_SHA1_CTX>() as u32).cast();
+        let data = env.mem.alloc_and_write_bytes(b"abc");
+        let digest = env.mem.alloc(20).cast::<u8>();
+
+        assert_eq!(CC_SHA1_Init(&mut env, ctx), 1);
+        assert_eq!(CC_SHA1_Update(&mut env, ctx, data.cast_const().cast(), 1), 1);
+        let copied_context = env.mem.read(ctx);
+        env.mem.write(copy, copied_context);
+        assert_eq!(CC_SHA1_Update(&mut env, copy, (data + 1).cast_const().cast(), 2), 1);
+        assert_eq!(CC_SHA1_Final(&mut env, digest, copy), 1);
+        assert_eq!(
+            env.mem.bytes_at(digest, 20),
+            &[
+                0xa9, 0x99, 0x3e, 0x36, 0x47, 0x06, 0x81, 0x6a, 0xba, 0x3e,
+                0x25, 0x71, 0x78, 0x50, 0xc2, 0x6c, 0x9c, 0xd0, 0xd8, 0x9d,
+            ]
+        );
+    }
+}

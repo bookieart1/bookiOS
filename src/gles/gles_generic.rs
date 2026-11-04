@@ -276,6 +276,7 @@ pub trait GLES {
     unsafe fn TexParameteriv(&mut self, target: GLenum, pname: GLenum, params: *const GLint);
     unsafe fn TexParameterfv(&mut self, target: GLenum, pname: GLenum, params: *const GLfloat);
     unsafe fn TexParameterxv(&mut self, target: GLenum, pname: GLenum, params: *const GLfixed);
+    unsafe fn GetTexParameteriv(&mut self, target: GLenum, pname: GLenum, params: *mut GLint);
     unsafe fn TexImage2D(
         &mut self,
         target: GLenum,
