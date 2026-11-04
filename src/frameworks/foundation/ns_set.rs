@@ -601,7 +601,8 @@ mod tests {
         let one: id = msg_class![&mut env; NSObject new];
         let two: id = msg_class![&mut env; NSObject new];
         let objects = env.mem.alloc_and_write([one, two, one]);
-        let set: id = msg_class![&mut env; NSSet setWithObjects:objects.cast_const() count:3u32];
+        let objects = objects.cast_const();
+        let set: id = msg_class![&mut env; NSSet setWithObjects:objects count:3u32];
         let count: NSUInteger = msg![&mut env; set count];
         assert_eq!(count, 2);
         release(&mut env, one);

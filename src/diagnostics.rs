@@ -2027,8 +2027,10 @@ impl Environment {
             .mem
             .get_bytes_fallible(ConstVoidPtr::from_bits(value), 12)
             .map(|bytes| {
-                for (word, chunk) in raw_words.iter_mut().zip(bytes.chunks_exact(4)) {
-                    *word = u32::from_le_bytes(chunk.try_into().unwrap());
+                let (chunks, remainder) = bytes.as_chunks::<4>();
+                debug_assert!(remainder.is_empty());
+                for (word, chunk) in raw_words.iter_mut().zip(chunks) {
+                    *word = u32::from_le_bytes(*chunk);
                 }
                 (bytes.len() / 4) as u8
             })
