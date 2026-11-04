@@ -642,6 +642,8 @@ mod tests {
     fn find_with_options_honors_the_supplied_range() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let haystack = from_rust_string(env, "one two TWO".to_owned());
         let needle = from_rust_string(env, "two".to_owned());
         let result = env.mem.alloc_and_write(CFRange {
@@ -662,5 +664,7 @@ mod tests {
         let found = env.mem.read(result);
         assert_eq!((found.location, found.length), (4, 3));
         env.mem.free(result.cast());
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

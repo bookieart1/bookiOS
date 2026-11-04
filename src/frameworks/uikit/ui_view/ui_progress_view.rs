@@ -146,6 +146,8 @@ mod tests {
     fn progress_is_clamped_and_style_is_stable() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let view: id = msg_class![env; UIProgressView alloc];
         let view: id = msg![env; view initWithProgressViewStyle:1i32];
         () = msg![env; view setProgress:1.5f32 animated:true];
@@ -154,5 +156,7 @@ mod tests {
         assert_eq!(progress, 1.0);
         assert_eq!(style, 1);
         release(env, view);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

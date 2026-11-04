@@ -785,7 +785,7 @@ mod tests {
         env.mem
             .bytes_at_mut(bytes.cast(), 4)
             .copy_from_slice(&[1u8, 2, 3, 4]);
-        let bytes = bytes.cast::<u8>().cast_const();
+        let bytes = bytes.cast_const();
         let data: id = msg_class![env; NSMutableData alloc];
         let data: id = msg![env; data initWithBytes:bytes length:4u32];
         let length: NSUInteger = msg![env; data length];

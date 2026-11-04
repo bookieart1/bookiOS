@@ -368,7 +368,7 @@ mod tests {
         env.mem
             .bytes_at_mut(bytes.cast(), length)
             .copy_from_slice(xml);
-        let bytes = bytes.cast::<u8>().cast_const();
+        let bytes = bytes.cast_const();
         let data: id = msg_class![env; NSData dataWithBytes:bytes length:length];
         let parser: id = msg_class![env; NSXMLParser alloc];
         let parser: id = msg![env; parser initWithData:data];

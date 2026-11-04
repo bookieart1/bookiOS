@@ -860,6 +860,8 @@ mod tests {
     fn ordered_perform_requests_keep_lower_orders_first() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let run_loop: id = msg_class![env; NSRunLoop currentRunLoop];
         let target: id = msg_class![env; NSObject new];
         let selector = env
@@ -880,5 +882,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![5, 20]
         );
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

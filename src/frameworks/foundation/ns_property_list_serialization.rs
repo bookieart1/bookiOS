@@ -377,6 +377,8 @@ mod tests {
     fn xml_serialization_emits_xml_and_reports_no_error() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         // This test exercises serialization, not autorelease-pool or allocator
         // teardown. The fake environment owns guest allocations until drop.
         let _pool: id = msg_class![env; NSAutoreleasePool new];
@@ -392,18 +394,22 @@ mod tests {
         assert_ne!(data, nil);
         assert_eq!(env.mem.read(error_string), nil);
         assert!(ns_data::to_rust_slice(env, data).starts_with(b"<?xml"));
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 
     #[test]
     fn mutable_data_leaf_serializes_as_data() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let _pool: id = msg_class![env; NSAutoreleasePool new];
         let bytes = env.mem.alloc(4);
         env.mem
             .bytes_at_mut(bytes.cast(), 4)
             .copy_from_slice(&[0xdeu8, 0xad, 0xbe, 0xef]);
-        let bytes = bytes.cast::<u8>().cast_const();
+        let bytes = bytes.cast_const();
         let leaf: id = msg_class![env; NSMutableData dataWithBytes:bytes length:4u32];
         let array: id = msg_class![env; NSMutableArray new];
         () = msg![env; array addObject:leaf];
@@ -414,5 +420,7 @@ mod tests {
             errorDescription:error_description];
         assert_ne!(data, nil);
         assert!(!ns_data::to_rust_slice(env, data).is_empty());
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

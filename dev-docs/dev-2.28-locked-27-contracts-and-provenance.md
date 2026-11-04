@@ -30,7 +30,7 @@ header and SwiftUI picker identify this build as Dev 2.28.
 ## Bounded diagnostic experiments
 
 The universal recorder remains permanent and strict. Dev 2.28 adds three
-general, fixed-size evidence sources: 64 recent Objective-C nil returns, 96
+general, fixed-size evidence sources: 16 recent Objective-C nil returns, 24
 autorelease enqueues with pool/object/class/refcount/caller context, and focused
 input, presentation, callback/invocation boundaries. Recording does not call
 guest code, retain objects, make invalid memory readable or change API results.
