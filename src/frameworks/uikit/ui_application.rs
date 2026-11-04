@@ -25,6 +25,7 @@ pub struct State {
     shared_application: Option<id>,
     pub(super) status_bar_hidden: bool,
     is_active: bool,
+    remote_notification_types: UIRemoteNotificationType,
 }
 
 struct UIApplicationHostObject {
@@ -279,7 +280,13 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())registerForRemoteNotificationTypes:(UIRemoteNotificationType)types {
-    log!("TODO: ignoring registerForRemoteNotificationTypes:{}", types);
+    env.framework_state.uikit.ui_application.remote_notification_types = types;
+}
+- (UIRemoteNotificationType)enabledRemoteNotificationTypes {
+    env.framework_state.uikit.ui_application.remote_notification_types
+}
+- (())unregisterForRemoteNotifications {
+    env.framework_state.uikit.ui_application.remote_notification_types = 0;
 }
 
 - (NSInteger)applicationIconBadgeNumber {
@@ -685,3 +692,23 @@ pub const CONSTANTS: ConstantExports = &[
 ];
 
 pub const FUNCTIONS: FunctionExports = &[export_c_func!(UIApplicationMain(_, _, _, _))];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remote_notification_type_state_round_trips_and_clears() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let application: id = msg_class![env; UIApplication alloc];
+        () = msg![env; application registerForRemoteNotificationTypes:7u32];
+        let enabled: UIRemoteNotificationType =
+            msg![env; application enabledRemoteNotificationTypes];
+        assert_eq!(enabled, 7);
+        () = msg![env; application unregisterForRemoteNotifications];
+        let enabled: UIRemoteNotificationType =
+            msg![env; application enabledRemoteNotificationTypes];
+        assert_eq!(enabled, 0);
+    }
+}

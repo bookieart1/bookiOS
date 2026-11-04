@@ -74,10 +74,16 @@ pub fn app_picker(
         .iter()
         .zip(&icons)
         .map(|(app, icon)| {
+            let library_key = app
+                .path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| app.path.to_string_lossy().into_owned());
             format!(
-                "{{\"name\":{},\"identifier\":{},\"iconWidth\":{},\"iconHeight\":{},\"hasIcon\":{},\"compatibility\":{}}}",
+                "{{\"name\":{},\"identifier\":{},\"libraryKey\":{},\"iconWidth\":{},\"iconHeight\":{},\"hasIcon\":{},\"compatibility\":{}}}",
                 json_string(&app.display_name),
                 json_string(&app.bundle_identifier),
+                json_string(&library_key),
                 icon.dimensions().0,
                 icon.dimensions().1,
                 app.icon.is_some(),
@@ -138,7 +144,7 @@ pub fn app_picker(
         }),
         json_string(branding),
         json_string(crate::DISPLAY_VERSION),
-        json_string("Dev 2.22"),
+        json_string("Dev 2.23"),
         json_string(&crate::licenses::get_text()),
         optional(paths::url_for_opening_user_data_dir().ok()),
         json_string("https://iDared32bit-emu.com/"),

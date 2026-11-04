@@ -13,6 +13,23 @@ use crate::objc::{
     autorelease, id, msg, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject,
     NSZonePtr,
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stream_schedule_state_tracks_schedule_and_remove() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stream: id = msg_class![env; NSStream alloc];
+        () = msg![env; stream scheduleInRunLoop:nil forMode:nil];
+        assert!(env.objc.borrow::<NSStreamHostObject>(stream).scheduled);
+        () = msg![env; stream removeFromRunLoop:nil forMode:nil];
+        assert!(!env.objc.borrow::<NSStreamHostObject>(stream).scheduled);
+        release(env, stream);
+    }
+}
 use crate::Environment;
 
 type NSStreamStatus = NSUInteger;
@@ -30,6 +47,7 @@ struct NSStreamHostObject {
     open_flags: i32,
     fd: Option<posix_io::FileDescriptor>,
     status: NSStreamStatus,
+    scheduled: bool,
 }
 impl HostObject for NSStreamHostObject {}
 
@@ -96,6 +114,17 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (id)streamError {
     nil
+}
+
+- (())scheduleInRunLoop:(id)_run_loop forMode:(id)_mode {
+    // File streams are polled synchronously today, and network stream
+    // creation truthfully fails. Remember the scheduling contract without
+    // inventing callback delivery.
+    env.objc.borrow_mut::<NSStreamHostObject>(this).scheduled = true;
+}
+
+- (())removeFromRunLoop:(id)_run_loop forMode:(id)_mode {
+    env.objc.borrow_mut::<NSStreamHostObject>(this).scheduled = false;
 }
 
 - (())dealloc {

@@ -30,7 +30,7 @@
 use crate::dyld::{export_c_func, FunctionExports};
 use crate::libc::errno::{
     set_errno, EAFNOSUPPORT, EAGAIN, EBADF, ECONNREFUSED, ECONNRESET, EHOSTUNREACH, EINVAL,
-    ENETUNREACH, ENOTSUP, EPROTONOSUPPORT, ETIMEDOUT,
+    ENETUNREACH, ENOTCONN, ENOTSUP, EPROTONOSUPPORT, ETIMEDOUT,
 };
 use crate::libc::posix_io::{
     close, find_or_create_socket, is_nonblocking, is_socket, FileDescriptor,
@@ -573,7 +573,6 @@ fn connect(
         return -1;
     };
     let type_ = socket_host_object.type_;
-    assert!(type_ == SOCK_STREAM);
 
     assert_sockaddr_len(address_len);
     let sockaddr_val = env.mem.read(address);
@@ -596,6 +595,64 @@ fn connect(
         set_errno(env, ENETUNREACH);
         return -1;
     }
+
+    if type_ == SOCK_DGRAM {
+        let options = State::get(env)
+            .sockets
+            .get(&socket)
+            .unwrap()
+            .options
+            .clone();
+        let existing_socket = State::get_mut(env)
+            .sockets
+            .get_mut(&socket)
+            .unwrap()
+            .udp_socket
+            .take();
+        let host_socket = match existing_socket {
+            Some(host_socket) => host_socket,
+            None => {
+                let bind_address = SocketAddrV4::new(std::net::Ipv4Addr::UNSPECIFIED, 0);
+                match UdpSocket::bind(bind_address) {
+                    Ok(host_socket) => {
+                        if options.contains(&SO_BROADCAST) {
+                            host_socket.set_broadcast(true).unwrap();
+                        }
+                        host_socket
+                    }
+                    Err(error) => {
+                        log!("Warning: UDP connect({socket}) could not create its host socket: {error}");
+                        set_errno(env, EHOSTUNREACH);
+                        return -1;
+                    }
+                }
+            }
+        };
+        if let Err(error) = host_socket.connect(socket_address) {
+            log!(
+                "Warning: UDP connect({}) to {} failed with {}, returning -1",
+                socket,
+                socket_address,
+                error
+            );
+            set_errno(env, EHOSTUNREACH);
+            State::get_mut(env)
+                .sockets
+                .get_mut(&socket)
+                .unwrap()
+                .udp_socket = Some(host_socket);
+            return -1;
+        }
+        host_socket.set_nonblocking(true).unwrap();
+        State::get_mut(env)
+            .sockets
+            .get_mut(&socket)
+            .unwrap()
+            .udp_socket = Some(host_socket);
+        return 0;
+    }
+
+    debug_assert_eq!(type_, SOCK_STREAM);
 
     assert!(State::get(env)
         .sockets
@@ -1146,8 +1203,12 @@ fn send(
     // TODO: handle errno properly
     set_errno(env, 0);
 
-    let type_ = State::get(env).sockets.get(&socket).unwrap().type_;
-    assert!(type_ == SOCK_STREAM);
+    let Some(socket_host_object) = State::get(env).sockets.get(&socket) else {
+        set_errno(env, EBADF);
+        return -1;
+    };
+    let type_ = socket_host_object.type_;
+    assert!(type_ == SOCK_STREAM || type_ == SOCK_DGRAM);
 
     assert_eq!(flags, 0); // TODO
 
@@ -1181,10 +1242,44 @@ fn send(
                 Err(e) => panic!("send: Socket {socket} encountered IO error: {e}"),
             }
         }
+        SOCK_DGRAM => {
+            let Some(udp_socket) = env
+                .libc_state
+                .socket
+                .sockets
+                .get(&socket)
+                .unwrap()
+                .udp_socket
+                .as_ref()
+            else {
+                set_errno(env, ENOTCONN);
+                return -1;
+            };
+            if udp_socket.peer_addr().is_err() {
+                set_errno(env, ENOTCONN);
+                return -1;
+            }
+            let buf = env.mem.bytes_at(buffer.cast(), length);
+            match udp_socket.send(buf) {
+                Ok(written) => written,
+                Err(ref error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    if is_nonblocking(env, socket) {
+                        set_errno(env, EAGAIN);
+                        return -1;
+                    }
+                    unimplemented!(
+                        "send: UDP socket {} would block on sending, block current guest thread {}.",
+                        socket,
+                        env.current_thread
+                    )
+                }
+                Err(error) => panic!("send: UDP socket {socket} encountered IO error: {error}"),
+            }
+        }
         _ => unreachable!(),
     };
     log_dbg!(
-        "send: written {} bytes to TCP socket {}",
+        "send: written {} bytes to socket {}",
         num_bytes_written,
         socket
     );
@@ -1370,6 +1465,41 @@ mod tests {
         assert!(fd >= 0);
         assert_eq!(listen(&mut env, fd, 1), -1);
         assert_eq!(crate::libc::errno::get_errno(&mut env), ENOTSUP);
+    }
+
+    #[test]
+    fn connect_on_datagram_socket_sets_a_default_peer() {
+        let mut env = Environment::new_fake_for_test();
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        let receiver_port = receiver.local_addr().unwrap().port();
+        let fd = socket(&mut env, AF_INET, SOCK_DGRAM, 0);
+        assert!(fd >= 0);
+        let address = env
+            .mem
+            .alloc_and_write(sockaddr::from_ipv4_parts([127, 0, 0, 1], receiver_port));
+        assert_eq!(
+            connect(
+                &mut env,
+                fd,
+                address.cast_const(),
+                guest_size_of::<sockaddr>(),
+            ),
+            0
+        );
+        assert_eq!(crate::libc::errno::get_errno(&mut env), 0);
+        assert!(State::get(&env).sockets[&fd].udp_socket.is_some());
+
+        let payload = env.mem.alloc(4);
+        env.mem
+            .bytes_at_mut(payload.cast(), 4)
+            .copy_from_slice(b"test");
+        assert_eq!(send(&mut env, fd, payload, 4, 0), 4);
+        let mut received = [0; 4];
+        assert_eq!(receiver.recv(&mut received).unwrap(), 4);
+        assert_eq!(&received, b"test");
     }
 
     #[test]

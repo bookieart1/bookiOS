@@ -39,6 +39,7 @@ const SELECTOR_EVENTS: usize = 64;
 const FOCUSED_BOUNDARY_EVENTS: usize = 16;
 const KVO_EVENTS: usize = 16;
 const MEDIA_EVENTS: usize = 16;
+const DEFAULTS_EVENTS: usize = 32;
 const HEALTHY_PRESENT_INTERVAL: Duration = Duration::from_millis(100);
 const SLOW_PRESENT_INTERVAL: Duration = Duration::from_millis(180);
 const HEALTHY_PRESENT_STREAK: u16 = 30;
@@ -255,6 +256,28 @@ struct DefaultsLookup {
     key: u32,
     result: u32,
     domain: DefaultsDomain,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct DefaultsEvent {
+    sequence: u64,
+    thread: usize,
+    receiver: u32,
+    key: u32,
+    key_description: Text,
+    result: u32,
+    result_class: Text,
+    domain: DefaultsDomain,
+    pc: u32,
+    lr: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct BundleCandidateEvent {
+    path: Text,
+    thread: usize,
+    pc: u32,
+    lr: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -494,7 +517,7 @@ pub struct Recorder {
     provenance: [Provenance; PROVENANCE],
     value_origins: [ValueOrigin; VALUE_ORIGINS],
     boundary_details: Ring<BoundaryDetail, BOUNDARY_DETAILS>,
-    bundle_candidates: Ring<Text, BUNDLE_CANDIDATES>,
+    bundle_candidates: Ring<BundleCandidateEvent, BUNDLE_CANDIDATES>,
     bundle_directory_entries: Ring<Text, BUNDLE_DIRECTORY_ENTRIES>,
     collection_events: Ring<CollectionEvent, COLLECTION_EVENTS>,
     invocation_events: Ring<InvocationEvent, INVOCATION_EVENTS>,
@@ -504,6 +527,7 @@ pub struct Recorder {
     dictionary_origins: [DictionaryOrigin; DICTIONARY_ORIGINS],
     dictionary_origin_sequence: u64,
     defaults_lookup: DefaultsLookup,
+    defaults_events: Ring<DefaultsEvent, DEFAULTS_EVENTS>,
     slow_capture: Option<SlowCapture>,
     pending_slow_capture: Option<PendingSlowCapture>,
     /// Largest individual present gap. Unlike the sustained-slow capture,
@@ -556,6 +580,7 @@ impl Recorder {
             dictionary_origins: [DictionaryOrigin::default(); DICTIONARY_ORIGINS],
             dictionary_origin_sequence: 0,
             defaults_lookup: DefaultsLookup::default(),
+            defaults_events: Ring::default(),
             slow_capture: None,
             pending_slow_capture: None,
             worst_present_gap: None,
@@ -1045,7 +1070,7 @@ impl Recorder {
             self.bundle_candidates.written
         );
         for candidate in self.bundle_candidates.iter() {
-            echo_no_panic!("flight bundle candidate miss path=\"{}\"", candidate);
+            echo_no_panic!("flight bundle candidate miss path=\"{}\" tid={} pc={:#x} lr={:#x}", candidate.path, candidate.thread, candidate.pc, candidate.lr);
         }
         echo_no_panic!(
             "flight bundle directory samples: newest {BUNDLE_DIRECTORY_ENTRIES}; total={} (bounded names from failed resource directories)",
@@ -1053,6 +1078,16 @@ impl Recorder {
         );
         for entry in self.bundle_directory_entries.iter() {
             echo_no_panic!("flight bundle directory entry name=\"{}\"", entry);
+        }
+        echo_no_panic!(
+            "flight defaults lookups: newest {DEFAULTS_EVENTS}; total={} (bounded key/domain/result provenance; no ownership changes)",
+            self.defaults_events.written
+        );
+        for event in self.defaults_events.iter() {
+            echo_no_panic!("flight defaults #{} tid={} receiver={:#x} key={:#x} key-description=\"{}\" result={:#x} result-class=\"{}\" domain={} pc={:#x} lr={:#x}",
+                event.sequence, event.thread, event.receiver, event.key,
+                event.key_description, event.result, event.result_class,
+                event.domain.as_str(), event.pc, event.lr);
         }
         echo_no_panic!("flight strstr searches: newest {STRING_SEARCHES}; total={} (80-byte prefixes; misses are not errors)", self.string_searches.written);
         for entry in self.string_searches.iter() {
@@ -1647,6 +1682,9 @@ impl Environment {
         result: u32,
         domain: &'static str,
     ) {
+        let regs = *self.cpu.regs();
+        let key_description = describe_object(&self.objc, &self.mem, key, true);
+        let result_class = describe_object(&self.objc, &self.mem, result, false);
         if let Some(recorder) = &mut self.diagnostics {
             recorder.defaults_lookup = DefaultsLookup {
                 receiver,
@@ -1654,6 +1692,18 @@ impl Environment {
                 result,
                 domain: DefaultsDomain::from_name(domain),
             };
+            recorder.defaults_events.push(DefaultsEvent {
+                sequence: recorder.sequence,
+                thread: self.current_thread,
+                receiver,
+                key,
+                key_description,
+                result,
+                result_class,
+                domain: DefaultsDomain::from_name(domain),
+                pc: regs[15],
+                lr: regs[14],
+            });
         }
     }
     /// Retain the exact failed candidate without writing a per-lookup log or
@@ -1673,8 +1723,14 @@ impl Environment {
                 }
             }
         }
+        let regs = *self.cpu.regs();
         if let Some(recorder) = &mut self.diagnostics {
-            recorder.bundle_candidates.push(Text::path_tail(path));
+            recorder.bundle_candidates.push(BundleCandidateEvent {
+                path: Text::path_tail(path),
+                thread: self.current_thread,
+                pc: regs[15],
+                lr: regs[14],
+            });
             for entry in &directory_entries[..directory_entry_count] {
                 recorder.bundle_directory_entries.push(*entry);
             }

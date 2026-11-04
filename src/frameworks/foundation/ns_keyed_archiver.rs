@@ -19,8 +19,8 @@ use plist::{to_writer_binary, Dictionary, Uid, Value};
 use crate::frameworks::foundation::ns_keyed_unarchiver::NSKeyedArchiveRootObjectKey;
 use crate::frameworks::foundation::ns_string::{get_static_str, to_rust_string};
 use crate::frameworks::foundation::{NSInteger, NSUInteger};
-use crate::frameworks::core_graphics::CGPoint;
-use crate::frameworks::uikit::ui_geometry::NSStringFromCGPoint;
+use crate::frameworks::core_graphics::{CGPoint, CGRect};
+use crate::frameworks::uikit::ui_geometry::{NSStringFromCGPoint, NSStringFromCGRect};
 use crate::mem::{ConstPtr, GuestUSize};
 use crate::objc::{
     id, msg, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject, NSZonePtr,
@@ -144,6 +144,12 @@ pub const CLASSES: ClassExports = objc_classes! {
               forKey:(id)key {
     let point_string = NSStringFromCGPoint(env, point);
     () = msg![env; this encodeObject:point_string forKey:key];
+}
+
+- (())encodeCGRect:(CGRect)rect
+             forKey:(id)key {
+    let rect_string = NSStringFromCGRect(env, rect);
+    () = msg![env; this encodeObject:rect_string forKey:key];
 }
 
 - (())encodeBytes:(ConstPtr<u8>)bytes
@@ -330,7 +336,7 @@ fn encode_object_for_key(env: &mut Environment, archiver: id, object: id, normal
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frameworks::core_graphics::CGPoint;
+    use crate::frameworks::core_graphics::{CGPoint, CGRect, CGSize};
 
     #[test]
     fn cgpoint_category_round_trips_through_keyed_archive() {
@@ -349,6 +355,33 @@ mod tests {
         let unarchiver: id = msg_class![env; NSKeyedUnarchiver alloc];
         let unarchiver: id = msg![env; unarchiver initForReadingWithData:data];
         let actual: CGPoint = msg![env; unarchiver decodeCGPointForKey:key];
+        assert_eq!(actual, expected);
+        release(env, unarchiver);
+        release(env, archiver);
+        release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
+
+
+    #[test]
+    fn cgrect_category_round_trips_through_keyed_archive() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let key = get_static_str(env, "rect");
+        let archiver: id = msg_class![env; NSKeyedArchiver new];
+        let expected = CGRect {
+            origin: CGPoint { x: -3.5, y: 8.25 },
+            size: CGSize { width: 320.0, height: 44.0 },
+        };
+        () = msg![env; archiver encodeCGRect:expected forKey:key];
+        let data: id = msg![env; archiver encodedData];
+        let unarchiver: id = msg_class![env; NSKeyedUnarchiver alloc];
+        let unarchiver: id = msg![env; unarchiver initForReadingWithData:data];
+        let actual: CGRect = msg![env; unarchiver decodeCGRectForKey:key];
         assert_eq!(actual, expected);
         release(env, unarchiver);
         release(env, archiver);

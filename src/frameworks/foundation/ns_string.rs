@@ -988,6 +988,10 @@ pub const CLASSES: ClassExports = objc_classes! {
         num
     }
 
+    if other == nil {
+        let regs = env.cpu.regs();
+        log!("NSString compare:options: received nil: receiver={:?} mask={:#x} pc={:#x} lr={:#x}; preserving native-contract failure", this, mask, regs[15], regs[14]);
+    }
     assert_ne!(other, nil);
 
     // TODO: support foreign subclasses (perhaps via a helper function that

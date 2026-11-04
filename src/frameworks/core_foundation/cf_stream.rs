@@ -122,9 +122,33 @@ fn CFWriteStreamSetClient(
     false
 }
 
+fn CFWriteStreamScheduleWithRunLoop(
+    env: &mut Environment,
+    stream: CFWriteStreamRef,
+    run_loop: id,
+    mode: CFStringRef,
+) {
+    if stream != nil {
+        () = msg![env; stream scheduleInRunLoop:run_loop forMode:mode];
+    }
+}
+
+fn CFWriteStreamUnscheduleFromRunLoop(
+    env: &mut Environment,
+    stream: CFWriteStreamRef,
+    run_loop: id,
+    mode: CFStringRef,
+) {
+    if stream != nil {
+        () = msg![env; stream removeFromRunLoop:run_loop forMode:mode];
+    }
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFStreamCreatePairWithSocketToHost(_, _, _, _, _)),
     export_c_func!(CFWriteStreamSetClient(_, _, _, _)),
+    export_c_func!(CFWriteStreamScheduleWithRunLoop(_, _, _)),
+    export_c_func!(CFWriteStreamUnscheduleFromRunLoop(_, _, _)),
     export_c_func!(CFReadStreamCreateWithFile(_, _)),
     export_c_func!(CFReadStreamOpen(_)),
     export_c_func!(CFReadStreamRead(_, _, _)),
@@ -164,6 +188,8 @@ mod tests {
             MutVoidPtr::null(),
             MutVoidPtr::null(),
         ));
+        CFWriteStreamScheduleWithRunLoop(env, nil, nil, nil);
+        CFWriteStreamUnscheduleFromRunLoop(env, nil, nil, nil);
         // Balance the Create Rule of from_rust_string. The URL convenience
         // results are autoreleased by NSURL itself.
         release(env, path);

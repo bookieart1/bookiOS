@@ -42,6 +42,18 @@ const CLASSES: ClassExports = objc_classes! {
     length <= 140
 }
 
+- (())setCompletionHandler:(id)_handler {
+    // Blocks that escape their caller require Block_copy semantics, which the
+    // runtime does not yet implement. Accept the historical setter so an app
+    // can follow canSendTweet == false, but do not retain a stack block or
+    // fabricate a completion callback.
+    log!("Twitter composer is unavailable; completion handler was not retained");
+}
+
+- (id)completionHandler {
+    nil
+}
+
 @end
 
 };
@@ -68,6 +80,9 @@ mod tests {
         let long = ns_string::from_rust_string(env, "x".repeat(141));
         let accepted: bool = msg![env; composer setInitialText:long];
         assert!(!accepted);
+        () = msg![env; composer setCompletionHandler:nil];
+        let completion: id = msg![env; composer completionHandler];
+        assert_eq!(completion, nil);
         release(env, long);
         release(env, short);
         release(env, composer);

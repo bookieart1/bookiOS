@@ -790,6 +790,11 @@ fn fcntl(
     // TODO: handle errno properly
     set_errno(env, 0);
 
+    if fd < 0 {
+        set_errno(env, EBADF);
+        return -1;
+    }
+
     if fd >= NORMAL_FILENO_BASE
         && env
             .libc_state
@@ -1150,4 +1155,16 @@ fn validate_lock(env: &mut Environment, fd: FileDescriptor, lock: &flock) -> Res
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fcntl_on_negative_descriptor_reports_bad_file_descriptor() {
+        let mut env = Environment::new_fake_for_test();
+        assert_eq!(fcntl(&mut env, -1, F_GETFL, MutVoidPtr::null()), -1);
+        assert_eq!(crate::libc::errno::get_errno(&mut env), EBADF);
+    }
 }

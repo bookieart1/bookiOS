@@ -42,6 +42,12 @@ fn CFStringGetTypeID(_env: &mut Environment) -> CFTypeID {
     CF_STRING_TYPE_ID
 }
 
+fn CFStringGetSystemEncoding(_env: &mut Environment) -> CFStringEncoding {
+    // The historical iPhone OS system encoding is MacRoman. This is the
+    // documented Core Foundation fallback, not the user's preferred locale.
+    kCFStringEncodingMacRoman
+}
+
 fn CFStringAppend(
     env: &mut Environment,
     the_string: CFMutableStringRef,
@@ -508,6 +514,7 @@ fn CFStringNormalize(
 
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFStringGetTypeID()),
+    export_c_func!(CFStringGetSystemEncoding()),
     export_c_func!(CFStringAppend(_, _)),
     export_c_func!(CFStringAppendCString(_, _, _)),
     export_c_func!(CFStringAppendFormat(_, _, _, _)),
@@ -554,6 +561,8 @@ mod tests {
 
     #[test]
     fn supported_iana_charset_names_are_canonical() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        assert_eq!(CFStringGetSystemEncoding(&mut env), kCFStringEncodingMacRoman);
         assert_eq!(
             iana_charset_name(kCFStringEncodingMacRoman),
             Some("macintosh")

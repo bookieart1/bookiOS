@@ -20,6 +20,9 @@ struct PickerInput: Decodable {
         let name: String
         /// Stable key used only for the user's picker classification override.
         let identifier: String
+        /// The imported IPA/app filename. Unlike the bundle identifier, this
+        /// distinguishes two installed builds of the same game.
+        let libraryKey: String
         let iconWidth: Int
         let iconHeight: Int
         let hasIcon: Bool
@@ -423,6 +426,17 @@ final class PickerModel: ObservableObject {
         }
     }
 
+    /// Apps discovered after the picker first established its library
+    /// baseline. This is deliberately independent of compatibility status.
+    @Published var newAppKeys: Set<String> {
+        didSet {
+            UserDefaults.standard.set(
+                newAppKeys.sorted(),
+                forKey: appPickerNewLibraryKeysKey
+            )
+        }
+    }
+
     func compatibility(for index: Int) -> String {
         let app = input.apps[index]
         return compatibilityOverrides[app.identifier] ?? app.compatibility
@@ -438,6 +452,14 @@ final class PickerModel: ObservableObject {
         classificationApp = nil
     }
 
+    func isNew(_ index: Int) -> Bool {
+        newAppKeys.contains(input.apps[index].libraryKey)
+    }
+
+    func markSeen(_ index: Int) {
+        newAppKeys.remove(input.apps[index].libraryKey)
+    }
+
     var filteredAppIndices: [Int] {
         input.apps.indices.filter { index in
             switch appFilter {
@@ -447,6 +469,8 @@ final class PickerModel: ObservableObject {
                 return compatibility(for: index) == "playable"
             case .needsWork:
                 return compatibility(for: index) != "playable"
+            case .new:
+                return isNew(index)
             }
         }
     }
@@ -499,6 +523,30 @@ final class PickerModel: ObservableObject {
         compatibilityOverrides = UserDefaults.standard.dictionary(
             forKey: appPickerCompatibilityOverridesKey
         ) as? [String: String] ?? [:]
+        let defaults = UserDefaults.standard
+        let currentLibraryKeys = Set(input.apps.map(\.libraryKey))
+        if let known = defaults.stringArray(forKey: appPickerKnownLibraryKeysKey) {
+            let knownLibraryKeys = Set(known)
+            let stillNew = Set(
+                defaults.stringArray(forKey: appPickerNewLibraryKeysKey) ?? []
+            ).intersection(currentLibraryKeys)
+            newAppKeys = stillNew.union(
+                currentLibraryKeys.subtracting(knownLibraryKeys)
+            )
+            defaults.set(
+                knownLibraryKeys.union(currentLibraryKeys).sorted(),
+                forKey: appPickerKnownLibraryKeysKey
+            )
+        } else {
+            // Migration: the library present when this feature first appears
+            // is the baseline, not hundreds of falsely-labelled new games.
+            newAppKeys = []
+            defaults.set(
+                currentLibraryKeys.sorted(),
+                forKey: appPickerKnownLibraryKeysKey
+            )
+        }
+        defaults.set(newAppKeys.sorted(), forKey: appPickerNewLibraryKeysKey)
         quickOptionValues = input.quickOptions.map(\.defaultValue)
         showingStartError = input.startError != nil
         wallpaper = input.wallpaperPath.flatMap { UIImage(contentsOfFile: $0) }
@@ -745,6 +793,7 @@ final class PickerModel: ObservableObject {
 
     /// Rust turns the quick option values into option arguments.
     func pick(_ app: Int) {
+        markSeen(app)
         let lines = [String(app)] + quickOptionValues.map(String.init)
         result = lines.joined(separator: "\n")
     }
@@ -796,6 +845,8 @@ private let headerColorKey = "AppPickerHeaderColor"
 private let appPickerPageKey = "AppPickerPage"
 private let appPickerCompatibilityOverridesKey = "AppPickerCompatibilityOverrides"
 private let appPickerFilterKey = "AppPickerFilter"
+private let appPickerKnownLibraryKeysKey = "AppPickerKnownLibraryKeys"
+private let appPickerNewLibraryKeysKey = "AppPickerNewLibraryKeys"
 private let hideHeaderLogoKey = "AppPickerHideHeaderLogo"
 private let hideIconLabelsKey = "AppPickerHideIconLabels"
 private let footerBackgroundKey = "AppPickerFooterBackground"
@@ -805,6 +856,7 @@ enum AppFilter: String, CaseIterable, Hashable {
     case all
     case playable
     case needsWork
+    case new
 
     static var saved: AppFilter {
         UserDefaults.standard.string(forKey: appPickerFilterKey)
@@ -816,6 +868,7 @@ enum AppFilter: String, CaseIterable, Hashable {
         case .all: return "All Games"
         case .playable: return "Playable"
         case .needsWork: return "Needs Work"
+        case .new: return "New"
         }
     }
 
@@ -824,6 +877,7 @@ enum AppFilter: String, CaseIterable, Hashable {
         case .all: return "square.grid.2x2.fill"
         case .playable: return "checkmark.circle.fill"
         case .needsWork: return "wrench.and.screwdriver.fill"
+        case .new: return "sparkles"
         }
     }
 }
@@ -1086,6 +1140,12 @@ struct PickerView: View {
                     if model.compatibilityOverrides[model.input.apps[app].identifier] != nil {
                         Button("Use Built-in Status") {
                             model.setCompatibility(nil, for: app)
+                        }
+                    }
+                    if model.isNew(app) {
+                        Button("Mark as Seen") {
+                            model.markSeen(app)
+                            model.classificationApp = nil
                         }
                     }
                 }
@@ -1476,10 +1536,23 @@ struct IconGrid: View {
             ForEach(Array(range.enumerated()), id: \.element) { slot, filteredIndex in
                 let app = appIndices[filteredIndex]
                 let iconFrame = layout.iconFrame(slot: slot)
-                Image(uiImage: model.icons[app])
-                    .resizable()
-                    .opacity(model.pressedApp == app ? 0.5 : 1)
-                    .shadow(color: .black.opacity(0.35), radius: 3, y: 2)
+                ZStack(alignment: .topTrailing) {
+                    Image(uiImage: model.icons[app])
+                        .resizable()
+                        .opacity(model.pressedApp == app ? 0.5 : 1)
+                        .shadow(color: .black.opacity(0.35), radius: 3, y: 2)
+                    if model.isNew(app) {
+                        Text("NEW")
+                            .font(.system(size: 9, weight: .heavy, design: .rounded))
+                            .foregroundColor(.black)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(logoYellow)
+                            .clipShape(Capsule())
+                            .overlay(Capsule().stroke(.black.opacity(0.3), lineWidth: 1))
+                            .offset(x: 5, y: -5)
+                    }
+                }
                     .place(iconFrame)
                     .simultaneousGesture(
                         LongPressGesture(minimumDuration: 0.55, maximumDistance: 12)

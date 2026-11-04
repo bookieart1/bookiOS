@@ -158,6 +158,7 @@ fn glGetError(env: &mut Environment) -> GLenum {
     err
 }
 fn glEnable(env: &mut Environment, cap: GLenum) {
+    env.framework_state.opengles.note_visual_call("glEnable", [cap, 0, 0, 0]);
     with_ctx_and_mem(env, |gles, _mem| {
         unsafe { gles.Enable(cap) };
     });
@@ -166,6 +167,7 @@ fn glIsEnabled(env: &mut Environment, cap: GLenum) -> GLboolean {
     with_ctx_and_mem(env, |gles, _mem| unsafe { gles.IsEnabled(cap) })
 }
 fn glDisable(env: &mut Environment, cap: GLenum) {
+    env.framework_state.opengles.note_visual_call("glDisable", [cap, 0, 0, 0]);
     with_ctx_and_mem(env, |gles, _mem| {
         unsafe { gles.Disable(cap) };
     });
@@ -308,6 +310,7 @@ fn glAlphaFuncx(env: &mut Environment, func: GLenum, ref_: GLclampx) {
     with_ctx_and_mem(env, |gles, _mem| unsafe { gles.AlphaFuncx(func, ref_) })
 }
 fn glBlendFunc(env: &mut Environment, sfactor: GLenum, dfactor: GLenum) {
+    env.framework_state.opengles.note_visual_call("glBlendFunc", [sfactor, dfactor, 0, 0]);
     with_ctx_and_mem(env, |gles, _mem| unsafe {
         gles.BlendFunc(sfactor, dfactor)
     })
@@ -322,6 +325,10 @@ fn glColorMask(
     blue: GLboolean,
     alpha: GLboolean,
 ) {
+    env.framework_state.opengles.note_visual_call(
+        "glColorMask",
+        [red as u32, green as u32, blue as u32, alpha as u32],
+    );
     with_ctx_and_mem(env, |gles, _mem| unsafe {
         gles.ColorMask(red, green, blue, alpha)
     })
@@ -626,16 +633,28 @@ fn glIsVertexArrayOES(env: &mut Environment, array: GLuint) -> GLboolean {
 
 // Non-pointers
 fn glColor4f(env: &mut Environment, red: GLfloat, green: GLfloat, blue: GLfloat, alpha: GLfloat) {
+    env.framework_state.opengles.note_visual_call(
+        "glColor4f",
+        [red.to_bits(), green.to_bits(), blue.to_bits(), alpha.to_bits()],
+    );
     with_ctx_and_mem(env, |gles, _mem| unsafe {
         gles.Color4f(red, green, blue, alpha)
     })
 }
 fn glColor4x(env: &mut Environment, red: GLfixed, green: GLfixed, blue: GLfixed, alpha: GLfixed) {
+    env.framework_state.opengles.note_visual_call(
+        "glColor4x",
+        [red as u32, green as u32, blue as u32, alpha as u32],
+    );
     with_ctx_and_mem(env, |gles, _mem| unsafe {
         gles.Color4x(red, green, blue, alpha)
     })
 }
 fn glColor4ub(env: &mut Environment, red: GLubyte, green: GLubyte, blue: GLubyte, alpha: GLubyte) {
+    env.framework_state.opengles.note_visual_call(
+        "glColor4ub",
+        [red as u32, green as u32, blue as u32, alpha as u32],
+    );
     with_ctx_and_mem(env, |gles, _mem| unsafe {
         gles.Color4ub(red, green, blue, alpha)
     })
@@ -915,6 +934,7 @@ fn glDrawElements(
 
 // Clearing
 fn glClear(env: &mut Environment, mask: GLbitfield) {
+    env.framework_state.opengles.note_visual_call("glClear", [mask, 0, 0, 0]);
     env.framework_state
         .opengles
         .note_gl_error_candidate("glClear", [mask, 0, 0, 0]);
@@ -927,6 +947,10 @@ fn glClearColor(
     blue: GLclampf,
     alpha: GLclampf,
 ) {
+    env.framework_state.opengles.note_visual_call(
+        "glClearColor",
+        [red.to_bits(), green.to_bits(), blue.to_bits(), alpha.to_bits()],
+    );
     with_ctx_and_mem(env, |gles, _mem| unsafe {
         gles.ClearColor(red, green, blue, alpha)
     });
@@ -938,6 +962,10 @@ fn glClearColorx(
     blue: GLclampx,
     alpha: GLclampx,
 ) {
+    env.framework_state.opengles.note_visual_call(
+        "glClearColorx",
+        [red as u32, green as u32, blue as u32, alpha as u32],
+    );
     with_ctx_and_mem(env, |gles, _mem| unsafe {
         gles.ClearColorx(red, green, blue, alpha)
     });

@@ -31,6 +31,7 @@ struct UITableViewCellHostObject {
     selection_style: UITableViewCellSelectionStyle,
     selected: bool,
     highlighted: bool,
+    editing: bool,
 }
 impl_HostObject_with_superclass!(UITableViewCellHostObject);
 
@@ -51,6 +52,7 @@ impl Default for UITableViewCellHostObject {
             selection_style: 1,
             selected: false,
             highlighted: false,
+            editing: false,
         }
     }
 }
@@ -135,6 +137,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         selection_style: _,
         selected: _,
         highlighted: _,
+        editing: _,
     } = std::mem::take(env.objc.borrow_mut(this));
     release(env, reuse_identifier);
     release(env, content_view);
@@ -223,10 +226,17 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())setHighlighted:(bool)highlighted animated:(bool)_animated {
     env.objc.borrow_mut::<UITableViewCellHostObject>(this).highlighted = highlighted;
 }
+- (bool)isEditing {
+    env.objc.borrow::<UITableViewCellHostObject>(this).editing
+}
+- (())setEditing:(bool)editing animated:(bool)_animated {
+    env.objc.borrow_mut::<UITableViewCellHostObject>(this).editing = editing;
+}
 
 - (())prepareForReuse {
     env.objc.borrow_mut::<UITableViewCellHostObject>(this).selected = false;
     env.objc.borrow_mut::<UITableViewCellHostObject>(this).highlighted = false;
+    env.objc.borrow_mut::<UITableViewCellHostObject>(this).editing = false;
 }
 
 - (())layoutSubviews {
@@ -292,6 +302,14 @@ mod tests {
         () = msg![env; cell setSelected:true animated:false];
         let selected: bool = msg![env; cell isSelected];
         assert!(selected);
+        () = msg![env; cell setEditing:true animated:true];
+        let editing: bool = msg![env; cell isEditing];
+        assert!(editing);
+        () = msg![env; cell prepareForReuse];
+        let editing: bool = msg![env; cell isEditing];
+        let selected: bool = msg![env; cell isSelected];
+        assert!(!editing);
+        assert!(!selected);
         release(env, cell);
         release(env, reuse);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;

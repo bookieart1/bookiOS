@@ -27,6 +27,12 @@ mod tests {
         assert_eq!(interval, 0.25);
         let available: bool = msg![env; manager isDeviceMotionAvailable];
         assert!(!available);
+        () = msg![env; manager startDeviceMotionUpdates];
+        let active: bool = msg![env; manager isDeviceMotionActive];
+        let sample: id = msg![env; manager deviceMotion];
+        assert!(!active);
+        assert_eq!(sample, nil);
+        () = msg![env; manager stopDeviceMotionUpdates];
         release(env, manager);
     }
 }
@@ -65,6 +71,7 @@ struct CMMotionManagerHostObject {
     /// Strong reference to the latest polling sample while active.
     accelerometer_data: id,
     device_motion_update_interval: NSTimeInterval,
+    device_motion_active: bool,
 }
 impl Default for CMMotionManagerHostObject {
     fn default() -> Self {
@@ -73,6 +80,7 @@ impl Default for CMMotionManagerHostObject {
             accelerometer_update_interval: DEFAULT_UPDATE_INTERVAL,
             accelerometer_data: nil,
             device_motion_update_interval: DEFAULT_UPDATE_INTERVAL,
+            device_motion_active: false,
         }
     }
 }
@@ -163,6 +171,30 @@ const CLASSES: ClassExports = objc_classes! {
     env.objc
         .borrow_mut::<CMMotionManagerHostObject>(this)
         .device_motion_update_interval = interval;
+}
+
+- (())startDeviceMotionUpdates {
+    // Device motion requires a gyroscope. This emulated device reports that
+    // capability as unavailable, so starting cannot produce samples.
+    env.objc
+        .borrow_mut::<CMMotionManagerHostObject>(this)
+        .device_motion_active = false;
+}
+
+- (())stopDeviceMotionUpdates {
+    env.objc
+        .borrow_mut::<CMMotionManagerHostObject>(this)
+        .device_motion_active = false;
+}
+
+- (bool)isDeviceMotionActive {
+    env.objc
+        .borrow::<CMMotionManagerHostObject>(this)
+        .device_motion_active
+}
+
+- (id)deviceMotion {
+    nil
 }
 - (bool)isAccelerometerAvailable {
     // According to https://developer.apple.com/documentation/coremotion/getting-raw-accelerometer-events?language=objc,

@@ -17,6 +17,47 @@ use crate::objc::{
     SEL,
 };
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objc::msg_class;
+    use crate::Environment;
+
+    #[test]
+    fn selector_typed_argument_round_trips_through_invocation() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[Cpu::SP] = stack.to_bits() + 0x1000;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let target: id = msg_class![env; NSObject new];
+        let perform = env
+            .objc
+            .register_host_selector("performSelector:".to_owned(), &mut env.mem);
+        let description = env
+            .objc
+            .register_host_selector("description".to_owned(), &mut env.mem);
+        let signature: id = msg![env; target methodSignatureForSelector:perform];
+        assert_ne!(signature, nil);
+        let invocation: id =
+            msg_class![env; NSInvocation invocationWithMethodSignature:signature];
+        () = msg![env; invocation setTarget:target];
+        () = msg![env; invocation setSelector:perform];
+        let selector_argument = env.mem.alloc_and_write(description);
+        () = msg![env; invocation setArgument:selector_argument.cast() atIndex:2i32];
+        () = msg![env; invocation invoke];
+        let return_value = env.mem.alloc_and_write(nil);
+        () = msg![env; invocation getReturnValue:return_value.cast()];
+        assert_ne!(env.mem.read(return_value), nil);
+        env.mem.free(return_value.cast());
+        env.mem.free(selector_argument.cast());
+        release(env, target);
+        release(env, pool);
+        env.cpu.regs_mut()[Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
+}
+
 struct NSInvocationHostObject {
     /// `NSMethodSignature *`
     sig: id,
@@ -218,6 +259,11 @@ pub const CLASSES: ClassExports = objc_classes! {
             let arg = env.mem.read(arg_loc);
             env.mem.alloc_and_write(arg).cast()
         }
+        ":" => {
+            let arg_loc: MutPtr<SEL> = arg_loc.cast();
+            let arg = env.mem.read(arg_loc);
+            env.mem.alloc_and_write(arg).cast()
+        }
         "*" => {
             assert!(!arguments_retained); // TODO
             let arg_loc: MutPtr<MutPtr<u8>> = arg_loc.cast();
@@ -364,6 +410,12 @@ pub const CLASSES: ClassExports = objc_classes! {
                 let arg_val = env.mem.read(arg);
                 let regs = env.cpu.regs_mut();
                 write_next_arg::<id>(&mut reg_offset, regs, &mut env.mem, arg_val);
+            },
+            ":" => {
+                let arg: ConstPtr<SEL> = arg_slot.cast().cast_const();
+                let arg_val = env.mem.read(arg);
+                let regs = env.cpu.regs_mut();
+                write_next_arg::<SEL>(&mut reg_offset, regs, &mut env.mem, arg_val);
             },
             "f" => {
                 let arg: ConstPtr<f32> = arg_slot.cast().cast_const();

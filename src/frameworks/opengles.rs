@@ -17,7 +17,7 @@ use touchHLE_gl_bindings::gles11::types::GLenum;
 use crate::mem::ConstPtr;
 
 const GL_ERROR_CANDIDATES: usize = 32;
-const GL_VISUAL_HISTORY: usize = 32;
+const GL_VISUAL_HISTORY: usize = 64;
 
 #[derive(Clone, Copy, Default)]
 struct GlErrorCandidate {
@@ -195,8 +195,8 @@ mod tests {
             state.note_visual_call("glTexImage2D", [value, 0, 0, 0]);
         }
         state.note_gl_error_observation(0, "guest glGetError");
-        assert_eq!(state.gl_visual_history_written, 35);
-        assert_eq!(state.gl_visual_history[2].args[0], 34);
+        assert_eq!(state.gl_visual_history_written, 67);
+        assert_eq!(state.gl_visual_history[2].args[0], 66);
     }
 }
 
