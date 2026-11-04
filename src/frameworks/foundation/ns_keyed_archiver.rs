@@ -336,6 +336,10 @@ mod tests {
     fn cgpoint_category_round_trips_through_keyed_archive() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        // encodeCGPoint:forKey: places its final Objective-C argument on the
+        // ARM stack, so host-to-guest dispatch needs synthetic stack space.
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let pool: id = msg_class![env; NSAutoreleasePool new];
         let key = get_static_str(env, "point");
         let archiver: id = msg_class![env; NSKeyedArchiver new];
@@ -349,5 +353,7 @@ mod tests {
         release(env, unarchiver);
         release(env, archiver);
         release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }
