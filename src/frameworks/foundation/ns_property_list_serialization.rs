@@ -399,7 +399,10 @@ mod tests {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
         let _pool: id = msg_class![env; NSAutoreleasePool new];
-        let bytes = env.mem.alloc_and_write([0xdeu8, 0xad, 0xbe, 0xef]);
+        let bytes = env.mem.alloc(4);
+        env.mem
+            .bytes_at_mut(bytes.cast(), 4)
+            .copy_from_slice(&[0xdeu8, 0xad, 0xbe, 0xef]);
         let bytes = bytes.cast::<u8>().cast_const();
         let leaf: id = msg_class![env; NSMutableData dataWithBytes:bytes length:4u32];
         let array: id = msg_class![env; NSMutableArray new];

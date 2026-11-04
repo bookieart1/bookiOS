@@ -121,7 +121,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     // array schedules nothing. This preserves the observable next-iteration,
     // ordering and ownership contracts without pretending to emulate private
     // run-loop modes separately.
-    if modes == nil || msg![env; modes count] == 0u32 {
+    let mode_count: NSUInteger = if modes == nil {
+        0
+    } else {
+        msg![env; modes count]
+    };
+    if mode_count == 0 {
         return;
     }
     add_perform_request_with_order(env, this, target, selector, argument, Some(0.0), false, order);

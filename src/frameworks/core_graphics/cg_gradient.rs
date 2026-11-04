@@ -203,10 +203,14 @@ mod tests {
 
         let mut env = Environment::new_fake_for_test_with_thread();
         let color_space = CGColorSpaceCreateDeviceRGB(&mut env);
-        let components = env.mem.alloc_and_write([
-            1.0f32, 0.0, 0.0, 1.0, 0.0, 0.5, 1.0, 0.25,
-        ]);
-        let locations = env.mem.alloc_and_write([0.25f32, 0.75]);
+        let component_values = [1.0f32, 0.0, 0.0, 1.0, 0.0, 0.5, 1.0, 0.25];
+        let components = env.mem.alloc(8 * 4).cast::<f32>();
+        for (index, value) in component_values.into_iter().enumerate() {
+            env.mem.write(components + index as u32, value);
+        }
+        let locations = env.mem.alloc(2 * 4).cast::<f32>();
+        env.mem.write(locations, 0.25f32);
+        env.mem.write(locations + 1, 0.75f32);
         let gradient = CGGradientCreateWithColorComponents(
             &mut env,
             color_space,

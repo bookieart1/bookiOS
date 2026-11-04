@@ -362,9 +362,12 @@ mod tests {
     fn stale_abort_flag_is_reset_by_a_new_parse() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let xml = b"<root />";
-        let bytes = env.mem.alloc_and_write(*xml);
-        let bytes = bytes.cast::<u8>().cast_const();
         let length = xml.len() as u32;
+        let bytes = env.mem.alloc(length);
+        env.mem
+            .bytes_at_mut(bytes.cast(), length)
+            .copy_from_slice(xml);
+        let bytes = bytes.cast::<u8>().cast_const();
         let data: id = msg_class![&mut env; NSData dataWithBytes:bytes length:length];
         let parser: id = msg_class![&mut env; NSXMLParser alloc];
         let parser: id = msg![&mut env; parser initWithData:data];

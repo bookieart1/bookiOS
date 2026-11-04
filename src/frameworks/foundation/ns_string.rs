@@ -12,9 +12,7 @@ mod path_algorithms;
 
 use super::ns_error::{NSCocoaErrorDomain, NSFilePathErrorKey, NSFileReadNoSuchFileError};
 use super::ns_keyed_archiver::set_value_to_encode_for_current_key;
-use super::ns_url_connection::{
-    make_url_error_for_url, NSErrorFailingURLStringKey, NSURLErrorNotConnectedToInternet,
-};
+use super::ns_url_connection::{make_url_error_for_url, NSURLErrorNotConnectedToInternet};
 use super::{ns_array, ns_dictionary, ns_keyed_unarchiver};
 use super::{
     unichar, NSComparisonResult, NSInteger, NSNotFound, NSOrderedAscending, NSOrderedDescending,
@@ -2867,7 +2865,10 @@ mod ns_string_tests {
         let code: NSInteger = msg![env; error code];
         assert_eq!(code, NSURLErrorNotConnectedToInternet);
         let user_info: id = msg![env; error userInfo];
-        let key = get_static_str(env, NSErrorFailingURLStringKey);
+        let key = get_static_str(
+            env,
+            crate::frameworks::foundation::ns_url_connection::NSErrorFailingURLStringKey,
+        );
         let failed_url: id = msg![env; user_info objectForKey:key];
         assert_eq!(to_rust_string(env, failed_url), "https://offline.invalid/ad.txt");
 
