@@ -336,6 +336,7 @@ mod tests {
     fn cgpoint_category_round_trips_through_keyed_archive() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
         let key = get_static_str(env, "point");
         let archiver: id = msg_class![env; NSKeyedArchiver new];
         let expected = CGPoint { x: 1.5, y: -2.25 };
@@ -347,5 +348,6 @@ mod tests {
         assert_eq!(actual, expected);
         release(env, unarchiver);
         release(env, archiver);
+        release(env, pool);
     }
 }
