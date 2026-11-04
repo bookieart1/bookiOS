@@ -61,7 +61,7 @@ const CLASSES: ClassExports = objc_classes! {
 #[cfg(test)]
 mod tests {
     use crate::frameworks::foundation::ns_string;
-    use crate::objc::{id, msg, msg_class, release};
+    use crate::objc::{id, msg, msg_class, nil, release};
     use crate::Environment;
 
     #[test]

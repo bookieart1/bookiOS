@@ -790,8 +790,7 @@ fn fcntl(
     // TODO: handle errno properly
     set_errno(env, 0);
 
-    if fd < 0 {
-        set_errno(env, EBADF);
+    if reject_negative_fd(env, fd) {
         return -1;
     }
 
@@ -902,6 +901,14 @@ fn fcntl(
         _ => unimplemented!(),
     }
     0 // success
+}
+
+fn reject_negative_fd(env: &mut Environment, fd: FileDescriptor) -> bool {
+    if fd >= 0 {
+        return false;
+    }
+    set_errno(env, EBADF);
+    true
 }
 
 fn flock(env: &mut Environment, fd: FileDescriptor, operation: FLockFlag) -> i32 {
@@ -1164,7 +1171,7 @@ mod tests {
     #[test]
     fn fcntl_on_negative_descriptor_reports_bad_file_descriptor() {
         let mut env = Environment::new_fake_for_test();
-        assert_eq!(fcntl(&mut env, -1, F_GETFL, MutVoidPtr::null()), -1);
+        assert!(reject_negative_fd(&mut env, -1));
         assert_eq!(crate::libc::errno::get_errno(&mut env), EBADF);
     }
 }

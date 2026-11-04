@@ -586,7 +586,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 // Generic implementation for immutable dictionaries and real NSDictionary
 // subclasses. The concrete mutable dictionary keeps its direct implementation
-// below, but an immutable _touchHLE_NSDictionary must inherit this contract too.
+// below, but an immutable _touchHLE_NSDictionary must inherit this contract
+// too.
 - (id)allValues {
     let values: id = msg_class![env; NSMutableArray array];
     let enumerator: id = msg![env; this keyEnumerator];

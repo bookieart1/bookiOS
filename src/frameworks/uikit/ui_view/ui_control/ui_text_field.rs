@@ -14,7 +14,6 @@ use super::{
 };
 use crate::dyld::{ConstantExports, HostConstant};
 use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect};
-use crate::frameworks::foundation::ns_string::to_rust_string;
 use crate::frameworks::foundation::{ns_string, NSInteger, NSRange, NSUInteger};
 use crate::frameworks::uikit::ui_font::{UITextAlignment, UITextAlignmentLeft};
 use crate::frameworks::uikit::ui_view::ui_window::{

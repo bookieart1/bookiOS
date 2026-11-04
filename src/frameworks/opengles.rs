@@ -39,7 +39,6 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
     function_exports: &[gles_guest::FUNCTIONS],
 };
 
-#[derive(Default)]
 pub struct State {
     /// Current EAGLContext for each thread
     current_ctxs: std::collections::HashMap<crate::ThreadId, Option<crate::objc::id>>,
@@ -65,6 +64,23 @@ pub struct State {
     gl_visual_history: [GlVisualCall; GL_VISUAL_HISTORY],
     gl_visual_history_written: u64,
     gl_visual_history_dumped: bool,
+}
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            current_ctxs: Default::default(),
+            strings_cache: Default::default(),
+            input_diagnostic_remaining: 0,
+            input_diagnostic_emitted: 0,
+            input_draw_diagnostic_remaining: 0,
+            input_draw_diagnostic_emitted: 0,
+            gl_error_candidates: [GlErrorCandidate::default(); GL_ERROR_CANDIDATES],
+            gl_error_candidate_written: 0,
+            gl_visual_history: [GlVisualCall::default(); GL_VISUAL_HISTORY],
+            gl_visual_history_written: 0,
+            gl_visual_history_dumped: false,
+        }
+    }
 }
 impl State {
     fn current_ctx_for_thread(&mut self, thread: crate::ThreadId) -> &mut Option<crate::objc::id> {
