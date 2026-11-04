@@ -1,15 +1,19 @@
 # Cocos2d project resume point
 
-**Dev 2.25 implementation pending hosted validation (2026-11-04):** the full
-"exact missing system contracts" batch is implemented as general framework,
-libc, OpenGL and CommonCrypto behavior. The twelve affected titles are Cannon
-Cadets, Clowning Around, Cordy, Current, Guerrilla Bob, Kick the Buddy,
-Labyrinth 2, Mini Militia, Muffin Knight, Sonic Dash, Trainyard and
-ZombieSmash; Spoing is the sole general control. Cordy/Current validate the
-Dev 2.24 owned offline stream lifecycle that they have not yet exercised on a
-device. See [scope, changes, predictions and limits](dev-2.25-exact-system-contracts.md).
-No title is promoted before the phone pass. The universal recorder is
-unchanged.
+**Dev 2.25 delivered; physical test pending (2026-11-04):** the full "exact
+missing system contracts" batch is implemented as general framework, libc,
+OpenGL and CommonCrypto behavior at `18719b57629070ee53c8775402f1851eeb346d6c`.
+Final Windows and macOS library suites each pass 301/302; the only failure is
+the unchanged XML property-list fixture, while all new Dev 2.25 tests pass.
+IPA workflow `41808379942` succeeded and the verified unsigned arm64
+development artifact has SHA-256
+`e07f8f4631b217533f3d4b27abea3e4e7ae8f8555bacc92584c337111e40bad8`.
+The twelve affected titles are Cannon Cadets, Clowning Around, Cordy, Current,
+Guerrilla Bob, Kick the Buddy, Labyrinth 2, Mini Militia, Muffin Knight, Sonic
+Dash, Trainyard and ZombieSmash; Spoing is the sole general control. See
+[scope, changes, validation and limits](dev-2.25-exact-system-contracts.md).
+The universal recorder is unchanged. No title is promoted before the phone
+pass.
 
 **Dev 2.24 physical result (2026-11-04):** the complete requested device pass
 tested implementation `fb810996` from IPA workflow `41796486938`. The user

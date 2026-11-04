@@ -1,7 +1,8 @@
 # Cocos2d compatibility project: implementation roadmap
 
-**Dev 2.25 current milestone (2026-11-04):** implement and physically test the
-complete exact-contract batch documented in
+**Dev 2.25 current milestone (2026-11-04):** the complete exact-contract batch
+is implemented, hosted-validated and packaged; the remaining step is its
+physical test documented in
 [dev-2.25-exact-system-contracts.md](dev-2.25-exact-system-contracts.md). This
 advances twelve affected titles with ten independently attributable contracts
 and uses Spoing as the only general control. The next milestone must be chosen

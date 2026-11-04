@@ -4102,10 +4102,16 @@ for a vacant nonnegative descriptor (Sonic Dash), version-0 CFRunLoop source
 lifecycle (Trainyard), and copyable 32-bit incremental CommonCrypto SHA-1 state
 (ZombieSmash). Spoing is the sole general control.
 
-Contract tests and hosted build results are still pending at this ledger
-checkpoint. None of the twelve affected titles is promoted to working; each
-prediction is only that its recorded first boundary will be crossed. Detailed
-scope and limitations are in
+Final implementation `18719b57629070ee53c8775402f1851eeb346d6c` is packaged
+by successful unsigned IPA workflow `41808379942`. Windows and macOS each pass
+301/302 library tests; all new contract tests pass and the one failure is the
+unchanged XML property-list fixture. The verified arm64 development IPA is
+unsigned, embeds the final commit/run, retains the universal recorder, and has
+SHA-256 `e07f8f4631b217533f3d4b27abea3e4e7ae8f8555bacc92584c337111e40bad8`.
+
+None of the twelve affected titles is promoted to working; each prediction is
+only that its recorded first boundary will be crossed. Detailed scope and
+limitations are in
 `cocos2d-phase1/dev-2.25-exact-system-contracts.md`. The universal recorder is
 unchanged, and unrelated invalid-object, graphics, input and package clusters
 remain outside this build.

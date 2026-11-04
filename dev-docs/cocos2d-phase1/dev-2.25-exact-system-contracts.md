@@ -54,3 +54,28 @@ This build does not mix in invalid-object origin work, rendering corruption,
 input/orientation investigation, encrypted packages, or speculative network
 success. Those remain separate ranked clusters so this device result can be
 attributed to the exact contracts above.
+
+## Hosted validation and delivered artifact
+
+Final implementation commit: `18719b57629070ee53c8775402f1851eeb346d6c`.
+The first hosted passes exposed only compilation/test-fixture defects in the
+new tests; those were corrected before delivery. In final test workflow
+`41808379950`, Windows and macOS each ran 302 library tests: all 301 current
+tests, including every Dev 2.25 contract test, passed. The sole failure on both
+hosts is the unchanged XML property-list serialization fixture at
+`ns_property_list_serialization::xml_serialization_emits_xml_and_reports_no_error`.
+The macOS native Foundation copy/defaults reference passed. Formatting and the
+post-library integration/sanity steps were skipped by workflow configuration
+or because the known library fixture leaves the job failed; Android failed in
+its separate setup/lint lane, and the dedicated native-reference-only job was
+skipped. These are reported separately rather than treating the overall red
+badge as a Dev 2.25 contract failure.
+
+Unsigned IPA workflow `41808379942` completed successfully. The downloaded
+artifact is arm64, contains no code-signature load command or signature
+directory, contains no provisioning profile, uses
+`com.bookieart1.idared32bit.dev`, embeds the final commit and workflow run, and
+retains the universal flight-recorder default. IPA SHA-256:
+`e07f8f4631b217533f3d4b27abea3e4e7ae8f8555bacc92584c337111e40bad8`.
+Physical-device status remains pending; no affected title is promoted to
+working by compilation or package verification.
