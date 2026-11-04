@@ -294,13 +294,14 @@ mod tests {
     #[test]
     fn should_indent_while_editing_defaults_true_and_round_trips() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let cell: id = msg_class![&mut env; UITableViewCell new];
-        let initial: bool = msg![&mut env; cell shouldIndentWhileEditing];
+        let env = &mut env;
+        let cell: id = msg_class![env; UITableViewCell new];
+        let initial: bool = msg![env; cell shouldIndentWhileEditing];
         assert!(initial);
-        () = msg![&mut env; cell setShouldIndentWhileEditing:false];
-        let updated: bool = msg![&mut env; cell shouldIndentWhileEditing];
+        () = msg![env; cell setShouldIndentWhileEditing:false];
+        let updated: bool = msg![env; cell shouldIndentWhileEditing];
         assert!(!updated);
-        release(&mut env, cell);
+        release(env, cell);
     }
 
     #[test]

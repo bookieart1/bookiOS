@@ -108,8 +108,9 @@ impl CC_SHA1_CTX {
             used += take;
             input = &input[take..];
             if used == 64 {
-                let block = sha1::digest::core_api::Block::<sha1::Sha1Core>::clone_from_slice(&block);
-                sha1::compress(&mut hash, &[block]);
+                let compressed_block =
+                    sha1::digest::core_api::Block::<sha1::Sha1Core>::clone_from_slice(&block);
+                sha1::compress(&mut hash, &[compressed_block]);
                 used = 0;
                 block = [0; 64];
             }
@@ -126,7 +127,8 @@ impl CC_SHA1_CTX {
         padding.resize(1 + (119 - used) % 64, 0);
         padding.extend_from_slice(&message_bits.to_be_bytes());
         self.update(&padding);
-        debug_assert_eq!(self.num, 0);
+        let num = self.num;
+        debug_assert_eq!(num, 0);
         self.hash
             .map(u32::to_be_bytes)
             .as_flattened()
@@ -521,7 +523,8 @@ mod tests {
         let mut env = Environment::new_fake_for_test();
         let ctx = env.mem.alloc(std::mem::size_of::<CC_SHA1_CTX>() as u32).cast();
         let copy = env.mem.alloc(std::mem::size_of::<CC_SHA1_CTX>() as u32).cast();
-        let data = env.mem.alloc_and_write_bytes(b"abc");
+        let data = env.mem.alloc(3).cast::<u8>();
+        env.mem.bytes_at_mut(data, 3).copy_from_slice(b"abc");
         let digest = env.mem.alloc(20).cast::<u8>();
 
         assert_eq!(CC_SHA1_Init(&mut env, ctx), 1);

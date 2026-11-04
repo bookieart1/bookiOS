@@ -106,11 +106,13 @@ fn CFRunLoopSourceCreate(
     assert!(allocator == kCFAllocatorDefault || env.mem.read(allocator).is_system_default());
     assert!(!context.is_null());
     let context = env.mem.read(context);
-    assert_eq!(context.version, 0);
+    let version = context.version;
+    assert_eq!(version, 0);
 
     let mut info = context.info;
-    if !context.retain.to_ptr().is_null() {
-        info = context.retain.call_from_host(env, (info,));
+    let retain = context.retain;
+    if !retain.to_ptr().is_null() {
+        info = retain.call_from_host(env, (info,));
     }
     let class = env
         .objc
