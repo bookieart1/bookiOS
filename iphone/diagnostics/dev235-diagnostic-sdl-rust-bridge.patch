@@ -1,7 +1,7 @@
 diff --git a/src/video/uikit/SDL_uikitdiagnostics.h b/src/video/uikit/SDL_uikitdiagnostics.h
 --- a/src/video/uikit/SDL_uikitdiagnostics.h
 +++ b/src/video/uikit/SDL_uikitdiagnostics.h
-@@ -16 +16,5 @@
+@@ -13 +13,5 @@
 -extern void idared_native_presentation_diagnostic_event(const char *source, const char *detail);
 +/* SDL is linked into Cargo's Rust library before the final Swift executable
 + * exists. Enter through a Rust-owned symbol, which forwards to the Swift
