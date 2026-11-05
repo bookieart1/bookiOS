@@ -85,7 +85,6 @@ impl HostObject for UIFontHostObject {}
 pub type UILineBreakMode = NSInteger;
 pub const UILineBreakModeWordWrap: UILineBreakMode = 0;
 pub const UILineBreakModeCharacterWrap: UILineBreakMode = 1;
-#[allow(dead_code)]
 pub const UILineBreakModeClip: UILineBreakMode = 2;
 #[allow(dead_code)]
 pub const UILineBreakModeHeadTruncation: UILineBreakMode = 3;
@@ -441,10 +440,24 @@ fn convert_line_break_mode(ui_mode: UILineBreakMode) -> WrapMode {
     match ui_mode {
         UILineBreakModeWordWrap => WrapMode::Word,
         UILineBreakModeCharacterWrap => WrapMode::Char,
+        UILineBreakModeClip => WrapMode::Clip,
         // TODO: support this properly; fake support is so that UILabel works,
         // which has this as its default line break mode
         UILineBreakModeTailTruncation => WrapMode::Word,
         _ => unimplemented!("TODO: line break mode {}", ui_mode),
+    }
+}
+
+#[cfg(test)]
+mod dev_233_tests {
+    use super::*;
+
+    #[test]
+    fn clip_line_break_mode_is_a_non_wrapping_clip_contract() {
+        assert!(matches!(
+            convert_line_break_mode(UILineBreakModeClip),
+            WrapMode::Clip
+        ));
     }
 }
 

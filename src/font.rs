@@ -35,6 +35,8 @@ pub enum TextAlignment {
 pub enum WrapMode {
     Word,
     Char,
+    /// Keep each explicit line intact and clip it at the supplied width.
+    Clip,
 }
 
 /// Helper for [Font::draw], used for the `draw_glyph` callback.
@@ -352,6 +354,14 @@ impl Font {
 
             let unwrapped_line = line;
 
+            if wrap_mode == WrapMode::Clip {
+                lines.push((
+                    self.calculate_line_width(font_size, line).min(wrap_width.max(0.0)),
+                    line,
+                ));
+                continue;
+            }
+
             // Find points at which the line could be wrapped
             let mut wrap_points = Vec::new();
             match wrap_mode {
@@ -378,6 +388,7 @@ impl Font {
                         char_end += 1;
                     }
                 }
+                WrapMode::Clip => unreachable!("clip mode was handled before wrapping"),
             };
             wrap_points.push(line.len());
 

@@ -1,9 +1,9 @@
 # iDared 32-bit tested-app compatibility ledger
 
-Last reconciled: November 4, 2026
-Latest device-tested checkpoint: **iDared Dev 2.29**, implementation `94b8d061cc8563a8fbe7e07803cb97fb5fa6f924`, IPA workflow `41899732869`; two supplied logs cover the full requested pass.
-Latest built checkpoint: **iDared Dev 2.30**, implementation `de27d6015d71b426e74a6d42f296909d0f671342`; this is an instrumentation build and is not evidence of changed compatibility.
-Current activity: **Dev 2.31 is the authorized Dev 2.29 compatibility follow-up. It implements the exact later contracts for Bike Race Pro, Carnival, Labyrinth 2, Legends of Ooo, ParaPanic HD, The Sims 3 and Trism, and adds bounded causal evidence for 100 Chambers, Cannon Cadets, Current, Fieldrunners 2, Kick the Buddy, MX Mayhem and Wire Way. Dismount remains in the pass for bounded performance evidence; Spoing is the relevant healthy control. Hosted Fast Preflight, IPA packaging and physical-device behavior are not yet established.**
+Last reconciled: November 5, 2026
+Latest device-tested checkpoint: **iDared Dev 2.32**, implementation `9d568fc7526acc08f4ce6ee9185ca8fbff5e2cea`, IPA workflow `41990584956`; two supplied logs cover the requested pass.
+Latest built checkpoint: **iDared Dev 2.32**, implementation `9d568fc7526acc08f4ce6ee9185ca8fbff5e2cea`, unsigned IPA workflow `41990584956`; package/build evidence and the physical-device result remain separately qualified below.
+Current activity: **Dev 2.32 physical-device evidence is reconciled. Highway Rider reaches responsive gameplay but has major missing scene graphics; iStunt Reloaded Pro reaches its level-pack table but lacks level buttons and later stalls input; Sky Burger reaches name entry but tapping it terminates the host and now requires a matching native `.ips`; TowerBloxx reaches gameplay but fails during Home/guest teardown; Tiki Totems Premium remains a healthy control. The logs also expose exact later boundaries for 1112 ep.01, Junk Jack Retro, both Real Racing packages and Stick Stunt Biker. No subsequent implementation or IPA is authorized.**
 
 The maintainer review at the end of this ledger qualifies earlier implementation claims. In particular, Dev 1.47's font fallback is provisional, its arc implementation is approximate, and its date formatter is not locale/time-zone complete. Earlier sections are historical checkpoints, not a claim that all listed work is currently complete.
 
@@ -4394,3 +4394,85 @@ Complete hashes, per-title evidence, compatibility classification and preserved
 next actions are in `dev-2.29-device-result.md`. This checkpoint updates
 documentation only. It does not authorize or contain another implementation,
 commit, push, workflow or IPA.
+
+## Dev 2.31 physical-device result — November 5, 2026
+
+Three supplied logs verify implementation
+`62aefdd42441ead701cf79e72f8589fc965ac8b3` and workflow
+`41968860889`. Bike Race Pro, Labyrinth 2, Legends of Ooo, ParaPanic HD, The
+Sims 3 and Trism crossed their intended Dev 2.31 contract, but each exposed a
+later independent exception, null producer, model-loading requirement,
+graphics error or guest stall rather than becoming fully compatible.
+
+Carnival's implemented IMA4 path did not decode the real package because its
+AIFC `COMM` records use a zero sample-size field while the new code accepts
+only 16. This falsifies the fixture assumption, but historical/reference
+behavior must be checked before accepting zero. The user still hears almost no
+audio and observes sharp intermittent slowdown. Dismount remains interactive
+but averages about 15.6 presentations per second.
+
+Current still presents near 58.5 Hz and receives touches without guest-visible
+response. Kick the Buddy presents near 54.6 Hz and occasionally reacts audibly
+beneath black output. Fieldrunners 2 remains a silent pre-presentation guest
+wait, but the recurring blocked PCs now include instruction bytes suitable for
+offline symbolization. Wire Way remains active around 29 Hz after its pause or
+level-complete transition turns permanently black and silent.
+
+The full evidence hashes, per-title results, compatibility classifications and
+bounded next actions are preserved in `dev-2.31-device-result.md`. This is a
+documentation checkpoint only; no new source change, commit, push, workflow or
+IPA is authorized.
+
+## Dev 2.32 physical-device result — November 5, 2026
+
+Two supplied logs verify implementation
+`9d568fc7526acc08f4ce6ee9185ca8fbff5e2cea` and workflow
+`41990584956`. Highway Rider now reaches responsive gameplay, but its road and
+substantial scene content are missing, leaving gray geometry and invisible
+collision hazards. iStunt Reloaded Pro crosses its former plain-`UIView`
+producer: a real `UITableView` is present and level packs open, but level
+buttons are absent and repeated interaction later stops reaching the guest in
+a useful way. These are genuine advances, not functional compatibility.
+
+Sky Burger reaches its name prompt and then closes the entire iDared host when
+the prompt is tapped. Its log ends without an emulator panic or normal return,
+after repeated rejected frees of the same unknown address; a matching native
+iOS `.ips` report is required before making an emulator change. TowerBloxx
+reaches actual gameplay, but native Home produces a guest deadlock followed by
+autorelease/coroutine teardown panics. Tiki Totems Premium remains fully working
+in the user's tested scope and returns cleanly through Home.
+
+The remaining logs expose later exact boundaries: 1112 ep.01 reaches UIKit
+line-break mode `2`; Junk Jack Retro reaches missing
+`UITapGestureRecognizer`; both Real Racing packages reach
+`MPMediaPickerController initWithMediaTypes:`; Stick Stunt Biker still reaches
+an ASCII-only string assertion through a path not covered by the new legacy
+encoding contract; and Doodle Grub decodes a string where the game expects a
+color, requiring archive/save-origin analysis rather than relaxed dispatch.
+
+Complete evidence hashes, per-title classifications and preserved next actions
+are in `dev-2.32-device-result.md`. This checkpoint changes documentation only;
+it does not authorize or contain another implementation, push, workflow or IPA.
+
+## Dev 2.33 five-contract and bounded-diagnostic batch — November 5, 2026
+
+The user authorized the maximum coherent cross-ledger scope: five direct
+correction titles, all ten evidence-backed diagnostic experiments, and two
+relevant working controls. The five correction titles map to three general
+contracts: `UILineBreakModeClip` for 1112 ep.01, tap/pan gesture recognizers
+for Junk Jack Retro and BouncyMouse, and media-picker construction/property
+state for R.Racing GTI and Real Racing. The media-picker work is explicitly a
+partial service contract: it does not fabricate host music access or a selected
+item.
+
+The diagnostic titles receive bounded archive-key/result evidence (Doodle
+Grub), table reload/row/selection evidence (Bungee Ball and iStunt), expanded
+texture upload/copy history (Highway Rider, Kick the Buddy and Flip's Escape),
+and suspicious duplicate-autorelease provenance (JellyCar 1.5.4,
+MX Mayhem, SUPERFALL and TowerBloxx). CrazyGolf and Tiki Totems Premium are
+unchanged controls, not disguised compatibility attempts.
+
+Exact predictions, falsifiers, implementation limits and the full seventeen
+title test scope are preserved in `dev-2.33-contracts-and-diagnostics.md`.
+Local compile/targeted tests and hosted build evidence remain distinct from
+physical-device compatibility; no title is promoted by source work alone.

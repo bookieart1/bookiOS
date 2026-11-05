@@ -2202,6 +2202,24 @@ impl Environment {
             .unwrap_or_else(|| Text::from_bytes(b"<invalid>"));
         let refcount = self.objc.refcount_for_diagnostics(object).unwrap_or(0);
         let regs = self.cpu.regs();
+        let duplicate_in_pool = recorder.autorelease_enqueues.iter().any(|event| {
+            event.object == object.to_bits() && event.context == pool.to_bits()
+        });
+        if duplicate_in_pool {
+            recorder.watch_object(object.to_bits());
+            recorder.object_lifetime_events.push(ObjectLifetimeEvent {
+                sequence: recorder.object_lifetime_events.written.saturating_add(1),
+                thread: self.current_thread,
+                action: "suspicious-duplicate-autorelease",
+                object: object.to_bits(),
+                class,
+                before: refcount,
+                after: refcount,
+                pc: regs[15],
+                lr: regs[14],
+                context: pool.to_bits(),
+            });
+        }
         recorder.autorelease_enqueues.push(ObjectLifetimeEvent {
             sequence: recorder.autorelease_enqueues.written.saturating_add(1),
             thread: self.current_thread,

@@ -448,16 +448,22 @@ fn enumerate_apps(
     // Normalized display names, bundle identifiers and archive filenames cover
     // the mixed naming in this batch and keep every requested test reachable
     // even when an archive's display-name metadata differs from its filename.
-    const DEV_232_TEST_NAMES: &[&str] = &[
+    const DEV_233_TEST_NAMES: &[&str] = &[
         "1112EP01",
+        "BOUNCYMOUSE",
+        "BUNGEEBALL",
+        "CRAZYGOLF",
         "DOODLEGRUB",
+        "FLIPSESCAPE",
         "HIGHWAYRIDER",
         "ISTUNTRELOADEDPRO",
+        "COMWALABERJELLYCAR",
         "JUNKJACKRETRO",
+        "KICKTHEBUDDY",
+        "MXMAYHEM",
         "RRACINGGTI",
         "REALRACING",
-        "SKYBURGER",
-        "STICKSTUNTBIKER",
+        "SUPERFALL",
         "TIKITOTEMSPREMIUM",
         "TOWERBLOXX",
     ];
@@ -477,7 +483,7 @@ fn enumerate_apps(
                 .and_then(|name| name.to_str())
                 .unwrap_or_default(),
         );
-        let rank = DEV_232_TEST_NAMES
+        let rank = DEV_233_TEST_NAMES
             .iter()
             .position(|&name| {
                 [&display_name, &bundle_identifier, &filename]
@@ -1172,7 +1178,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.32",
+            "iDared 32bit {}{}{} · Dev 2.33",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""

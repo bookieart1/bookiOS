@@ -196,7 +196,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)decodeObjectForKey:(id)key { // NSString*
+    let diagnostic_key = to_rust_string(env, key).to_string();
     let Some(next_uid) = get_value_to_decode_for_key(env, this, key) else {
+        env.diagnostic_selector_event("unarchive-missing", this, nil, &diagnostic_key, nil, None);
         return nil;
     };
     let next_uid = next_uid.as_uid().copied().unwrap();
@@ -204,7 +206,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     // on behalf of the caller
     retain(env, object);
-    autorelease(env, object)
+    let object = autorelease(env, object);
+    env.diagnostic_selector_event("unarchive-result", this, object, &diagnostic_key, object, None);
+    object
 }
 
 - (ConstPtr<u8>)decodeBytesForKey:(id)key returnedLength:(MutPtr<NSUInteger>)length {

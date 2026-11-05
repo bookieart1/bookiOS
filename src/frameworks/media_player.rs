@@ -34,6 +34,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
 #[derive(Default)]
 pub struct State {
     movie_player: movie_player::State,
+    media_picker_controller: media_picker_controller::State,
 }
 
 /// For use by `NSRunLoop`: check media players' status, send notifications if

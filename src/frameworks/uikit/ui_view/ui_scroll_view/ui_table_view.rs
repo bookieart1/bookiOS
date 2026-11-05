@@ -131,6 +131,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     todo_objc_setter!(this, view);
 }
 - (())reloadData {
+    env.diagnostic_selector_event("table-reload-begin", this, nil, "reloadData", nil, None);
     let old_cells = std::mem::take(
         &mut env.objc.borrow_mut::<UITableViewHostObject>(this).visible_cells,
     );
@@ -220,6 +221,9 @@ pub const CLASSES: ClassExports = objc_classes! {
         host.section_row_counts = section_row_counts;
         host.visible_cells = cells;
     }
+    env.diagnostic_selector_event(
+        "table-reload-end", this, data_source, "reloadData", nil, Some(total_rows as f64)
+    );
     log_dbg!(
         "[(UITableView*) {:?} reloadData] laid out {} uniform rows",
         this,
@@ -381,6 +385,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     let flat = ((point.y + offset.y) / row_height).floor() as NSInteger;
     let selected = index_path_for_flat_row(&counts, flat);
     let Some((section, row)) = selected else {
+        env.diagnostic_selector_event("table-selection-miss", this, nil, "touchesEnded:", touch, None);
         return;
     };
     let index_path: id = msg_class![env; NSIndexPath indexPathForRow:row inSection:section];
@@ -391,6 +396,10 @@ pub const CLASSES: ClassExports = objc_classes! {
         );
         let responds: bool = msg![env; delegate respondsToSelector:selector];
         if responds {
+            env.diagnostic_selector_event(
+                "table-selection", this, delegate,
+                "tableView:didSelectRowAtIndexPath:", index_path, None
+            );
             () = msg![env; delegate tableView:this didSelectRowAtIndexPath:index_path];
         }
     }

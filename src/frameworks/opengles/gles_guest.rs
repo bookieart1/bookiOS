@@ -1415,6 +1415,10 @@ fn glCompressedTexImage2D(
     image_size: GLsizei,
     data: ConstVoidPtr,
 ) {
+    env.framework_state.opengles.note_visual_call(
+        "glCompressedTexImage2D",
+        [target, internalformat, ((width as u32) << 16) | (height as u32 & 0xffff), image_size as u32],
+    );
     with_ctx_and_mem(env, |gles, mem| unsafe {
         let data = mem
             .ptr_at(data.cast::<u8>(), image_size.try_into().unwrap())
@@ -1442,6 +1446,10 @@ fn glCopyTexImage2D(
     height: GLsizei,
     border: GLint,
 ) {
+    env.framework_state.opengles.note_visual_call(
+        "glCopyTexImage2D",
+        [target, internalformat, ((width as u32) << 16) | (height as u32 & 0xffff), ((x as u32) << 16) | (y as u32 & 0xffff)],
+    );
     with_ctx_and_mem(env, |gles, _mem| unsafe {
         gles.CopyTexImage2D(target, level, internalformat, x, y, width, height, border)
     })
@@ -1457,6 +1465,10 @@ fn glCopyTexSubImage2D(
     width: GLsizei,
     height: GLsizei,
 ) {
+    env.framework_state.opengles.note_visual_call(
+        "glCopyTexSubImage2D",
+        [target, ((xoffset as u32) << 16) | (yoffset as u32 & 0xffff), ((width as u32) << 16) | (height as u32 & 0xffff), ((x as u32) << 16) | (y as u32 & 0xffff)],
+    );
     with_ctx_and_mem(env, |gles, _mem| unsafe {
         gles.CopyTexSubImage2D(target, level, xoffset, yoffset, x, y, width, height)
     })
