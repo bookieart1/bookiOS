@@ -62,6 +62,16 @@ jobs:
       - name: Verify the exact candidate commit
         run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
+      # Diagnostic-only: keep the shared SDL submodule's public URL unchanged,
+      # then load the isolated observation commit from a small Git bundle in
+      # this candidate. Reverting this diagnostic commit restores the exact
+      # Dev 2.35 dependency without requiring an external SDL fork.
+      - name: Apply bounded Dev 2.35 UIKit diagnostics
+        run: |
+          git -C vendor/SDL fetch "$GITHUB_WORKSPACE/iphone/diagnostics/dev235-presentation-diagnostics.bundle" refs/heads/bookios/dev235-presentation-diagnostics
+          git -C vendor/SDL checkout --detach FETCH_HEAD
+          test "$(git -C vendor/SDL rev-parse HEAD)" = "07318edcc53abdc0ffa1ac5d53e585ba5489cf28"
+
       - name: Show build tools
         run: |
           xcodebuild -version

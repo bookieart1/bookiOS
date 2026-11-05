@@ -25,10 +25,15 @@ use sdl2_sys::SDL_PowerState;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::f32::consts::{FRAC_PI_2, PI};
+#[cfg(target_os = "ios")]
+use std::ffi::CString;
 use std::num::NonZeroU32;
 use std::ptr::null_mut;
 #[cfg(target_os = "ios")]
-use std::sync::{atomic::{AtomicBool, Ordering}, OnceLock};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    OnceLock,
+};
 use std::time::{Duration, Instant};
 
 #[repr(C)]
@@ -187,10 +192,17 @@ pub type HostOrientationFn = unsafe extern "C" fn(i32);
 pub type HostPresentationFn = unsafe extern "C" fn(i32);
 
 #[cfg(target_os = "ios")]
+pub type HostDiagnosticFn =
+    unsafe extern "C" fn(*const std::ffi::c_char, *const std::ffi::c_char);
+
+#[cfg(target_os = "ios")]
 static HOST_ORIENTATION: OnceLock<HostOrientationFn> = OnceLock::new();
 
 #[cfg(target_os = "ios")]
 static HOST_PRESENTATION: OnceLock<HostPresentationFn> = OnceLock::new();
+
+#[cfg(target_os = "ios")]
+static HOST_DIAGNOSTIC: OnceLock<HostDiagnosticFn> = OnceLock::new();
 
 /// Registered by the final iOS executable, whose Swift code owns the host
 /// `UIWindowScene`. The Rust crate is also linked as a standalone dylib, so it
@@ -209,6 +221,27 @@ pub extern "C" fn idared_set_host_presentation(callback: HostPresentationFn) {
     let _ = HOST_PRESENTATION.set(callback);
 }
 
+/// Registered by the final iOS executable. The callback attaches the current
+/// native presentation sequence/owner/generation and forwards the event into
+/// Rust's retrievable device log.
+#[cfg(target_os = "ios")]
+#[no_mangle]
+pub extern "C" fn idared_set_host_diagnostic(callback: HostDiagnosticFn) {
+    let _ = HOST_DIAGNOSTIC.set(callback);
+}
+
+#[cfg(target_os = "ios")]
+fn host_presentation_diagnostic(source: &str, detail: &str) {
+    let (Ok(source), Ok(detail)) = (CString::new(source), CString::new(detail)) else {
+        return;
+    };
+    unsafe {
+        if let Some(report) = HOST_DIAGNOSTIC.get() {
+            report(source.as_ptr(), detail.as_ptr());
+        }
+    }
+}
+
 /// End guest orientation ownership before rebuilding or revealing the native
 /// picker. Resetting SDL's global mask matters because SDL's root controller
 /// can outlive the guest window briefly while UIKit presents the next window.
@@ -216,6 +249,10 @@ pub fn begin_picker_presentation() {
     #[cfg(target_os = "ios")]
     {
         sdl2::hint::set("SDL_IOS_ORIENTATIONS", "Portrait");
+        host_presentation_diagnostic(
+            "rust-picker-owner",
+            "SDL_IOS_ORIENTATIONS=Portrait ownership-return-requested",
+        );
         unsafe {
             if let Some(request) = HOST_PRESENTATION.get() {
                 request(0);
@@ -231,11 +268,14 @@ pub fn begin_picker_presentation() {
 /// Window is created or the emulated app rotates.
 pub fn begin_guest_presentation() {
     #[cfg(target_os = "ios")]
-    unsafe {
-        if let Some(request) = HOST_PRESENTATION.get() {
-            request(1);
-        } else {
-            log!("Host presentation bridge is unavailable; guest ownership not reported");
+    {
+        host_presentation_diagnostic("rust-guest-owner", "guest-ownership-requested");
+        unsafe {
+            if let Some(request) = HOST_PRESENTATION.get() {
+                request(1);
+            } else {
+                log!("Host presentation bridge is unavailable; guest ownership not reported");
+            }
         }
     }
 }
@@ -243,30 +283,34 @@ pub fn begin_guest_presentation() {
 /// Tell SDL2 what orientation we want. Only useful on Android.
 fn set_sdl2_orientation(orientation: DeviceOrientation) {
     // Despite the name, this hint works on Android too.
-    sdl2::hint::set(
-        "SDL_IOS_ORIENTATIONS",
-        match orientation {
-            DeviceOrientation::Portrait => "Portrait",
-            // The inversion is deliberate. These probably correspond to
-            // iPhone OS content orientations?
-            DeviceOrientation::PortraitUpsideDown => "PortraitUpsideDown",
-            DeviceOrientation::LandscapeLeft => "LandscapeRight",
-            DeviceOrientation::LandscapeRight => "LandscapeLeft",
-        },
-    );
+    let orientation_hint = match orientation {
+        DeviceOrientation::Portrait => "Portrait",
+        // The inversion is deliberate. These probably correspond to
+        // iPhone OS content orientations?
+        DeviceOrientation::PortraitUpsideDown => "PortraitUpsideDown",
+        DeviceOrientation::LandscapeLeft => "LandscapeRight",
+        DeviceOrientation::LandscapeRight => "LandscapeLeft",
+    };
+    sdl2::hint::set("SDL_IOS_ORIENTATIONS", orientation_hint);
     #[cfg(target_os = "ios")]
-    unsafe {
-        let Some(request) = HOST_ORIENTATION.get() else {
-            log!("Host orientation bridge is unavailable; leaving scene orientation unchanged");
-            return;
-        };
-        let orientation = match orientation {
-            DeviceOrientation::Portrait => 0,
-            DeviceOrientation::PortraitUpsideDown => 1,
-            DeviceOrientation::LandscapeLeft => 2,
-            DeviceOrientation::LandscapeRight => 3,
-        };
-        request(orientation);
+    {
+        host_presentation_diagnostic(
+            "rust-sdl-orientation",
+            &format!("device-orientation={orientation:?} SDL_IOS_ORIENTATIONS={orientation_hint}"),
+        );
+        unsafe {
+            let Some(request) = HOST_ORIENTATION.get() else {
+                log!("Host orientation bridge is unavailable; leaving scene orientation unchanged");
+                return;
+            };
+            let orientation = match orientation {
+                DeviceOrientation::Portrait => 0,
+                DeviceOrientation::PortraitUpsideDown => 1,
+                DeviceOrientation::LandscapeLeft => 2,
+                DeviceOrientation::LandscapeRight => 3,
+            };
+            request(orientation);
+        }
     }
 }
 
@@ -508,7 +552,13 @@ impl Window {
         // value of 1 asks UIKit to auto-hide the visual Home indicator without
         // deferring the real system gesture to a second swipe.
         #[cfg(target_os = "ios")]
-        sdl2::hint::set("SDL_IOS_HIDE_HOME_INDICATOR", "1");
+        {
+            sdl2::hint::set("SDL_IOS_HIDE_HOME_INDICATOR", "1");
+            host_presentation_diagnostic(
+                "rust-home-indicator-hint",
+                "SDL_IOS_HIDE_HOME_INDICATOR=1 set-before-window-creation",
+            );
+        }
 
         // The "hidapi" feature of rust-sdl2 is enabled so that sdl2::sensor
         // is available, but we don't want to enable SDL's HIDAPI controller

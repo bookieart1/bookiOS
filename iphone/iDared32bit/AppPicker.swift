@@ -70,6 +70,9 @@ private func idaredPickerPerformanceEvent(
     _ elapsedUs: UInt64
 )
 
+@_silgen_name("idared_host_presentation_diagnostic_event")
+private func idaredHostPresentationDiagnosticEvent(_ event: UnsafePointer<CChar>)
+
 @_silgen_name("idared_purge_retained_picker_catalog")
 private func idaredPurgeRetainedPickerCatalog()
 
@@ -92,6 +95,10 @@ private func reportPickerPerformance(
     event.withCString {
         idaredPickerPerformanceEvent(input.performanceScanID, $0, elapsedUs)
     }
+}
+
+private func reportHostPresentationDiagnostic(_ event: String) {
+    event.withCString { idaredHostPresentationDiagnosticEvent($0) }
 }
 
 /// Games opened with "Open in iDared 32bit", waiting for the picker.
@@ -256,6 +263,7 @@ public func idaredSwiftUIAppPicker(
     }
     // Let the picked icon's highlight show before the app starts.
     let selectionObserved = performanceNow()
+    HostPresentationCoordinator.pickerSelectionObserved()
     RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
 
     HostPresentationCoordinator.setPickerVisible(false)
@@ -407,6 +415,7 @@ private enum HostPresentationCoordinator {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var owner = HostPresentationOwner.picker
     nonisolated(unsafe) private static var generation: UInt64 = 0
+    nonisolated(unsafe) private static var sequenceID: UInt64 = 0
     nonisolated(unsafe) private static var pickerVisible = false
     nonisolated(unsafe) private static var transitionActive = false
     nonisolated(unsafe) private static var requestInFlight = false
@@ -417,6 +426,87 @@ private enum HostPresentationCoordinator {
         return HostPresentationToken(owner: owner, generation: generation)
     }
 
+    private static func diagnosticState() -> (
+        sequence: UInt64,
+        owner: HostPresentationOwner,
+        generation: UInt64,
+        pickerVisible: Bool,
+        transitionActive: Bool,
+        requestInFlight: Bool
+    ) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (
+            sequenceID,
+            owner,
+            generation,
+            pickerVisible,
+            transitionActive,
+            requestInFlight
+        )
+    }
+
+    private static func objectLabel(_ object: AnyObject?) -> String {
+        guard let object else { return "none" }
+        let pointer = Unmanaged.passUnretained(object).toOpaque()
+        return "\(String(describing: type(of: object)))@\(pointer)"
+    }
+
+    private static func emit(_ event: String, _ detail: String = "") {
+        let state = diagnosticState()
+        let suffix = detail.isEmpty ? "" : " \(detail)"
+        reportHostPresentationDiagnostic(
+            String(
+                format: "seq=%llu uptime=%.6f owner=%@ generation=%llu pickerVisible=%@ transitionActive=%@ requestInFlight=%@ event=%@%@",
+                state.sequence,
+                performanceNow(),
+                state.owner.label,
+                state.generation,
+                state.pickerVisible ? "yes" : "no",
+                state.transitionActive ? "yes" : "no",
+                state.requestInFlight ? "yes" : "no",
+                event,
+                suffix
+            )
+        )
+    }
+
+    static func nativeEvent(source: String, detail: String) {
+        emit("native-event", "source=\(source) \(detail)")
+    }
+
+    static func pickerSelectionObserved() {
+        lock.lock()
+        sequenceID &+= 1
+        let newSequence = sequenceID
+        lock.unlock()
+        emit("picker-selection", "newSequence=\(newSequence)")
+        hierarchySnapshot("picker-selection-observed")
+    }
+
+    static func hierarchySnapshot(_ point: String) {
+        let report = {
+            guard let scene = activeWindowScene() else {
+                emit("hierarchy", "point=\(point) scene=none")
+                return
+            }
+            let windows = scene.windows.enumerated().map { index, window in
+                let root = window.rootViewController
+                let top = topViewController(root)
+                return "w\(index){id=\(objectLabel(window)),key=\(window.isKeyWindow),hidden=\(window.isHidden),alpha=\(String(format: \"%.2f\", window.alpha)),level=\(window.windowLevel.rawValue),root=\(objectLabel(root)),top=\(objectLabel(top))}"
+            }.joined(separator: ";")
+            emit(
+                "hierarchy",
+                "point=\(point) scene=\(objectLabel(scene)) interfaceOrientation=\(scene.interfaceOrientation.rawValue) windows=[\(windows)]"
+            )
+        }
+        if Thread.isMainThread {
+            report()
+        } else {
+            DispatchQueue.main.async(execute: report)
+        }
+    }
+
     private static func isCurrent(_ token: HostPresentationToken) -> Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -425,6 +515,8 @@ private enum HostPresentationCoordinator {
 
     static func setOwner(_ newOwner: HostPresentationOwner) {
         lock.lock()
+        let oldOwner = owner
+        let oldGeneration = generation
         generation &+= 1
         owner = newOwner
         pickerVisible = false
@@ -432,6 +524,12 @@ private enum HostPresentationCoordinator {
         requestInFlight = false
         let newToken = HostPresentationToken(owner: owner, generation: generation)
         lock.unlock()
+
+        emit(
+            "owner-change",
+            "oldOwner=\(oldOwner.label) oldGeneration=\(oldGeneration) newOwner=\(newOwner.label) newGeneration=\(newToken.generation)"
+        )
+        hierarchySnapshot("owner-changed-to-\(newOwner.label)")
 
         let report = {
             guard isCurrent(newToken) else { return }
@@ -475,15 +573,21 @@ private enum HostPresentationCoordinator {
             token: current,
             preferredController: controller
         )
+        hierarchySnapshot("picker-controller-installed-before-window-visible")
     }
 
     static func setPickerVisible(_ visible: Bool) {
         lock.lock()
         pickerVisible = visible
         lock.unlock()
+        emit("picker-visibility", "visible=\(visible)")
+        hierarchySnapshot(visible ? "picker-visible" : "picker-hidden")
     }
 
-    static func transitionWillBegin(to size: CGSize) {
+    static func transitionWillBegin(
+        to size: CGSize,
+        coordinator: UIViewControllerTransitionCoordinator
+    ) {
         lock.lock()
         transitionActive = true
         let currentOwner = owner
@@ -500,9 +604,16 @@ private enum HostPresentationCoordinator {
             visible ? "yes" : "no",
             inFlight ? "yes" : "no"
         )
+        emit(
+            "picker-transition-begin",
+            "targetSize=\(String(format: \"%.0fx%.0f\", size.width, size.height)) duration=\(String(format: \"%.3f\", coordinator.transitionDuration)) animated=\(coordinator.isAnimated) interactive=\(coordinator.isInteractive) initiallyInteractive=\(coordinator.initiallyInteractive) capturedOwner=\(currentOwner.label) capturedGeneration=\(currentGeneration) capturedVisible=\(visible) capturedInFlight=\(inFlight) sceneOrientation=\(activeWindowScene()?.interfaceOrientation.rawValue ?? 0)"
+        )
+        hierarchySnapshot("picker-transition-begin")
     }
 
-    static func transitionDidComplete() {
+    static func transitionDidComplete(
+        context: UIViewControllerTransitionCoordinatorContext
+    ) {
         lock.lock()
         transitionActive = false
         let currentOwner = owner
@@ -516,6 +627,14 @@ private enum HostPresentationCoordinator {
             activeWindowScene()?.interfaceOrientation.rawValue ?? 0,
             visible ? "yes" : "no"
         )
+        emit(
+            "picker-transition-completion",
+            "capturedOwner=\(currentOwner.label) capturedGeneration=\(currentGeneration) capturedVisible=\(visible) cancelled=\(context.isCancelled) percentComplete=\(String(format: \"%.3f\", context.percentComplete)) completionVelocity=\(String(format: \"%.3f\", context.completionVelocity)) sceneOrientation=\(activeWindowScene()?.interfaceOrientation.rawValue ?? 0)"
+        )
+        hierarchySnapshot("picker-transition-completion")
+        DispatchQueue.main.async {
+            hierarchySnapshot("picker-post-transition-main-loop")
+        }
     }
 
     static func applyGuestOrientation(
@@ -541,6 +660,10 @@ private enum HostPresentationCoordinator {
     ) {
         guard isCurrent(token) else {
             let current = self.token()
+            emit(
+                "orientation-request-rejected-stale",
+                "source=\(source) raw=\(rawOrientation) requestedMask=0x\(String(mask.rawValue, radix: 16)) requestOwner=\(token.owner.label) requestGeneration=\(token.generation) currentOwner=\(current.owner.label) currentGeneration=\(current.generation)"
+            )
             NSLog(
                 "iDared host orientation ignored stale source=%@ raw=%d requestOwner=%@ requestGeneration=%llu currentOwner=%@ currentGeneration=%llu",
                 source,
@@ -553,6 +676,10 @@ private enum HostPresentationCoordinator {
             return
         }
         guard let scene = activeWindowScene() else {
+            emit(
+                "orientation-request-rejected-no-scene",
+                "source=\(source) raw=\(rawOrientation) requestedMask=0x\(String(mask.rawValue, radix: 16)) requestOwner=\(token.owner.label) requestGeneration=\(token.generation)"
+            )
             NSLog(
                 "iDared host orientation ignored no-scene source=%@ raw=%d owner=%@ generation=%llu",
                 source,
@@ -568,18 +695,38 @@ private enum HostPresentationCoordinator {
         }.joined(separator: ",")
         if let preferredController {
             preferredController.setNeedsUpdateOfSupportedInterfaceOrientations()
+            emit(
+                "supported-orientations-update-requested",
+                "source=\(source) target=preferred controller=\(objectLabel(preferredController))"
+            )
         } else {
             for window in scene.windows where !window.isHidden {
                 guard !(window.rootViewController is PickerHostingController) else { continue }
                 window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+                emit(
+                    "supported-orientations-update-requested",
+                    "source=\(source) target=visible-non-picker window=\(objectLabel(window)) controller=\(objectLabel(window.rootViewController))"
+                )
             }
         }
 
         lock.lock()
+        let priorRequestInFlight = requestInFlight
         requestInFlight = true
         let visible = pickerVisible
         let transition = transitionActive
         lock.unlock()
+        emit(
+            "orientation-request-accepted",
+            "source=\(source) raw=\(rawOrientation) requestedMask=0x\(String(mask.rawValue, radix: 16)) requestOwner=\(token.owner.label) requestGeneration=\(token.generation) scene=\(objectLabel(scene)) sceneOrientationBefore=\(scene.interfaceOrientation.rawValue) roots=[\(roots)] priorRequestInFlight=\(priorRequestInFlight)"
+        )
+        if priorRequestInFlight {
+            emit(
+                "orientation-request-overlaps-in-flight-bookkeeping",
+                "source=\(source) requestOwner=\(token.owner.label) requestGeneration=\(token.generation) note=no-request-was-cancelled-or-coalesced"
+            )
+        }
+        hierarchySnapshot("before-\(source)-geometry-request")
         NSLog(
             "iDared host orientation accepted source=%@ raw=%d owner=%@ generation=%llu current=%ld roots=%@ guestEnvironmentActive=%@ pickerVisible=%@ transitionActive=%@",
             source,
@@ -598,6 +745,10 @@ private enum HostPresentationCoordinator {
                 interfaceOrientations: mask
             )
             scene.requestGeometryUpdate(preferences) { error in
+                emit(
+                    "geometry-request-error",
+                    "source=\(source) requestOwner=\(token.owner.label) requestGeneration=\(token.generation) error=\(error.localizedDescription) sceneOrientation=\(scene.interfaceOrientation.rawValue)"
+                )
                 NSLog(
                     "iDared host orientation request failed source=%@ owner=%@ generation=%llu: %@",
                     source,
@@ -606,12 +757,26 @@ private enum HostPresentationCoordinator {
                     error.localizedDescription
                 )
             }
+            emit(
+                "geometry-request-submitted",
+                "source=\(source) requestOwner=\(token.owner.label) requestGeneration=\(token.generation) requestedMask=0x\(String(mask.rawValue, radix: 16)) sceneOrientationImmediatelyAfter=\(scene.interfaceOrientation.rawValue)"
+            )
         } else {
+            emit(
+                "legacy-attempt-rotation-submitted",
+                "source=\(source) requestOwner=\(token.owner.label) requestGeneration=\(token.generation)"
+            )
             UIViewController.attemptRotationToDeviceOrientation()
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            guard isCurrent(token) else { return }
+            let current = self.token()
+            let stillCurrent = isCurrent(token)
+            emit(
+                "internal-bookkeeping-timeout",
+                "source=\(source) requestOwner=\(token.owner.label) requestGeneration=\(token.generation) stillCurrent=\(stillCurrent) currentOwner=\(current.owner.label) currentGeneration=\(current.generation) sceneOrientation=\(scene.interfaceOrientation.rawValue) note=not-native-transition-completion"
+            )
+            guard stillCurrent else { return }
             lock.lock()
             requestInFlight = false
             let visible = pickerVisible
@@ -629,6 +794,18 @@ private enum HostPresentationCoordinator {
             )
         }
     }
+}
+
+/// Entry used by the vendored SDL UIKit backend. It deliberately adds only
+/// bounded lifecycle/query events and does not change any UIKit return value.
+@_cdecl("idared_native_presentation_diagnostic_event")
+public func idaredNativePresentationDiagnosticEvent(
+    _ sourcePointer: UnsafePointer<CChar>?,
+    _ detailPointer: UnsafePointer<CChar>?
+) {
+    let source = sourcePointer.map { String(cString: $0) } ?? "unknown"
+    let detail = detailPointer.map { String(cString: $0) } ?? ""
+    HostPresentationCoordinator.nativeEvent(source: source, detail: detail)
 }
 
 @_cdecl("idared_set_host_presentation_owner")
@@ -652,7 +829,17 @@ public func idaredRequestHostOrientation(_ rawOrientation: Int32) {
     default: return
     }
 
+    HostPresentationCoordinator.nativeEvent(
+        source: "swift-host-orientation-entry",
+        detail: "raw=\(rawOrientation) requestedMask=0x\(String(mask.rawValue, radix: 16)) mainThread=\(Thread.isMainThread)"
+    )
+    HostPresentationCoordinator.hierarchySnapshot("before-guest-orientation-request")
+
     guard let token = HostPresentationCoordinator.guestToken() else {
+        HostPresentationCoordinator.nativeEvent(
+            source: "swift-host-orientation-no-guest-owner",
+            detail: "raw=\(rawOrientation) requestedMask=0x\(String(mask.rawValue, radix: 16))"
+        )
         NSLog("iDared host orientation ignored without guest ownership raw=%d", rawOrientation)
         return
     }
@@ -1181,7 +1368,30 @@ final class PickerHostingController: UIHostingController<PickerView> {
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        .portrait
+        let mask = UIInterfaceOrientationMask.portrait
+        HostPresentationCoordinator.nativeEvent(
+            source: "picker-supported-orientations-query",
+            detail: "controller=\(String(describing: type(of: self))) resultMask=0x\(String(mask.rawValue, radix: 16)) sceneOrientation=\(view.window?.windowScene?.interfaceOrientation.rawValue ?? 0)"
+        )
+        return mask
+    }
+
+    override var shouldAutorotate: Bool {
+        let result = super.shouldAutorotate
+        HostPresentationCoordinator.nativeEvent(
+            source: "picker-should-autorotate-query",
+            detail: "controller=\(String(describing: type(of: self))) result=\(result) sceneOrientation=\(view.window?.windowScene?.interfaceOrientation.rawValue ?? 0)"
+        )
+        return result
+    }
+
+    override var prefersHomeIndicatorAutoHidden: Bool {
+        let result = super.prefersHomeIndicatorAutoHidden
+        HostPresentationCoordinator.nativeEvent(
+            source: "picker-home-indicator-query",
+            detail: "controller=\(String(describing: type(of: self))) result=\(result) sceneOrientation=\(view.window?.windowScene?.interfaceOrientation.rawValue ?? 0)"
+        )
+        return result
     }
 
     override func viewDidLayoutSubviews() {
@@ -1226,9 +1436,9 @@ final class PickerHostingController: UIHostingController<PickerView> {
         with coordinator: UIViewControllerTransitionCoordinator
     ) {
         super.viewWillTransition(to: size, with: coordinator)
-        HostPresentationCoordinator.transitionWillBegin(to: size)
-        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
-            HostPresentationCoordinator.transitionDidComplete()
+        HostPresentationCoordinator.transitionWillBegin(to: size, coordinator: coordinator)
+        coordinator.animate(alongsideTransition: nil) { [weak self] context in
+            HostPresentationCoordinator.transitionDidComplete(context: context)
             guard let self else { return }
             reportPickerPerformance(
                 self.model.input,

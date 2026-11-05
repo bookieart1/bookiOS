@@ -50,6 +50,19 @@ pub unsafe extern "C" fn idared_picker_performance_event(
     );
 }
 
+/// Receives bounded UIKit/SDL presentation diagnostics from the native iOS
+/// executable. Swift attaches the lifecycle sequence, ownership generation,
+/// and monotonic timestamp before forwarding the event here, so all decisive
+/// evidence lands in the same device Log.txt as the Rust runtime log.
+#[no_mangle]
+pub unsafe extern "C" fn idared_host_presentation_diagnostic_event(event: *const c_char) {
+    if event.is_null() {
+        return;
+    }
+    let event = unsafe { CStr::from_ptr(event) }.to_string_lossy();
+    echo!("Host Presentation Diagnostic: {}", event);
+}
+
 pub fn is_available() -> bool {
     PICKER.get().is_some()
 }
@@ -203,7 +216,7 @@ pub fn app_picker(
         }),
         json_string(branding),
         json_string(crate::DISPLAY_VERSION),
-        json_string("Dev 2.35"),
+        json_string("Dev 2.35 Diagnostic 1"),
         json_string(&crate::licenses::get_text()),
         optional(paths::url_for_opening_user_data_dir().ok()),
         json_string("https://iDared32bit-emu.com/"),
