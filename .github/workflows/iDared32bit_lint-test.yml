@@ -23,6 +23,10 @@ on:
         description: Build an IPA after a successful manual preflight
         type: boolean
         default: false
+      cold_cargo_cache:
+        description: Bypass Cargo cache restore/save for a diagnostic cold run
+        type: boolean
+        default: false
 
 # A newer ordinary development commit supersedes every job from an older one,
 # including queued/running preflight, IPA, Windows and Android work. Manual and
@@ -79,6 +83,8 @@ jobs:
     if: ${{ !inputs.native_reference_only && github.ref == 'refs/heads/ci/unsigned-ipa-baseline' }}
     runs-on: macos-15-intel
     timeout-minutes: 30
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target/host
     steps:
       - uses: actions/checkout@v4
         with:
@@ -92,6 +98,60 @@ jobs:
         run: |
           echo "Intentional preflight-gate test: the IPA job must remain skipped."
           exit 1
+      - name: Identify the host Rust cache boundary
+        id: host-rust
+        run: |
+          set -euo pipefail
+          rust_release="$(rustc -vV | awk '/^release:/ { print $2 }')"
+          test -n "$rust_release"
+          echo "release=$rust_release" | tee -a "$GITHUB_OUTPUT"
+      - name: Start host Cargo cache restore timer
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.cold_cargo_cache }}
+        run: echo "HOST_CACHE_RESTORE_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Restore host Cargo cache
+        id: host-cache-restore
+        if: ${{ github.event_name != 'workflow_dispatch' || !inputs.cold_cargo_cache }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .cargo-target/host
+          key: cargo-v1-${{ runner.os }}-${{ runner.arch }}-rust-${{ steps.host-rust.outputs.release }}-x86_64-apple-darwin-test-default-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'src/**/Cargo.toml', '.cargo/config.toml') }}-${{ github.sha }}
+          restore-keys: |
+            cargo-v1-${{ runner.os }}-${{ runner.arch }}-rust-${{ steps.host-rust.outputs.release }}-x86_64-apple-darwin-test-default-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'src/**/Cargo.toml', '.cargo/config.toml') }}-
+            cargo-v1-${{ runner.os }}-${{ runner.arch }}-rust-${{ steps.host-rust.outputs.release }}-x86_64-apple-darwin-test-default-
+      - name: Report host Cargo cache restore
+        if: ${{ always() && (github.event_name != 'workflow_dispatch' || !inputs.cold_cargo_cache) }}
+        env:
+          CACHE_HIT: ${{ steps.host-cache-restore.outputs.cache-hit }}
+          MATCHED_KEY: ${{ steps.host-cache-restore.outputs.cache-matched-key }}
+          PRIMARY_KEY: ${{ steps.host-cache-restore.outputs.cache-primary-key }}
+          RESTORE_OUTCOME: ${{ steps.host-cache-restore.outcome }}
+        run: |
+          set -euo pipefail
+          elapsed=$(($(date +%s) - HOST_CACHE_RESTORE_STARTED_AT))
+          if [[ "$RESTORE_OUTCOME" != "success" ]]; then
+            status="restore-error (cold recovery)"
+            rm -rf "$CARGO_TARGET_DIR" "$HOME/.cargo/registry" "$HOME/.cargo/git"
+          elif [[ "$CACHE_HIT" == "true" ]]; then
+            status="exact-hit"
+          elif [[ -n "$MATCHED_KEY" ]]; then
+            status="restore-prefix-hit"
+          else
+            status="miss"
+          fi
+          echo "Host Cargo cache: $status; restore ${elapsed}s"
+          echo "Requested key: $PRIMARY_KEY"
+          echo "Matched key: ${MATCHED_KEY:-<none>}"
+          {
+            echo "### Host Cargo cache restore"
+            echo "- Status: $status"
+            echo "- Duration: ${elapsed}s"
+            echo "- Requested: \`$PRIMARY_KEY\`"
+            echo "- Matched: \`${MATCHED_KEY:-<none>}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Restore CMake 3.31.6
         id: cache-cmake
         uses: actions/cache@v4
@@ -120,10 +180,63 @@ jobs:
         run: cd "$GITHUB_WORKSPACE/tests" && curl -L https://github.com/touchHLE/common-3.0-sdk/releases/latest/download/common-3.0.sdk-macOS-universal.tar.gz | tar xzv
       - name: Install the x86_64 macOS Rust target
         run: rustup target add x86_64-apple-darwin
+      - name: Start host Cargo compile timer
+        run: echo "HOST_CARGO_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
       - name: Compile and run the library tests
+        id: host-cargo-test
         run: cargo test --lib --target x86_64-apple-darwin
         env:
           CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+      - name: Report host Cargo compile time
+        if: ${{ always() }}
+        run: |
+          elapsed=$(($(date +%s) - HOST_CARGO_STARTED_AT))
+          echo "Host Cargo compile/test: ${elapsed}s"
+          echo "- Cargo compile/test: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+      - name: Measure host Cargo cache contents
+        if: ${{ success() && (github.event_name != 'workflow_dispatch' || !inputs.cold_cargo_cache) && steps.host-cache-restore.outputs.cache-hit != 'true' }}
+        run: |
+          set -euo pipefail
+          total_kib=0
+          for path in "$HOME/.cargo/registry" "$HOME/.cargo/git" "$CARGO_TARGET_DIR"; do
+            if [[ -e "$path" ]]; then
+              size_kib=$(du -sk "$path" | awk '{ print $1 }')
+              total_kib=$((total_kib + size_kib))
+              echo "$path: ${size_kib} KiB"
+            fi
+          done
+          echo "Host Cargo cache uncompressed size: ${total_kib} KiB"
+          echo "HOST_CACHE_SAVE_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+          echo "HOST_CACHE_SIZE_KIB=$total_kib" >> "$GITHUB_ENV"
+      - name: Save host Cargo cache
+        id: host-cache-save
+        if: ${{ success() && (github.event_name != 'workflow_dispatch' || !inputs.cold_cargo_cache) && steps.host-cache-restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .cargo-target/host
+          key: ${{ steps.host-cache-restore.outputs.cache-primary-key }}
+      - name: Report host Cargo cache save
+        if: ${{ always() && steps.host-cargo-test.outcome == 'success' }}
+        env:
+          SAVE_OUTCOME: ${{ steps.host-cache-save.outcome }}
+          CACHE_HIT: ${{ steps.host-cache-restore.outputs.cache-hit }}
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ inputs.cold_cargo_cache }}" == "true" ]]; then
+            message="bypassed by cold_cargo_cache"
+          elif [[ "$CACHE_HIT" == "true" ]]; then
+            message="skipped for exact cache hit"
+          elif [[ -n "${HOST_CACHE_SAVE_STARTED_AT:-}" ]]; then
+            elapsed=$(($(date +%s) - HOST_CACHE_SAVE_STARTED_AT))
+            message="${SAVE_OUTCOME}; ${elapsed}s; ${HOST_CACHE_SIZE_KIB:-unknown} KiB uncompressed"
+          else
+            message="not attempted"
+          fi
+          echo "Host Cargo cache save: $message"
+          echo "- Cache save: $message" >> "$GITHUB_STEP_SUMMARY"
 
   native-reference-only:
     if: ${{ inputs.native_reference_only }}
@@ -346,3 +459,5 @@ jobs:
         (github.event_name == 'push' || inputs.build_ipa)
       }}
     uses: ./.github/workflows/unsigned-ios-ipa.yml
+    with:
+      cold_cargo_cache: ${{ inputs.cold_cargo_cache || false }}

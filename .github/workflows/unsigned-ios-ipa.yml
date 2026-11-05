@@ -8,7 +8,19 @@ on:
   # fast macOS preflight succeeds. Manual runs remain available for preserved
   # milestone/recovery builds.
   workflow_call:
+    inputs:
+      cold_cargo_cache:
+        description: Bypass Cargo cache restore/save for a diagnostic cold run
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
+    inputs:
+      cold_cargo_cache:
+        description: Bypass Cargo cache restore/save for a diagnostic cold run
+        required: false
+        type: boolean
+        default: false
 
 # This workflow only needs to read the repository and upload its build artifact.
 permissions:
@@ -36,6 +48,8 @@ jobs:
     # same pinned Xcode/SDK according to GitHub's runner-image inventory.
     runs-on: macos-15-intel
     timeout-minutes: 60
+    env:
+      IOS_CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target/ios
 
     steps:
       - name: Check out the fork
@@ -54,8 +68,74 @@ jobs:
           rustc --version
           cargo --version
 
+      - name: Identify the iOS Rust cache boundary
+        id: ios-build-environment
+        run: |
+          set -euo pipefail
+          rust_release="$(rustc -vV | awk '/^release:/ { print $2 }')"
+          xcode_build="$(xcodebuild -version | awk '/Build version/ { print $3 }')"
+          sdk_build="$(xcrun --sdk iphoneos --show-sdk-build-version)"
+          test -n "$rust_release"
+          test -n "$xcode_build"
+          test -n "$sdk_build"
+          {
+            echo "rust_release=$rust_release"
+            echo "xcode_build=$xcode_build"
+            echo "sdk_build=$sdk_build"
+          } | tee -a "$GITHUB_OUTPUT"
+
       - name: Install the iOS Rust target
         run: rustup target add aarch64-apple-ios
+
+      - name: Start iOS Cargo cache restore timer
+        if: ${{ !inputs.cold_cargo_cache }}
+        run: echo "IOS_CACHE_RESTORE_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Restore iOS release Cargo cache
+        id: ios-cache-restore
+        if: ${{ !inputs.cold_cargo_cache }}
+        continue-on-error: true
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .cargo-target/ios
+          key: cargo-v1-${{ runner.os }}-${{ runner.arch }}-rust-${{ steps.ios-build-environment.outputs.rust_release }}-aarch64-apple-ios-release-default-xcode-${{ steps.ios-build-environment.outputs.xcode_build }}-sdk-${{ steps.ios-build-environment.outputs.sdk_build }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'src/**/Cargo.toml', '.cargo/config.toml') }}-${{ github.sha }}
+          restore-keys: |
+            cargo-v1-${{ runner.os }}-${{ runner.arch }}-rust-${{ steps.ios-build-environment.outputs.rust_release }}-aarch64-apple-ios-release-default-xcode-${{ steps.ios-build-environment.outputs.xcode_build }}-sdk-${{ steps.ios-build-environment.outputs.sdk_build }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'src/**/Cargo.toml', '.cargo/config.toml') }}-
+            cargo-v1-${{ runner.os }}-${{ runner.arch }}-rust-${{ steps.ios-build-environment.outputs.rust_release }}-aarch64-apple-ios-release-default-xcode-${{ steps.ios-build-environment.outputs.xcode_build }}-sdk-${{ steps.ios-build-environment.outputs.sdk_build }}-
+
+      - name: Report iOS Cargo cache restore
+        if: ${{ always() && !inputs.cold_cargo_cache }}
+        env:
+          CACHE_HIT: ${{ steps.ios-cache-restore.outputs.cache-hit }}
+          MATCHED_KEY: ${{ steps.ios-cache-restore.outputs.cache-matched-key }}
+          PRIMARY_KEY: ${{ steps.ios-cache-restore.outputs.cache-primary-key }}
+          RESTORE_OUTCOME: ${{ steps.ios-cache-restore.outcome }}
+        run: |
+          set -euo pipefail
+          elapsed=$(($(date +%s) - IOS_CACHE_RESTORE_STARTED_AT))
+          if [[ "$RESTORE_OUTCOME" != "success" ]]; then
+            status="restore-error (cold recovery)"
+            rm -rf "$IOS_CARGO_TARGET_DIR" "$HOME/.cargo/registry" "$HOME/.cargo/git"
+          elif [[ "$CACHE_HIT" == "true" ]]; then
+            status="exact-hit"
+          elif [[ -n "$MATCHED_KEY" ]]; then
+            status="restore-prefix-hit"
+          else
+            status="miss"
+          fi
+          echo "iOS Cargo cache: $status; restore ${elapsed}s"
+          echo "Requested key: $PRIMARY_KEY"
+          echo "Matched key: ${MATCHED_KEY:-<none>}"
+          {
+            echo "### iOS Cargo cache restore"
+            echo "- Status: $status"
+            echo "- Duration: ${elapsed}s"
+            echo "- Requested: \`$PRIMARY_KEY\`"
+            echo "- Matched: \`${MATCHED_KEY:-<none>}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # SDL's current CMake project still needs the pre-CMake-4 compatibility
       # mode. This is the same known-good CMake release used by the repository's
@@ -82,8 +162,10 @@ jobs:
           "$CMAKE" --version
 
       - name: Build the separate iDared Dev app without signing
+        id: ios-archive
         run: |
           set -euo pipefail
+          started_at=$(date +%s)
           xcodebuild archive \
             -project iphone/iDared32bit.xcodeproj \
             -scheme "iDared 32bit" \
@@ -96,7 +178,18 @@ jobs:
             INFOPLIST_KEY_CFBundleName="$DEV_DISPLAY_NAME" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY=""
+            CODE_SIGN_IDENTITY="" \
+            CARGO_TARGET_DIR="$IOS_CARGO_TARGET_DIR" \
+            2>&1 | tee "$RUNNER_TEMP/idared-xcodebuild.log"
+          elapsed=$(($(date +%s) - started_at))
+          echo "Xcode archive (including nested iOS Cargo release build): ${elapsed}s"
+          cargo_summary="$(grep -E 'Finished .*release.* in ' "$RUNNER_TEMP/idared-xcodebuild.log" | tail -n 1 || true)"
+          echo "Nested Cargo summary: ${cargo_summary:-not emitted by this Xcode build}"
+          {
+            echo "### iOS archive timing"
+            echo "- Xcode archive including Cargo: ${elapsed}s"
+            echo "- Nested Cargo: ${cargo_summary:-not emitted by this Xcode build}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify separate identity and package the unsigned IPA
         run: |
@@ -158,3 +251,50 @@ jobs:
           path: build/native-symbols/
           if-no-files-found: error
           retention-days: 90
+
+      - name: Measure iOS Cargo cache contents
+        if: ${{ success() && !inputs.cold_cargo_cache && steps.ios-cache-restore.outputs.cache-hit != 'true' }}
+        run: |
+          set -euo pipefail
+          total_kib=0
+          for path in "$HOME/.cargo/registry" "$HOME/.cargo/git" "$IOS_CARGO_TARGET_DIR"; do
+            if [[ -e "$path" ]]; then
+              size_kib=$(du -sk "$path" | awk '{ print $1 }')
+              total_kib=$((total_kib + size_kib))
+              echo "$path: ${size_kib} KiB"
+            fi
+          done
+          echo "iOS Cargo cache uncompressed size: ${total_kib} KiB"
+          echo "IOS_CACHE_SAVE_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+          echo "IOS_CACHE_SIZE_KIB=$total_kib" >> "$GITHUB_ENV"
+
+      - name: Save iOS release Cargo cache
+        id: ios-cache-save
+        if: ${{ success() && !inputs.cold_cargo_cache && steps.ios-cache-restore.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .cargo-target/ios
+          key: ${{ steps.ios-cache-restore.outputs.cache-primary-key }}
+
+      - name: Report iOS Cargo cache save
+        if: ${{ always() && steps.ios-archive.outcome == 'success' }}
+        env:
+          SAVE_OUTCOME: ${{ steps.ios-cache-save.outcome }}
+          CACHE_HIT: ${{ steps.ios-cache-restore.outputs.cache-hit }}
+        run: |
+          if [[ "${{ inputs.cold_cargo_cache }}" == "true" ]]; then
+            message="bypassed by cold_cargo_cache"
+          elif [[ "$CACHE_HIT" == "true" ]]; then
+            message="skipped for exact cache hit"
+          elif [[ -n "${IOS_CACHE_SAVE_STARTED_AT:-}" ]]; then
+            elapsed=$(($(date +%s) - IOS_CACHE_SAVE_STARTED_AT))
+            message="${SAVE_OUTCOME}; ${elapsed}s; ${IOS_CACHE_SIZE_KIB:-unknown} KiB uncompressed"
+          else
+            message="not attempted"
+          fi
+          echo "iOS Cargo cache save: $message"
+          echo "- Cache save: $message" >> "$GITHUB_STEP_SUMMARY"
