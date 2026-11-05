@@ -1,0 +1,56 @@
+diff --git a/src/video/uikit/SDL_uikitappdelegate.m b/src/video/uikit/SDL_uikitappdelegate.m
+index c085955..0a3bacb 100644
+--- a/src/video/uikit/SDL_uikitappdelegate.m
++++ b/src/video/uikit/SDL_uikitappdelegate.m
+@@ -475,14 +475,48 @@ SDL_LoadLaunchImageNamed(NSString *name, int screenh)
+             return mask;
+         }
+     }
++
++    /* SDL shares this scene with iDared's native portrait picker. Once the
++     * SDL guest window has detached, ask the scene's actual key native root
++     * controller for its policy instead of treating the absence of an SDL
++     * root as permission for every orientation. */
++    for (UIWindow *window in windowScene.windows) {
++        UIViewController *root = window.rootViewController;
++        if (window.hidden || window.alpha == 0.0 || !window.isKeyWindow || root == nil) {
++            continue;
++        }
++        if ([window.accessibilityIdentifier isEqualToString:@"touchHLE.gameControls"] ||
++            [root isKindOfClass:[SDL_uikitviewcontroller class]]) {
++            continue;
++        }
++
++        UIInterfaceOrientationMask mask = root.supportedInterfaceOrientations;
++        if (mask != 0) {
++            idared_native_presentation_diagnostic_event(
++                "sdl-scene-delegate-supported-orientations-query",
++                [[NSString stringWithFormat:
++                    @"scene=%@ sceneOrientation=%ld selectedWindow=%@ selectedRoot=%@ reason=native-key-root resultMask=0x%lx hierarchy={%@}",
++                    IDaredUIKitObjectLabel(windowScene),
++                    (long)windowScene.interfaceOrientation,
++                    IDaredUIKitObjectLabel(window),
++                    IDaredUIKitObjectLabel(root),
++                    (unsigned long)mask,
++                    IDaredUIKitWindowSummary(windowScene)] UTF8String]);
++            return mask;
++        }
++    }
++
++    /* iDared's only non-guest scene is its portrait picker. This fallback
++     * covers the brief gap after SDL detaches and before that picker becomes
++     * key, and deliberately never returns an invalid zero mask. */
+     idared_native_presentation_diagnostic_event(
+         "sdl-scene-delegate-supported-orientations-query",
+         [[NSString stringWithFormat:
+-            @"scene=%@ sceneOrientation=%ld selectedWindow=none selectedRoot=none reason=fallback resultMask=0x%lx hierarchy={%@}",
++            @"scene=%@ sceneOrientation=%ld selectedWindow=none selectedRoot=none reason=native-host-fallback resultMask=0x%lx hierarchy={%@}",
+             IDaredUIKitObjectLabel(windowScene),
+             (long)windowScene.interfaceOrientation,
+-            (unsigned long)UIInterfaceOrientationMaskAll,
++            (unsigned long)UIInterfaceOrientationMaskPortrait,
+             IDaredUIKitWindowSummary(windowScene)] UTF8String]);
+-    return UIInterfaceOrientationMaskAll;
++    return UIInterfaceOrientationMaskPortrait;
+ }
+ #endif

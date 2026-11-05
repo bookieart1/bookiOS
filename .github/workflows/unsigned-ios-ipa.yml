@@ -37,8 +37,9 @@ env:
   # original App Store identity, while this development IPA installs beside it.
   DEV_BUNDLE_ID: com.bookieart1.idared32bit.dev
   DEV_DISPLAY_NAME: iDared Dev
-  # This diagnostic commit deliberately restores the ordinary iOS Cargo cache
-  # but never saves its patched native SDL output back into that cache.
+  # Dev 2.36 restores the ordinary iOS Cargo cache, then forcibly rebuilds its
+  # patched native SDL dependency. Never save that custom output into the
+  # ordinary iOS cache.
   IDARED_SDL_DIAGNOSTIC: "1"
 
 jobs:
@@ -140,15 +141,15 @@ jobs:
             echo "- Matched: \`${MATCHED_KEY:-<none>}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Resolve and instrument the actual iPhone sdl2-sys SDL source
+      - name: Resolve and patch the actual iPhone sdl2-sys SDL source
         id: diagnostic-sdl
         run: bash iphone/diagnostics/prepare-dev235-diagnostic-sdl.sh
 
       # A restored target cache may contain sdl2-sys output compiled from the
-      # uninstrumented nested SDL checkout. Clean only this native dependency;
-      # its dependents will relink normally while unrelated Rust artifacts stay
-      # warm. The final executable checks below are the authoritative proof.
-      - name: Force the instrumented native SDL dependency to rebuild
+      # unmodified nested SDL checkout. Clean only this native dependency; its
+      # dependents relink normally while unrelated Rust artifacts stay warm.
+      # The final executable checks below are the authoritative proof.
+      - name: Force the corrected native SDL dependency to rebuild
         run: |
           set -euo pipefail
           cargo clean \
@@ -211,7 +212,7 @@ jobs:
             echo "- Nested Cargo: ${cargo_summary:-not emitted by this Xcode build}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Verify Diagnostic 2 native SDL provenance in the linked app
+      - name: Verify Dev 2.36 native SDL correction in the linked app
         run: |
           set -euo pipefail
           APP_PATH="$RUNNER_TEMP/iDared32bit.xcarchive/Products/Applications/iDared 32bit.app"
@@ -225,6 +226,8 @@ jobs:
           # bundled native SDL—not the unrelated vendor/SDL copy—was rebuilt.
           markers=(
             'sdl-scene-delegate-supported-orientations-query'
+            'reason=native-key-root'
+            'reason=native-host-fallback'
             'sdl-controller-supported-orientations-query'
             'sdl-controller-transition-begin'
             'sdl-orientation-policy-consumed'
@@ -233,7 +236,7 @@ jobs:
             'sdl-view-window-change-begin'
           )
           for marker in "${markers[@]}"; do
-            grep -Fqx "$marker" "$strings_file"
+            grep -Fq "$marker" "$strings_file"
             echo "Linked diagnostic marker: $marker"
           done
 
@@ -254,16 +257,20 @@ jobs:
             echo "diagnostic_bundle_sha256=${{ steps.diagnostic-sdl.outputs.bundle_sha256 }}"
             echo "diagnostic_bridge_patch_blob=${{ steps.diagnostic-sdl.outputs.bridge_patch_blob }}"
             echo "diagnostic_bridge_patch_sha256=${{ steps.diagnostic-sdl.outputs.bridge_patch_sha256 }}"
+            echo "scene_policy_patch_blob=${{ steps.diagnostic-sdl.outputs.scene_policy_patch_blob }}"
+            echo "scene_policy_patch_sha256=${{ steps.diagnostic-sdl.outputs.scene_policy_patch_sha256 }}"
             printf 'linked_marker=%s\n' "${markers[@]}"
           } | tee build/diagnostic-provenance/identity.txt
 
           {
-            echo "### Diagnostic 2 native SDL provenance"
+            echo "### Dev 2.36 native SDL provenance"
             echo "- rust-sdl2: \`${{ steps.diagnostic-sdl.outputs.rust_sdl2_commit }}\`"
             echo "- bundled SDL base: \`${{ steps.diagnostic-sdl.outputs.sdl_base_commit }}\`"
             echo "- bundled SDL diagnostic: \`${{ steps.diagnostic-sdl.outputs.sdl_diagnostic_commit }}\`"
             echo "- Diagnostic bridge patch blob: \`${{ steps.diagnostic-sdl.outputs.bridge_patch_blob }}\`"
             echo "- Diagnostic bridge patch SHA-256: \`${{ steps.diagnostic-sdl.outputs.bridge_patch_sha256 }}\`"
+            echo "- Scene-policy patch blob: \`${{ steps.diagnostic-sdl.outputs.scene_policy_patch_blob }}\`"
+            echo "- Scene-policy patch SHA-256: \`${{ steps.diagnostic-sdl.outputs.scene_policy_patch_sha256 }}\`"
             echo "- Native rebuild: sdl2-sys build script and dependent rebuild observed"
             echo "- Linked markers: ${#markers[@]} of ${#markers[@]}"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -329,7 +336,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-      - name: Upload Diagnostic 2 provenance
+      - name: Upload Dev 2.36 native SDL provenance
         uses: actions/upload-artifact@v7
         with:
           name: iDared32bit-diagnostic-provenance-${{ github.sha }}
@@ -374,7 +381,7 @@ jobs:
           if [[ "${{ inputs.cold_cargo_cache }}" == "true" ]]; then
             message="bypassed by cold_cargo_cache"
           elif [[ "$IDARED_SDL_DIAGNOSTIC" == "1" ]]; then
-            message="not saved; Diagnostic 2 native SDL output is intentionally isolated"
+            message="not saved; Dev 2.36 custom native SDL output is intentionally isolated"
           elif [[ "$CACHE_HIT" == "true" ]]; then
             message="skipped for exact cache hit"
           elif [[ -n "${IOS_CACHE_SAVE_STARTED_AT:-}" ]]; then
