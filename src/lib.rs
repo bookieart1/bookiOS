@@ -439,6 +439,10 @@ fn run_app(
     }
 
     let environment_started = std::time::Instant::now();
+    // The native picker owns portrait orientation until this exact candidate
+    // is ready to create its guest Window. Failed package opening above never
+    // grants guest presentation authority.
+    window::begin_guest_presentation();
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         Environment::new(
             bundle,

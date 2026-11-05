@@ -28,6 +28,10 @@ extern void idared_install_open_in_hook(void);
 typedef void (*idared_host_orientation_fn)(int32_t);
 extern void idared_request_host_orientation(int32_t);
 extern void idared_set_host_orientation(idared_host_orientation_fn);
+/* Explicit guest/picker ownership invalidates delayed guest rotations. */
+typedef void (*idared_host_presentation_fn)(int32_t);
+extern void idared_set_host_presentation_owner(int32_t);
+extern void idared_set_host_presentation(idared_host_presentation_fn);
 
 int
 main(int argc, char *argv[])
@@ -35,6 +39,7 @@ main(int argc, char *argv[])
     idared_set_swiftui_app_picker(idared_swiftui_app_picker);
     idared_set_native_text_alert(idared_native_text_alert);
     idared_set_host_orientation(idared_request_host_orientation);
+    idared_set_host_presentation(idared_set_host_presentation_owner);
     idared_install_open_in_hook();
     return SDL_UIKitRunApp(argc, argv, SDL_main);
 }

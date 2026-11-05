@@ -205,13 +205,16 @@ public func idaredSwiftUIAppPicker(
     // Above SDL's launch screen, which fades out on its own.
     window.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.normal.rawValue + 2)
     let controllerStarted = performanceNow()
-    window.rootViewController = PickerHostingController(
+    let controller = PickerHostingController(
         model: model,
         performanceStartUptime: bridgeEntry
     )
+    window.rootViewController = controller
     let controllerCreated = performanceNow()
+    HostPresentationCoordinator.installPickerController(controller)
     let makeVisibleStarted = performanceNow()
     window.makeKeyAndVisible()
+    HostPresentationCoordinator.setPickerVisible(true)
     let makeVisibleReturned = performanceNow()
 
     reportPickerPerformance(
@@ -255,6 +258,7 @@ public func idaredSwiftUIAppPicker(
     let selectionObserved = performanceNow()
     RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
 
+    HostPresentationCoordinator.setPickerVisible(false)
     window.isHidden = true
     window.rootViewController = nil
     reportPickerPerformance(
@@ -379,6 +383,260 @@ private func activeWindowScene() -> UIWindowScene? {
         ?? scenes.first
 }
 
+private enum HostPresentationOwner: Int32 {
+    case picker = 0
+    case guest = 1
+
+    var label: String {
+        switch self {
+        case .picker: return "picker"
+        case .guest: return "guest"
+        }
+    }
+}
+
+private struct HostPresentationToken: Equatable {
+    let owner: HostPresentationOwner
+    let generation: UInt64
+}
+
+/// Serializes scene-orientation ownership between the native picker and the
+/// emulated guest. Guest requests carry a generation token, so a request that
+/// was queued before guest teardown cannot rotate a later picker or guest.
+private enum HostPresentationCoordinator {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var owner = HostPresentationOwner.picker
+    nonisolated(unsafe) private static var generation: UInt64 = 0
+    nonisolated(unsafe) private static var pickerVisible = false
+    nonisolated(unsafe) private static var transitionActive = false
+    nonisolated(unsafe) private static var requestInFlight = false
+
+    private static func token() -> HostPresentationToken {
+        lock.lock()
+        defer { lock.unlock() }
+        return HostPresentationToken(owner: owner, generation: generation)
+    }
+
+    private static func isCurrent(_ token: HostPresentationToken) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return owner == token.owner && generation == token.generation
+    }
+
+    static func setOwner(_ newOwner: HostPresentationOwner) {
+        lock.lock()
+        generation &+= 1
+        owner = newOwner
+        pickerVisible = false
+        transitionActive = false
+        requestInFlight = false
+        let newToken = HostPresentationToken(owner: owner, generation: generation)
+        lock.unlock()
+
+        let report = {
+            guard isCurrent(newToken) else { return }
+            let current = activeWindowScene()?.interfaceOrientation.rawValue ?? 0
+            NSLog(
+                "iDared presentation owner=%@ generation=%llu current=%ld guestEnvironmentActive=%@ pickerVisible=false",
+                newOwner.label,
+                newToken.generation,
+                current,
+                newOwner == .guest ? "yes" : "no"
+            )
+        }
+        if Thread.isMainThread {
+            report()
+        } else {
+            DispatchQueue.main.async(execute: report)
+        }
+    }
+
+    static func guestToken() -> HostPresentationToken? {
+        let current = token()
+        return current.owner == .guest ? current : nil
+    }
+
+    static func installPickerController(_ controller: UIViewController) {
+        let current = token()
+        guard current.owner == .picker else {
+            NSLog(
+                "iDared picker installation repaired unexpected owner=%@ generation=%llu",
+                current.owner.label,
+                current.generation
+            )
+            setOwner(.picker)
+            installPickerController(controller)
+            return
+        }
+        applyOrientation(
+            .portrait,
+            rawOrientation: 0,
+            source: "picker-controller-installed",
+            token: current,
+            preferredController: controller
+        )
+    }
+
+    static func setPickerVisible(_ visible: Bool) {
+        lock.lock()
+        pickerVisible = visible
+        lock.unlock()
+    }
+
+    static func transitionWillBegin(to size: CGSize) {
+        lock.lock()
+        transitionActive = true
+        let currentOwner = owner
+        let currentGeneration = generation
+        let visible = pickerVisible
+        let inFlight = requestInFlight
+        lock.unlock()
+        NSLog(
+            "iDared picker orientation transition begin owner=%@ generation=%llu targetSize=%.0fx%.0f pickerVisible=%@ requestInFlight=%@",
+            currentOwner.label,
+            currentGeneration,
+            size.width,
+            size.height,
+            visible ? "yes" : "no",
+            inFlight ? "yes" : "no"
+        )
+    }
+
+    static func transitionDidComplete() {
+        lock.lock()
+        transitionActive = false
+        let currentOwner = owner
+        let currentGeneration = generation
+        let visible = pickerVisible
+        lock.unlock()
+        NSLog(
+            "iDared picker orientation transition end owner=%@ generation=%llu current=%ld pickerVisible=%@",
+            currentOwner.label,
+            currentGeneration,
+            activeWindowScene()?.interfaceOrientation.rawValue ?? 0,
+            visible ? "yes" : "no"
+        )
+    }
+
+    static func applyGuestOrientation(
+        _ mask: UIInterfaceOrientationMask,
+        rawOrientation: Int32,
+        token: HostPresentationToken
+    ) {
+        applyOrientation(
+            mask,
+            rawOrientation: rawOrientation,
+            source: "guest-orientation",
+            token: token,
+            preferredController: nil
+        )
+    }
+
+    private static func applyOrientation(
+        _ mask: UIInterfaceOrientationMask,
+        rawOrientation: Int32,
+        source: String,
+        token: HostPresentationToken,
+        preferredController: UIViewController?
+    ) {
+        guard isCurrent(token) else {
+            let current = self.token()
+            NSLog(
+                "iDared host orientation ignored stale source=%@ raw=%d requestOwner=%@ requestGeneration=%llu currentOwner=%@ currentGeneration=%llu",
+                source,
+                rawOrientation,
+                token.owner.label,
+                token.generation,
+                current.owner.label,
+                current.generation
+            )
+            return
+        }
+        guard let scene = activeWindowScene() else {
+            NSLog(
+                "iDared host orientation ignored no-scene source=%@ raw=%d owner=%@ generation=%llu",
+                source,
+                rawOrientation,
+                token.owner.label,
+                token.generation
+            )
+            return
+        }
+
+        let roots = scene.windows.compactMap { window in
+            window.rootViewController.map { String(describing: type(of: $0)) }
+        }.joined(separator: ",")
+        if let preferredController {
+            preferredController.setNeedsUpdateOfSupportedInterfaceOrientations()
+        } else {
+            for window in scene.windows where !window.isHidden {
+                guard !(window.rootViewController is PickerHostingController) else { continue }
+                window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+            }
+        }
+
+        lock.lock()
+        requestInFlight = true
+        let visible = pickerVisible
+        let transition = transitionActive
+        lock.unlock()
+        NSLog(
+            "iDared host orientation accepted source=%@ raw=%d owner=%@ generation=%llu current=%ld roots=%@ guestEnvironmentActive=%@ pickerVisible=%@ transitionActive=%@",
+            source,
+            rawOrientation,
+            token.owner.label,
+            token.generation,
+            scene.interfaceOrientation.rawValue,
+            roots,
+            token.owner == .guest ? "yes" : "no",
+            visible ? "yes" : "no",
+            transition ? "yes" : "no"
+        )
+
+        if #available(iOS 16.0, *) {
+            let preferences = UIWindowScene.GeometryPreferences.iOS(
+                interfaceOrientations: mask
+            )
+            scene.requestGeometryUpdate(preferences) { error in
+                NSLog(
+                    "iDared host orientation request failed source=%@ owner=%@ generation=%llu: %@",
+                    source,
+                    token.owner.label,
+                    token.generation,
+                    error.localizedDescription
+                )
+            }
+        } else {
+            UIViewController.attemptRotationToDeviceOrientation()
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            guard isCurrent(token) else { return }
+            lock.lock()
+            requestInFlight = false
+            let visible = pickerVisible
+            let transition = transitionActive
+            lock.unlock()
+            NSLog(
+                "iDared host orientation result source=%@ raw=%d owner=%@ generation=%llu current=%ld pickerVisible=%@ transitionActive=%@",
+                source,
+                rawOrientation,
+                token.owner.label,
+                token.generation,
+                scene.interfaceOrientation.rawValue,
+                visible ? "yes" : "no",
+                transition ? "yes" : "no"
+            )
+        }
+    }
+}
+
+@_cdecl("idared_set_host_presentation_owner")
+public func idaredSetHostPresentationOwner(_ rawOwner: Int32) {
+    guard let owner = HostPresentationOwner(rawValue: rawOwner) else { return }
+    HostPresentationCoordinator.setOwner(owner)
+}
+
 /// SDL's orientation hint controls the SDL view controller, but after the
 /// portrait-only SwiftUI picker has owned the scene, recent iOS versions also
 /// require an explicit scene geometry request. Keeping the host scene aligned
@@ -394,40 +652,16 @@ public func idaredRequestHostOrientation(_ rawOrientation: Int32) {
     default: return
     }
 
+    guard let token = HostPresentationCoordinator.guestToken() else {
+        NSLog("iDared host orientation ignored without guest ownership raw=%d", rawOrientation)
+        return
+    }
     let update = {
-        guard let scene = activeWindowScene() else {
-            NSLog("iDared host orientation deferred without an active window scene: %d", rawOrientation)
-            return
-        }
-        let roots = scene.windows.compactMap { window in
-            window.rootViewController.map { String(describing: type(of: $0)) }
-        }.joined(separator: ",")
-        NSLog(
-            "iDared host orientation apply raw=%d current=%ld roots=%@",
-            rawOrientation,
-            scene.interfaceOrientation.rawValue,
-            roots
+        HostPresentationCoordinator.applyGuestOrientation(
+            mask,
+            rawOrientation: rawOrientation,
+            token: token
         )
-        for window in scene.windows {
-            window.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
-        }
-        if #available(iOS 16.0, *) {
-            let preferences = UIWindowScene.GeometryPreferences.iOS(
-                interfaceOrientations: mask
-            )
-            scene.requestGeometryUpdate(preferences) { error in
-                NSLog("iDared host orientation request failed: %@", error.localizedDescription)
-            }
-        } else {
-            UIViewController.attemptRotationToDeviceOrientation()
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            NSLog(
-                "iDared host orientation result raw=%d current=%ld",
-                rawOrientation,
-                scene.interfaceOrientation.rawValue
-            )
-        }
     }
     // A synchronous request on the UIKit thread is required here. Deferring
     // the geometry update until after SDL replaces the root controller caused
@@ -992,7 +1226,9 @@ final class PickerHostingController: UIHostingController<PickerView> {
         with coordinator: UIViewControllerTransitionCoordinator
     ) {
         super.viewWillTransition(to: size, with: coordinator)
+        HostPresentationCoordinator.transitionWillBegin(to: size)
         coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            HostPresentationCoordinator.transitionDidComplete()
             guard let self else { return }
             reportPickerPerformance(
                 self.model.input,

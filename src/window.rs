@@ -184,7 +184,13 @@ fn rotate_fullscreen_size(orientation: DeviceOrientation, screen_size: (u32, u32
 pub type HostOrientationFn = unsafe extern "C" fn(i32);
 
 #[cfg(target_os = "ios")]
+pub type HostPresentationFn = unsafe extern "C" fn(i32);
+
+#[cfg(target_os = "ios")]
 static HOST_ORIENTATION: OnceLock<HostOrientationFn> = OnceLock::new();
+
+#[cfg(target_os = "ios")]
+static HOST_PRESENTATION: OnceLock<HostPresentationFn> = OnceLock::new();
 
 /// Registered by the final iOS executable, whose Swift code owns the host
 /// `UIWindowScene`. The Rust crate is also linked as a standalone dylib, so it
@@ -193,6 +199,45 @@ static HOST_ORIENTATION: OnceLock<HostOrientationFn> = OnceLock::new();
 #[no_mangle]
 pub extern "C" fn idared_set_host_orientation(callback: HostOrientationFn) {
     let _ = HOST_ORIENTATION.set(callback);
+}
+
+/// Registered by the final iOS executable. This tells native UIKit whether the
+/// guest or the portrait-only iDared picker currently owns scene orientation.
+#[cfg(target_os = "ios")]
+#[no_mangle]
+pub extern "C" fn idared_set_host_presentation(callback: HostPresentationFn) {
+    let _ = HOST_PRESENTATION.set(callback);
+}
+
+/// End guest orientation ownership before rebuilding or revealing the native
+/// picker. Resetting SDL's global mask matters because SDL's root controller
+/// can outlive the guest window briefly while UIKit presents the next window.
+pub fn begin_picker_presentation() {
+    #[cfg(target_os = "ios")]
+    {
+        sdl2::hint::set("SDL_IOS_ORIENTATIONS", "Portrait");
+        unsafe {
+            if let Some(request) = HOST_PRESENTATION.get() {
+                request(0);
+            } else {
+                log!("Host presentation bridge is unavailable; picker ownership not reported");
+            }
+        }
+    }
+}
+
+/// Grant the next guest authority to choose the host scene orientation. The
+/// actual orientation is still supplied by `set_sdl2_orientation` when its
+/// Window is created or the emulated app rotates.
+pub fn begin_guest_presentation() {
+    #[cfg(target_os = "ios")]
+    unsafe {
+        if let Some(request) = HOST_PRESENTATION.get() {
+            request(1);
+        } else {
+            log!("Host presentation bridge is unavailable; guest ownership not reported");
+        }
+    }
 }
 
 /// Tell SDL2 what orientation we want. Only useful on Android.
@@ -458,6 +503,12 @@ impl Window {
     ) -> Window {
         let sdl_ctx = sdl2::init().unwrap();
         let video_ctx = sdl_ctx.video().unwrap();
+
+        // Use SDL/UIKit's supported native policy for guest presentation. A
+        // value of 1 asks UIKit to auto-hide the visual Home indicator without
+        // deferring the real system gesture to a second swipe.
+        #[cfg(target_os = "ios")]
+        sdl2::hint::set("SDL_IOS_HIDE_HOME_INDICATOR", "1");
 
         // The "hidapi" feature of rust-sdl2 is enabled so that sdl2::sensor
         // is available, but we don't want to enable SDL's HIDAPI controller

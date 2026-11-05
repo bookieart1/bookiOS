@@ -371,6 +371,11 @@ pub fn app_picker(
     options: Options,
     invocation: PickerInvocation,
 ) -> Result<(PathBuf, Vec<String>), String> {
+    // Revoke guest orientation authority before any picker work begins. This
+    // also resets SDL's process-global orientation mask to portrait so its old
+    // root controller cannot pull the native picker back to guest orientation.
+    crate::window::begin_picker_presentation();
+
     #[cfg(target_os = "ios")]
     if swiftui::is_available() {
         let return_reason = if matches!(invocation, PickerInvocation::ReturnFromGame) {
@@ -1428,7 +1433,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.34",
+            "iDared 32bit {}{}{} · Dev 2.35",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""
