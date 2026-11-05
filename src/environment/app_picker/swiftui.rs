@@ -67,8 +67,33 @@ pub struct ReloadState {
     quick_option_values: Vec<usize>,
 }
 
+fn parse_picker_result(paths: &[PathBuf], result: String) -> Result<Picked, String> {
+    let mut lines = result.lines();
+    if result.starts_with("reload\n") {
+        lines.next();
+        let page = lines.next().and_then(|page| page.parse().ok()).unwrap_or(0);
+        let quick_option_values = lines.map(|value| value.parse().unwrap_or(0)).collect();
+        echo!("The Games folder changed, so the app picker is shown again.");
+        return Ok(Picked::Reload(ReloadState {
+            page,
+            quick_option_values,
+        }));
+    }
+    let app = lines
+        .next()
+        .and_then(|idx| idx.parse::<usize>().ok())
+        .and_then(|idx| paths.get(idx))
+        .ok_or_else(|| "The app picker returned an invalid app.".to_string())?;
+    let values: Vec<usize> = lines.map(|value| value.parse().unwrap_or(0)).collect();
+    echo!("Picked: {}", app.display());
+    Ok(Picked::App(
+        app.clone(),
+        quick_option_args(&values).collect(),
+    ))
+}
+
 pub fn app_picker(
-    apps: Result<Vec<AppInfo>, String>,
+    apps: Result<&[AppInfo], &str>,
     state: Option<ReloadState>,
     performance: PickerPerformance,
 ) -> Result<Picked, String> {
@@ -76,7 +101,7 @@ pub fn app_picker(
     let picker = *PICKER.get().unwrap();
     let (apps, error) = match apps {
         Ok(apps) => (apps, None),
-        Err(e) => (Vec::new(), Some(e)),
+        Err(e) => (&[][..], Some(e.to_owned())),
     };
 
     // Swift draws a "?" on this for apps without an icon.
@@ -178,7 +203,7 @@ pub fn app_picker(
         }),
         json_string(branding),
         json_string(crate::DISPLAY_VERSION),
-        json_string("Dev 2.33"),
+        json_string("Dev 2.34"),
         json_string(&crate::licenses::get_text()),
         optional(paths::url_for_opening_user_data_dir().ok()),
         json_string("https://iDared32bit-emu.com/"),
@@ -221,6 +246,7 @@ pub fn app_picker(
         preparation_total.as_secs_f64() * 1000.0
     );
     echo!("=== End iDared Picker Rust-to-Swift Preparation ===");
+    let paths: Vec<PathBuf> = apps.iter().map(|app| app.path.clone()).collect();
     let result_ptr = unsafe { picker(json.as_ptr(), icon_ptrs.as_ptr(), icon_ptrs.len()) };
     if result_ptr.is_null() {
         return Err("Couldn't show the app picker.".to_string());
@@ -230,28 +256,7 @@ pub fn app_picker(
         .into_owned();
     unsafe { libc::free(result_ptr.cast()) };
 
-    let mut lines = result.lines();
-    if result.starts_with("reload\n") {
-        lines.next();
-        let page = lines.next().and_then(|page| page.parse().ok()).unwrap_or(0);
-        let quick_option_values = lines.map(|value| value.parse().unwrap_or(0)).collect();
-        echo!("The Games folder changed, so the app picker is shown again.");
-        return Ok(Picked::Reload(ReloadState {
-            page,
-            quick_option_values,
-        }));
-    }
-    let app = lines
-        .next()
-        .and_then(|idx| idx.parse::<usize>().ok())
-        .and_then(|idx| apps.get(idx))
-        .ok_or_else(|| "The app picker returned an invalid app.".to_string())?;
-    let values: Vec<usize> = lines.map(|value| value.parse().unwrap_or(0)).collect();
-    echo!("Picked: {}", app.path.display());
-    Ok(Picked::App(
-        app.path.clone(),
-        quick_option_args(&values).collect(),
-    ))
+    parse_picker_result(&paths, result)
 }
 
 fn json_string(s: &str) -> String {

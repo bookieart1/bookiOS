@@ -206,6 +206,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     // failed, so it's probably best to always quit. Return to the app picker
     // rather than exiting: on iOS the URL is opened later, from the run loop,
     // so exiting now would stop it from opening at all.
+    crate::window::set_picker_return_reason(crate::window::PickerReturnReason::ExternalUrl);
     notify_will_terminate(env);
     env.return_to_app_picker = true;
     true

@@ -171,6 +171,9 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
                 // even if Home is pressed again before we've returned.
                 if !env.return_to_app_picker {
                     log!("Handling HomeButton event: returning to app picker.");
+                    crate::window::set_picker_return_reason(
+                        crate::window::PickerReturnReason::NormalHome,
+                    );
                     echo!(
                         "iDared Return Performance: Home/exit requested at process t={:.3} ms",
                         crate::performance_process_elapsed_ms()

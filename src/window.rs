@@ -2569,6 +2569,53 @@ impl Window {
 /// never shown, and the app hangs.
 pub static START_ERROR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
+/// Why the guest is returning to the native iDared picker. This is native
+/// launcher state only; it is consumed before the picker is shown again.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum PickerReturnReason {
+    Other = 0,
+    NormalHome = 1,
+    Crash = 2,
+    FailedLaunch = 3,
+    GuestExit = 4,
+    ExternalUrl = 5,
+}
+
+impl PickerReturnReason {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Other => "other",
+            Self::NormalHome => "normal",
+            Self::Crash => "crash",
+            Self::FailedLaunch => "failed-launch",
+            Self::GuestExit => "guest-exit",
+            Self::ExternalUrl => "external-url",
+        }
+    }
+}
+
+static PICKER_RETURN_REASON: std::sync::atomic::AtomicU8 =
+    std::sync::atomic::AtomicU8::new(PickerReturnReason::Other as u8);
+
+pub fn set_picker_return_reason(reason: PickerReturnReason) {
+    PICKER_RETURN_REASON.store(reason as u8, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn take_picker_return_reason() -> PickerReturnReason {
+    match PICKER_RETURN_REASON.swap(
+        PickerReturnReason::Other as u8,
+        std::sync::atomic::Ordering::Relaxed,
+    ) {
+        1 => PickerReturnReason::NormalHome,
+        2 => PickerReturnReason::Crash,
+        3 => PickerReturnReason::FailedLaunch,
+        4 => PickerReturnReason::GuestExit,
+        5 => PickerReturnReason::ExternalUrl,
+        _ => PickerReturnReason::Other,
+    }
+}
+
 /// Source location captured by the iOS/Android panic hook. The panic payload
 /// alone is often too generic to identify the failing emulator code.
 pub static LAST_PANIC_LOCATION: std::sync::Mutex<Option<String>> =
@@ -2597,6 +2644,7 @@ pub fn show_error_messagebox(window: Option<&Window>, error_message: &str) {
     if cfg!(target_os = "ios") {
         let message = format!("iDared 32bit crashed: {error_message}");
         *START_ERROR.lock().unwrap() = Some(message);
+        set_picker_return_reason(PickerReturnReason::Crash);
         RETURN_TO_APP_PICKER_AFTER_ERROR.store(true, std::sync::atomic::Ordering::Relaxed);
         return;
     }

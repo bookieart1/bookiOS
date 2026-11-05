@@ -414,6 +414,7 @@ fn exit(env: &mut Environment, exit_code: i32) {
     }
 
     echo!("App called exit({}), returning to app picker.", exit_code);
+    crate::window::set_picker_return_reason(crate::window::PickerReturnReason::GuestExit);
     env.return_to_app_picker = true;
 }
 

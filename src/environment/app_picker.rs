@@ -42,10 +42,12 @@ use crate::objc::{
 use crate::options::Options;
 use crate::paths;
 use crate::Environment;
+#[cfg(target_os = "ios")]
+use std::cell::{Cell, RefCell};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 static NEXT_PICKER_SCAN_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -54,6 +56,7 @@ pub enum PickerInvocation {
     ColdStart,
     ReturnFromGame,
     LibraryReload,
+    RetainedReturn,
 }
 
 impl PickerInvocation {
@@ -62,6 +65,7 @@ impl PickerInvocation {
             Self::ColdStart => "Cold Start",
             Self::ReturnFromGame => "Return From Game",
             Self::LibraryReload => "Library Reload",
+            Self::RetainedReturn => "Retained Return",
         }
     }
 }
@@ -121,6 +125,34 @@ struct LibraryTiming {
     packages_succeeded: usize,
     packages_skipped: usize,
     packages: Vec<PackageTiming>,
+}
+
+/// Cheap process-lifetime identity for direct entries in the Games directory.
+/// It deliberately does not open IPA archives or walk .app packages.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LibraryEntryFingerprint {
+    relative_path: PathBuf,
+    file_kind: u8,
+    len: u64,
+    modified_nanos: u128,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LibrarySnapshot(Vec<LibraryEntryFingerprint>);
+
+#[cfg(target_os = "ios")]
+struct LibraryCatalog {
+    apps: Vec<AppInfo>,
+    snapshot: LibrarySnapshot,
+}
+
+#[cfg(target_os = "ios")]
+thread_local! {
+    // AppInfo contains decoded image storage and guest-pointer-shaped fields,
+    // so keep this native launcher cache on the same main thread that owns
+    // the picker rather than claiming it is safe to move between threads.
+    static RETAINED_LIBRARY: RefCell<Option<LibraryCatalog>> = const { RefCell::new(None) };
+    static PURGE_RETAINED_LIBRARY: Cell<bool> = const { Cell::new(false) };
 }
 
 struct AppInfo {
@@ -212,27 +244,245 @@ fn picker_compatibility(app: &AppInfo) -> &'static str {
     }
 }
 
+fn snapshot_entries(
+    directory: &Path,
+    prefix: &str,
+    include: impl Fn(&Path) -> bool,
+    output: &mut Vec<LibraryEntryFingerprint>,
+) -> Result<(), String> {
+    let entries = std::fs::read_dir(directory)
+        .map_err(|error| format!("couldn't read {}: {error}", directory.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            format!("couldn't read an entry in {}: {error}", directory.display())
+        })?;
+        let path = entry.path();
+        if !include(&path) {
+            continue;
+        }
+        let metadata = entry
+            .metadata()
+            .map_err(|error| format!("couldn't inspect {}: {error}", path.display()))?;
+        let modified = metadata
+            .modified()
+            .map_err(|error| format!("couldn't read mtime for {}: {error}", path.display()))?;
+        let modified_nanos = modified
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|error| format!("invalid mtime for {}: {error}", path.display()))?
+            .as_nanos();
+        let file_kind = if metadata.is_file() {
+            1
+        } else if metadata.is_dir() {
+            2
+        } else {
+            3
+        };
+        output.push(LibraryEntryFingerprint {
+            relative_path: PathBuf::from(prefix).join(entry.file_name()),
+            file_kind,
+            len: metadata.len(),
+            modified_nanos,
+        });
+    }
+    Ok(())
+}
+
+fn capture_library_snapshot() -> Result<LibrarySnapshot, String> {
+    let base = paths::user_data_base_path();
+    let games = base.join(paths::apps_dir());
+    let mut entries = Vec::new();
+    snapshot_entries(
+        &games,
+        "Games",
+        |path| {
+            path.extension().is_some_and(|extension| {
+                extension.eq_ignore_ascii_case("ipa") || extension.eq_ignore_ascii_case("app")
+            })
+        },
+        &mut entries,
+    )?;
+    // iOS can receive IPAs in the main Documents directory. The normal full
+    // path moves them into Games; include them so a retained picker never
+    // hides a newly shared package.
+    snapshot_entries(
+        &base,
+        "Loose",
+        |path| {
+            path.extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("ipa"))
+        },
+        &mut entries,
+    )?;
+    entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(LibrarySnapshot(entries))
+}
+
+#[cfg(target_os = "ios")]
+fn retained_icon_bytes(apps: &[AppInfo]) -> usize {
+    apps.iter()
+        .filter_map(|app| app.icon.as_ref())
+        .map(|icon| icon.pixels().len())
+        .sum()
+}
+
+#[cfg(target_os = "ios")]
+fn store_catalog_after_picker(catalog: LibraryCatalog) {
+    let icon_bytes = retained_icon_bytes(&catalog.apps);
+    if PURGE_RETAINED_LIBRARY.with(|purge| purge.replace(false)) {
+        echo!(
+            "iDared retained library catalog discarded after a memory warning ({} apps, {:.2} MiB decoded icon pixels).",
+            catalog.apps.len(),
+            icon_bytes as f64 / (1024.0 * 1024.0)
+        );
+        return;
+    }
+    echo!(
+        "iDared retained library catalog ready: {} apps, {:.2} MiB decoded icon pixels; no guest filesystem state retained.",
+        catalog.apps.len(),
+        icon_bytes as f64 / (1024.0 * 1024.0)
+    );
+    RETAINED_LIBRARY.with(|retained| *retained.borrow_mut() = Some(catalog));
+}
+
+/// Called by the native iOS application on a memory warning. The native
+/// picker hierarchy is already released after selection; this releases the
+/// process-lifetime metadata/icon catalog as well. The next return safely uses
+/// the existing full scan.
+#[cfg(target_os = "ios")]
+#[no_mangle]
+pub extern "C" fn idared_purge_retained_picker_catalog() {
+    RETAINED_LIBRARY.with(|retained| {
+        if let Some(catalog) = retained.borrow_mut().take() {
+            PURGE_RETAINED_LIBRARY.with(|purge| purge.set(false));
+            echo_no_panic!(
+                "iDared retained library catalog purged for memory pressure ({} apps, {:.2} MiB decoded icon pixels).",
+                catalog.apps.len(),
+                retained_icon_bytes(&catalog.apps) as f64 / (1024.0 * 1024.0)
+            );
+        } else {
+            // The catalog may currently be local to the native picker call.
+            // Prevent it from being retained after the user selects a game.
+            PURGE_RETAINED_LIBRARY.with(|purge| purge.set(true));
+        }
+    });
+}
+
 pub fn app_picker(
     options: Options,
     invocation: PickerInvocation,
 ) -> Result<(PathBuf, Vec<String>), String> {
-    let (apps, performance) = find_apps(&options, invocation);
-
     #[cfg(target_os = "ios")]
     if swiftui::is_available() {
+        let return_reason = if matches!(invocation, PickerInvocation::ReturnFromGame) {
+            crate::window::take_picker_return_reason()
+        } else {
+            crate::window::PickerReturnReason::Other
+        };
+        let mut state = None;
+        let mut scan_invocation = invocation;
+        let mut retained_catalog = None;
+        let mut retained_return_started = None;
+
+        if matches!(invocation, PickerInvocation::ReturnFromGame) {
+            let check_started = Instant::now();
+            // Take ownership rather than holding a RefCell borrow while Swift
+            // runs a nested main-thread run loop. A memory warning can then
+            // request that this local catalog not be retained after selection.
+            let cached = RETAINED_LIBRARY.with(|retained| retained.borrow_mut().take());
+            let current = capture_library_snapshot();
+            let check_elapsed = check_started.elapsed();
+            echo!("=== iDared Picker Fast Return ===");
+            echo!("Return Type: {}", return_reason.label());
+            echo!("Library cheap-check: {:.3} ms", duration_ms(check_elapsed));
+            match (cached, current) {
+                (Some(cached), Ok(current)) if cached.snapshot == current => {
+                    echo!("Picker Return Mode: retained-catalog");
+                    echo!(
+                        "Retained apps: {}; decoded icon pixels: {:.2} MiB",
+                        cached.apps.len(),
+                        retained_icon_bytes(&cached.apps) as f64 / (1024.0 * 1024.0)
+                    );
+                    retained_catalog = Some(cached);
+                    retained_return_started = Some(check_started);
+                }
+                (Some(_), Ok(_)) => {
+                    echo!("Picker Return Mode: full-rescan");
+                    echo!("Fallback reason: library-changed");
+                }
+                (None, _) => {
+                    echo!("Picker Return Mode: full-rescan");
+                    echo!("Fallback reason: no-retained-library");
+                }
+                (Some(_), Err(error)) => {
+                    echo!("Picker Return Mode: full-rescan");
+                    echo!("Fallback reason: snapshot-error ({error})");
+                }
+            }
+            echo!("=== End iDared Picker Fast Return ===");
+        }
+
         // The picker asks to be shown again when the Games folder changes,
         // e.g. after a game is added in the Files app.
-        let (mut apps, mut performance, mut state) = (apps, performance, None);
         loop {
-            match swiftui::app_picker(apps, state, performance)? {
-                swiftui::Picked::App(path, args) => return Ok((path, args)),
-                swiftui::Picked::Reload(new_state) => {
-                    state = Some(new_state);
-                    (apps, performance) = find_apps(&options, PickerInvocation::LibraryReload);
+            if let Some(catalog) = retained_catalog.take() {
+                let performance = PickerPerformance {
+                    scan_id: NEXT_PICKER_SCAN_ID.fetch_add(1, Ordering::Relaxed),
+                    context: PickerInvocation::RetainedReturn,
+                    scan_started: retained_return_started.unwrap_or_else(Instant::now),
+                };
+                match swiftui::app_picker(Ok(&catalog.apps), state, performance)? {
+                    swiftui::Picked::App(path, args) => {
+                        store_catalog_after_picker(catalog);
+                        return Ok((path, args));
+                    }
+                    swiftui::Picked::Reload(new_state) => {
+                        echo!(
+                            "Retained picker requested a library reload; discarding its catalog."
+                        );
+                        state = Some(new_state);
+                        scan_invocation = PickerInvocation::LibraryReload;
+                    }
+                }
+                continue;
+            }
+
+            let (apps, performance) = find_apps(&options, scan_invocation);
+            match apps {
+                Err(error) => match swiftui::app_picker(Err(&error), state, performance)? {
+                    swiftui::Picked::App(path, args) => return Ok((path, args)),
+                    swiftui::Picked::Reload(new_state) => {
+                        state = Some(new_state);
+                        scan_invocation = PickerInvocation::LibraryReload;
+                    }
+                },
+                Ok(apps) => {
+                    // Capture after the scan and before presentation. The
+                    // Swift picker also watches the directory while visible;
+                    // a change there asks this loop to perform a full reload.
+                    let snapshot = capture_library_snapshot().map_err(|error| {
+                        echo!(
+                            "Warning: picker catalog cannot be retained because its library snapshot failed: {error}"
+                        );
+                        error
+                    });
+                    match swiftui::app_picker(Ok(&apps), state, performance)? {
+                        swiftui::Picked::App(path, args) => {
+                            if let Ok(snapshot) = snapshot {
+                                store_catalog_after_picker(LibraryCatalog { apps, snapshot });
+                            }
+                            return Ok((path, args));
+                        }
+                        swiftui::Picked::Reload(new_state) => {
+                            state = Some(new_state);
+                            scan_invocation = PickerInvocation::LibraryReload;
+                        }
+                    }
                 }
             }
         }
     }
+
+    let (apps, _performance) = find_apps(&options, invocation);
     show_app_picker_gui(options, apps)
 }
 
@@ -1178,7 +1428,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.33",
+            "iDared 32bit {}{}{} · Dev 2.34",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""
@@ -2362,6 +2612,36 @@ fn setup_quick_options(
 mod tests {
     use super::*;
 
+    fn snapshot_test_directory() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "idared-library-snapshot-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        directory
+    }
+
+    fn test_snapshot(directory: &Path) -> LibrarySnapshot {
+        let mut entries = Vec::new();
+        snapshot_entries(
+            directory,
+            "Games",
+            |path| {
+                path.extension().is_some_and(|extension| {
+                    extension.eq_ignore_ascii_case("ipa") || extension.eq_ignore_ascii_case("app")
+                })
+            },
+            &mut entries,
+        )
+        .unwrap();
+        entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+        LibrarySnapshot(entries)
+    }
+
     fn test_app(identifier: &str, name: &str) -> AppInfo {
         AppInfo {
             path: PathBuf::new(),
@@ -2407,6 +2687,42 @@ mod tests {
             picker_compatibility(&test_app("unknown.bundle", "New Game")),
             "needsWork"
         );
+    }
+
+    #[test]
+    fn cheap_library_snapshot_detects_relevant_direct_entry_changes() {
+        let directory = snapshot_test_directory();
+        let first = directory.join("First.ipa");
+        std::fs::write(&first, b"first").unwrap();
+        std::fs::write(directory.join("ignored.txt"), b"ignored").unwrap();
+
+        let original = test_snapshot(&directory);
+        assert_eq!(original, test_snapshot(&directory));
+
+        let second = directory.join("Second.ipa");
+        std::fs::write(&second, b"second").unwrap();
+        let added = test_snapshot(&directory);
+        assert_ne!(original, added);
+
+        std::fs::remove_file(&second).unwrap();
+        // Model a rename as the directory state iDared observes after it:
+        // one entry removed and another entry added. Some Windows security
+        // configurations deny rename operations in the test temp directory.
+        std::fs::remove_file(&first).unwrap();
+        std::fs::write(directory.join("Renamed.ipa"), b"first").unwrap();
+        let renamed = test_snapshot(&directory);
+        assert_ne!(original, renamed);
+
+        let renamed_path = directory.join("Renamed.ipa");
+        std::fs::write(&renamed_path, b"replacement with a different size").unwrap();
+        let replaced = test_snapshot(&directory);
+        assert_ne!(renamed, replaced);
+
+        std::fs::remove_file(renamed_path).unwrap();
+        let removed = test_snapshot(&directory);
+        assert_ne!(replaced, removed);
+
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

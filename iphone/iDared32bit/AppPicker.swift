@@ -70,6 +70,9 @@ private func idaredPickerPerformanceEvent(
     _ elapsedUs: UInt64
 )
 
+@_silgen_name("idared_purge_retained_picker_catalog")
+private func idaredPurgeRetainedPickerCatalog()
+
 private func performanceNow() -> TimeInterval {
     ProcessInfo.processInfo.systemUptime
 }
@@ -103,11 +106,31 @@ enum OpenedGames {
     }
 }
 
+/// The picker UI itself is intentionally short-lived, but Rust retains its
+/// compact discovered-library catalog while a guest runs. Let iOS discard
+/// that catalog under memory pressure; the next return safely performs the
+/// existing full scan instead.
+enum RetainedPickerCatalogMemoryPressure {
+    nonisolated(unsafe) static var observer: NSObjectProtocol?
+
+    static func install() {
+        guard observer == nil else { return }
+        observer = NotificationCenter.default.addObserver(
+            forName: UIApplication.didReceiveMemoryWarningNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            idaredPurgeRetainedPickerCatalog()
+        }
+    }
+}
+
 /// Called from main() before SDL starts. SDL turns files opened in the app
 /// into drop events, which nothing reads, so this also gives them to the
 /// picker. The app opens them in place, so they aren't put in an Inbox.
 @_cdecl("idared_install_open_in_hook")
 public func idaredInstallOpenInHook() {
+    RetainedPickerCatalogMemoryPressure.install()
     let selector = NSSelectorFromString("sendDropFileForURL:")
     for name in ["SDLUIKitSceneDelegate", "SDLUIKitDelegate"] {
         guard let delegateClass = NSClassFromString(name),
