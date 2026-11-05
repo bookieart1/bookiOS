@@ -349,10 +349,15 @@ fn aiff_to_pcm16(bytes: &[u8]) -> Option<symphonia_formats::SymphoniaDecodedToPc
         return None;
     }
     let is_aifc = form_type == b"AIFC";
-    let (mut comm, mut data_start) = (None, None);
+    let (mut comm, mut data_range) = (None, None);
     let mut pos = 12;
     while pos + 8 <= bytes.len() {
         let start = pos + 8;
+        let size = usize::try_from(u32_at(pos + 4)?).ok()?;
+        let end = start.checked_add(size)?;
+        if end > bytes.len() {
+            return None;
+        }
         match &bytes[pos..pos + 4] {
             b"COMM" => {
                 let channels = u16::from_be_bytes(bytes.get(start..start + 2)?.try_into().ok()?);
@@ -367,30 +372,72 @@ fn aiff_to_pcm16(bytes: &[u8]) -> Option<symphonia_formats::SymphoniaDecodedToPc
                 if channels == 0 || !(1..=32).contains(&bits) {
                     return None;
                 }
-                let little_endian = if is_aifc {
+                let compression = if is_aifc {
                     match bytes.get(start + 18..start + 22)? {
-                        b"NONE" | b"twos" => false,
-                        b"sowt" => true,
-                        // Do not guess compressed codecs such as ima4.
+                        b"NONE" | b"twos" => *b"twos",
+                        b"sowt" => *b"sowt",
+                        b"ima4" => *b"ima4",
                         _ => return None,
                     }
                 } else {
-                    false
+                    *b"twos"
                 };
-                comm = Some((channels, frames, bits, rate, little_endian));
+                comm = Some((channels, frames, bits, rate, compression));
             }
-            b"SSND" => data_start = Some(start + 8 + usize::try_from(u32_at(start)?).ok()?),
+            b"SSND" => {
+                let data_start = start
+                    .checked_add(8)?
+                    .checked_add(usize::try_from(u32_at(start)?).ok()?)?;
+                if data_start > end {
+                    return None;
+                }
+                data_range = Some(data_start..end);
+            }
             _ => (),
         }
         // Chunks are padded to an even size.
-        let size = usize::try_from(u32_at(pos + 4)?).ok()?;
-        pos = start.checked_add(size)?.checked_add(size & 1)?;
+        pos = end.checked_add(size & 1)?;
     }
-    let (channels, frames, bits, rate, little_endian) = comm?;
+    let (channels, frames, bits, rate, compression) = comm?;
+    let samples = bytes.get(data_range?)?;
+    if compression == *b"ima4" {
+        if bits != 16 {
+            return None;
+        }
+        let channels_usize = usize::from(channels);
+        let packet_group_bytes = 34usize.checked_mul(channels_usize)?;
+        let packet_groups = samples.len() / packet_group_bytes;
+        let available_frames = packet_groups.checked_mul(64)?;
+        let frame_count = usize::try_from(frames).ok()?.min(available_frames);
+        let mut pcm = Vec::with_capacity(frame_count.checked_mul(channels_usize)?.checked_mul(2)?);
+        let mut written_frames = 0usize;
+        for packet_group in samples.chunks_exact(packet_group_bytes) {
+            if written_frames >= frame_count {
+                break;
+            }
+            let decoded: Vec<[i16; 64]> = packet_group
+                .chunks_exact(34)
+                .map(|packet| decode_ima4(packet.try_into().unwrap()))
+                .collect();
+            let frames_here = (frame_count - written_frames).min(64);
+            for frame in 0..frames_here {
+                for channel in &decoded {
+                    pcm.extend_from_slice(&channel[frame].to_le_bytes());
+                }
+            }
+            written_frames += frames_here;
+        }
+        return Some(symphonia_formats::SymphoniaDecodedToPcm {
+            bytes: pcm,
+            sample_rate: rate.try_into().ok()?,
+            channels: channels.into(),
+            compressed_format: None,
+        });
+    }
     let width = usize::from(bits).div_ceil(8);
     let len = usize::try_from(frames).ok()? * usize::from(channels) * width;
-    let samples = bytes.get(data_start?..)?;
     let samples = &samples[..len.min(samples.len() / width * width)];
+    let little_endian = compression == *b"sowt";
     Some(symphonia_formats::SymphoniaDecodedToPcm {
         // Samples are signed and big-endian: keep the top 16 bits.
         bytes: samples
@@ -805,5 +852,31 @@ mod tests {
         assert_eq!(pcm.sample_rate, 44100);
         assert_eq!(pcm.channels, 1);
         assert_eq!(pcm.bytes, [0x34, 0x12, 0xdc, 0xfe]);
+    }
+
+    #[test]
+    fn aifc_ima4_packets_are_decoded_and_interleaved_as_pcm16() {
+        let mut bytes = b"FORM\0\0\0\0AIFCCOMM\0\0\0\x16".to_vec();
+        bytes.extend_from_slice(&[
+            0, 1, // mono
+            0, 0, 0, 64, // one 64-frame packet
+            0, 16, // decoded sample size
+            0x40, 0x0d, 0xac, 0x44, 0, 0, 0, 0, 0, 0, // 22050 extended
+            b'i', b'm', b'a', b'4',
+        ]);
+        let packet = [0u8; 34];
+        bytes.extend_from_slice(b"SSND\0\0\0\x2a\0\0\0\0\0\0\0\0");
+        bytes.extend_from_slice(&packet);
+        let form_size = u32::try_from(bytes.len() - 8).unwrap().to_be_bytes();
+        bytes[4..8].copy_from_slice(&form_size);
+
+        let pcm = aiff_to_pcm16(&bytes).unwrap();
+        assert_eq!(pcm.sample_rate, 22050);
+        assert_eq!(pcm.channels, 1);
+        let expected: Vec<u8> = decode_ima4(&packet)
+            .into_iter()
+            .flat_map(i16::to_le_bytes)
+            .collect();
+        assert_eq!(pcm.bytes, expected);
     }
 }

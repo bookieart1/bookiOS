@@ -1,9 +1,9 @@
 # iDared 32-bit tested-app compatibility ledger
 
 Last reconciled: November 4, 2026
-Latest device-tested checkpoint: **iDared Dev 2.28**, implementation `5f421ee519024ee137ace6e70e54f4df03d79400`, IPA workflow `41862962461`; four supplied logs cover all 27 requested launches.
-Latest built checkpoint: **iDared Dev 2.28**, same embedded implementation and workflow. Build verification and physical-device compatibility remain separate evidence categories.
-Current activity: **Dev 2.29 is an implementation candidate for the complete authorized Dev 2.28 follow-up: all fourteen later boundaries receive either a safe general contract, a strict partial contract or a bounded causal diagnostic, and Current, Wire Way, Fieldrunners 2, Trism, Carnival and Labyrinth 2 receive the focused diagnostics described in `dev-2.29-follow-up-contracts-and-diagnostics.md`. Hosted compilation/tests and physical-device behavior are not yet established.**
+Latest device-tested checkpoint: **iDared Dev 2.29**, implementation `94b8d061cc8563a8fbe7e07803cb97fb5fa6f924`, IPA workflow `41899732869`; two supplied logs cover the full requested pass.
+Latest built checkpoint: **iDared Dev 2.30**, implementation `de27d6015d71b426e74a6d42f296909d0f671342`; this is an instrumentation build and is not evidence of changed compatibility.
+Current activity: **Dev 2.31 is the authorized Dev 2.29 compatibility follow-up. It implements the exact later contracts for Bike Race Pro, Carnival, Labyrinth 2, Legends of Ooo, ParaPanic HD, The Sims 3 and Trism, and adds bounded causal evidence for 100 Chambers, Cannon Cadets, Current, Fieldrunners 2, Kick the Buddy, MX Mayhem and Wire Way. Dismount remains in the pass for bounded performance evidence; Spoing is the relevant healthy control. Hosted Fast Preflight, IPA packaging and physical-device behavior are not yet established.**
 
 The maintainer review at the end of this ledger qualifies earlier implementation claims. In particular, Dev 1.47's font fallback is provisional, its arc implementation is approximate, and its date formatter is not locale/time-zone complete. Earlier sections are historical checkpoints, not a claim that all listed work is currently complete.
 
@@ -4356,3 +4356,41 @@ The exact evidence hashes, every title's later boundary, compatibility status
 and next discriminating action are preserved in
 `dev-2.28-device-result.md`. This result updates evidence only and does not
 authorize a source change, commit, push or IPA build.
+
+## Dev 2.29 physical-device result — November 4, 2026
+
+Two supplied logs verify implementation
+`94b8d061cc8563a8fbe7e07803cb97fb5fa6f924` and workflow
+`41899732869`; the permanent recorder and focused Dev 2.29 diagnostics were
+active. Perfect Cell and Trainyard appear working in the tested scope. Dismount
+now reaches gameplay but averages only about 15.4 presentations per second, so
+it remains partial rather than fully compatible.
+
+The pass materially clarifies several unresolved titles. Current delivers all
+recorded taps to its interactive EAGL view and presents near 58 Hz, placing the
+failure in later guest touch/menu dispatch. Kick the Buddy presents near 54 Hz
+and audibly reacts to blind taps beneath an all-black result, making this a
+rendering/content-state defect rather than input loss or a freeze. Fieldrunners
+2 has six blocked/sleeping guest threads, zero main-loop iterations and zero
+presentations; queued Home requests cannot run because initialization is in a
+guest-wide wait. Wire Way continues to present and deliberately draws opaque
+black after level completion; the enlarged rolling selector history was
+overwritten by later presentation/layout traffic and did not retain the
+decisive fade/audio-stop callback.
+
+Carnival's missing music and sparse effects are now attributed to 119 honest
+decode failures for IMA4-compressed AIFC, which Dev 2.29's uncompressed AIFC
+support does not cover. Its separate slowdown remains unexplained and is not
+proved audio-related. Labyrinth 2's wall-crossing defect was reproduced only
+once; one launch also reveals missing `UIActivityIndicatorView.hidesWhenStopped`,
+while a restored launch runs without a panic. Trism reaches gameplay and then
+stops at missing `_CGContextClosePath`. Bike Race Pro reaches mutable-dictionary
+URL writing, ParaPanic HD reaches `NSProcessInfo.processIdentifier`, The Sims 3
+reaches Clear blend mode, and Legends of Ooo reaches absent
+`NSManagedObjectModel`. Cannon Cadets, MX Mayhem and 100 Chambers remain strict
+graphics, lifetime and KVC-origin investigations respectively.
+
+Complete hashes, per-title evidence, compatibility classification and preserved
+next actions are in `dev-2.29-device-result.md`. This checkpoint updates
+documentation only. It does not authorize or contain another implementation,
+commit, push, workflow or IPA.

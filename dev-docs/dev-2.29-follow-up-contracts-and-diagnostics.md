@@ -80,3 +80,10 @@ test matrix and iOS packaging must be reported separately after the GitHub
 workflows run. Local Rust/Cargo/CMake/preflight processes are deliberately not
 run on the user's computer because the user previously required hosted-only
 validation after a local build attempt destabilized the workstation.
+
+## Physical-device result
+
+The verified Dev 2.29 device evidence, log hashes, per-title outcomes and
+preserved next actions are recorded in `dev-2.29-device-result.md`. That result
+is an evidence checkpoint only and does not authorize another implementation or
+build.

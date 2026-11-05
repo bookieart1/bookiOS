@@ -10,7 +10,7 @@ use super::cg_color_space::{
     kCGColorSpaceGenericGray, kCGColorSpaceGenericRGB, CGColorSpaceHostObject, CGColorSpaceRef,
 };
 use super::cg_context::{
-    blend_mode_name, kCGBlendModeCopy, kCGBlendModeDarken, kCGBlendModeLighten,
+    blend_mode_name, kCGBlendModeClear, kCGBlendModeCopy, kCGBlendModeDarken, kCGBlendModeLighten,
     kCGBlendModeMultiply, kCGBlendModeNormal, kCGBlendModeScreen, kCGBlendModeSourceAtop,
     kCGBlendModeSourceIn, kCGBlendModeSourceOut, CGBlendMode, CGContextHostObject, CGContextRef,
     CGContextSubclass,
@@ -292,6 +292,10 @@ fn blend_straight(
     fg: (f32, f32, f32, f32),
     blend_mode: CGBlendMode,
 ) -> (f32, f32, f32, f32) {
+    if blend_mode == kCGBlendModeClear {
+        let remaining = 1.0 - fg.3;
+        return (bg.0, bg.1, bg.2, bg.3 * remaining);
+    }
     assert_eq!(blend_mode, kCGBlendModeNormal); // TODO
     if fg.3 == 0.0 {
         // If fg.3 == 0.0 we attempt to blend fully transparent color.
@@ -318,6 +322,15 @@ fn blend_premultiplied(
 ) -> (f32, f32, f32, f32) {
     if blend_mode == kCGBlendModeCopy {
         return fg;
+    }
+    if blend_mode == kCGBlendModeClear {
+        let remaining = 1.0 - fg.3;
+        return (
+            bg.0 * remaining,
+            bg.1 * remaining,
+            bg.2 * remaining,
+            bg.3 * remaining,
+        );
     }
 
     let neg_bg_a = 1.0 - bg.3;
@@ -900,3 +913,38 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGBitmapContextGetHeight(_)),
     export_c_func!(CGBitmapContextGetBytesPerRow(_)),
 ];
+
+#[cfg(test)]
+mod blend_mode_tests {
+    use super::*;
+
+    fn assert_pixel_near(actual: (f32, f32, f32, f32), expected: (f32, f32, f32, f32)) {
+        for (actual, expected) in [actual.0, actual.1, actual.2, actual.3]
+            .into_iter()
+            .zip([expected.0, expected.1, expected.2, expected.3])
+        {
+            assert!((actual - expected).abs() < 0.000_001);
+        }
+    }
+
+    #[test]
+    fn clear_blend_removes_covered_premultiplied_destination() {
+        let background = (0.4, 0.2, 0.1, 0.5);
+        assert_eq!(
+            blend_premultiplied(background, (0.8, 0.7, 0.6, 1.0), kCGBlendModeClear),
+            (0.0, 0.0, 0.0, 0.0)
+        );
+        assert_pixel_near(
+            blend_premultiplied(background, (0.0, 0.0, 0.0, 0.25), kCGBlendModeClear),
+            (0.3, 0.15, 0.075, 0.375)
+        );
+    }
+
+    #[test]
+    fn clear_blend_preserves_straight_color_while_reducing_alpha_for_coverage() {
+        assert_pixel_near(
+            blend_straight((0.8, 0.4, 0.2, 0.6), (1.0, 1.0, 1.0, 0.5), kCGBlendModeClear),
+            (0.8, 0.4, 0.2, 0.3)
+        );
+    }
+}

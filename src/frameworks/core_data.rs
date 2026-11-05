@@ -27,6 +27,9 @@ const CLASSES: ClassExports = objc_classes! {
 @implementation NSPersistentStoreCoordinator: NSObject
 @end
 
+@implementation NSManagedObjectModel: NSObject
+@end
+
 };
 
 #[cfg(test)]
@@ -39,6 +42,15 @@ mod tests {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
         let object: id = msg_class![env; NSPersistentStoreCoordinator new];
+        assert!(!object.is_null());
+        release(env, object);
+    }
+
+    #[test]
+    fn managed_object_model_has_real_class_identity_and_allocation() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let object: id = msg_class![env; NSManagedObjectModel new];
         assert!(!object.is_null());
         release(env, object);
     }

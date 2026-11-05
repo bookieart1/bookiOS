@@ -39,6 +39,7 @@ const STRING_SEARCHES: usize = 32;
 const TOUCH_EVENTS: usize = 64;
 const SELECTOR_EVENTS: usize = 64;
 const FOCUSED_BOUNDARY_EVENTS: usize = 128;
+const FOCUSED_CATEGORY_EVENTS: usize = 64;
 const MOTION_EVENTS: usize = 64;
 const KVO_EVENTS: usize = 16;
 const MEDIA_EVENTS: usize = 16;
@@ -424,6 +425,8 @@ pub struct ThreadSnapshot {
     pub state: u8,
     pub blocked: u8,
     pub detail: u32,
+    pub code: [u8; 8],
+    pub code_len: u8,
 }
 
 #[derive(Default)]
@@ -571,6 +574,13 @@ pub struct Recorder {
     touch_events: Ring<TouchEvent, TOUCH_EVENTS>,
     selector_events: Ring<SelectorEvent, SELECTOR_EVENTS>,
     focused_boundary_events: Ring<FocusedBoundaryEvent, FOCUSED_BOUNDARY_EVENTS>,
+    /// Category-specific rings prevent the decisive input, transition, KVC or
+    /// presentation boundary from being overwritten by unrelated focused
+    /// traffic in long-running games.
+    input_boundary_events: Ring<FocusedBoundaryEvent, FOCUSED_CATEGORY_EVENTS>,
+    transition_boundary_events: Ring<FocusedBoundaryEvent, FOCUSED_CATEGORY_EVENTS>,
+    kvc_boundary_events: Ring<FocusedBoundaryEvent, FOCUSED_CATEGORY_EVENTS>,
+    presentation_boundary_events: Ring<FocusedBoundaryEvent, FOCUSED_CATEGORY_EVENTS>,
     kvo_events: Ring<KvoEvent, KVO_EVENTS>,
     media_events: Ring<MediaEvent, MEDIA_EVENTS>,
     motion_events: Ring<MotionEvent, MOTION_EVENTS>,
@@ -625,6 +635,10 @@ impl Recorder {
             touch_events: Ring::default(),
             selector_events: Ring::default(),
             focused_boundary_events: Ring::default(),
+            input_boundary_events: Ring::default(),
+            transition_boundary_events: Ring::default(),
+            kvc_boundary_events: Ring::default(),
+            presentation_boundary_events: Ring::default(),
             kvo_events: Ring::default(),
             media_events: Ring::default(),
             motion_events: Ring::default(),
@@ -1027,8 +1041,9 @@ impl Recorder {
         echo_no_panic!("flight progress ms={} tid={} pc={:#x} lr={:#x} thread-slots={} runnable={} api={} objc={} main-loops={} EAGL-returns={} yields={} main-sources[timer,selector,queue,unit]={:?}",
             p.ms, p.thread, p.pc, p.lr, p.threads, p.runnable, p.api, p.objc, p.run_loops, p.presents, p.yields, p.sources);
         for sample in &p.thread_samples[..usize::from(p.thread_sample_count)] {
-            echo_no_panic!("flight thread snapshot tid={} pc={:#x} lr={:#x} sp={:#x} state={} blocked={} detail={:#x}",
-                sample.id, sample.pc, sample.lr, sample.sp, sample.state, sample.blocked, sample.detail);
+            echo_no_panic!("flight thread snapshot tid={} pc={:#x} lr={:#x} sp={:#x} state={} blocked={} detail={:#x} code={:02x?}",
+                sample.id, sample.pc, sample.lr, sample.sp, sample.state, sample.blocked, sample.detail,
+                &sample.code[..usize::from(sample.code_len)]);
         }
     }
     fn print_event(&self, e: &Event) {
@@ -1190,6 +1205,25 @@ impl Recorder {
                 event.sequence, event.thread, event.category, event.selector,
                 event.receiver, event.receiver_class, event.arguments,
                 event.argument_classes[0], event.argument_classes[1], event.pc, event.lr);
+        }
+        for (label, ring) in [
+            ("input", &self.input_boundary_events),
+            ("transition", &self.transition_boundary_events),
+            ("kvc", &self.kvc_boundary_events),
+            ("presentation", &self.presentation_boundary_events),
+        ] {
+            echo_no_panic!(
+                "flight focused {} boundaries: newest {}; total={} (category-isolated bounded history)",
+                label,
+                FOCUSED_CATEGORY_EVENTS,
+                ring.written
+            );
+            for event in ring.iter() {
+                echo_no_panic!("flight focused {} #{} tid={} selector=\"{}\" receiver={:#x} receiver-class=\"{}\" args={:08x?} arg-descriptions=[\"{}\",\"{}\"] pc={:#x} lr={:#x}",
+                    label, event.sequence, event.thread, event.selector,
+                    event.receiver, event.receiver_class, event.arguments,
+                    event.argument_classes[0], event.argument_classes[1], event.pc, event.lr);
+            }
         }
         echo_no_panic!(
             "flight KVO lifecycle: newest {KVO_EVENTS}; total={} (bounded registration/change/delivery evidence)",
@@ -1673,22 +1707,8 @@ impl Environment {
         let category = if selector_matches(
             name.bytes(),
             &[
-                b"target",
-                b"Target",
-                b"action",
-                b"Action",
-                b"response",
-                b"Response",
                 b"complete",
                 b"Complete",
-                b"notification",
-                b"Notification",
-                b"unpack",
-                b"Unpack",
-                b"invoke",
-                b"Invocation",
-                b"operation",
-                b"Operation",
                 b"scene",
                 b"Scene",
                 b"transition",
@@ -1699,6 +1719,28 @@ impl Environment {
                 b"Audio",
                 b"stop",
                 b"Stop",
+                b"fade",
+                b"Fade",
+            ],
+        ) {
+            Some("transition")
+        } else if selector_matches(
+            name.bytes(),
+            &[
+                b"target",
+                b"Target",
+                b"action",
+                b"Action",
+                b"response",
+                b"Response",
+                b"notification",
+                b"Notification",
+                b"unpack",
+                b"Unpack",
+                b"invoke",
+                b"Invocation",
+                b"operation",
+                b"Operation",
             ],
         ) {
             Some("callback")
@@ -1757,7 +1799,7 @@ impl Environment {
             None
         };
         if let Some(category) = category {
-            recorder.focused_boundary_events.push(FocusedBoundaryEvent {
+            let event = FocusedBoundaryEvent {
                 sequence: recorder.focused_boundary_events.written.saturating_add(1),
                 thread: self.current_thread,
                 category,
@@ -1771,7 +1813,15 @@ impl Environment {
                 ],
                 pc: regs[15],
                 lr: regs[14],
-            });
+            };
+            recorder.focused_boundary_events.push(event);
+            match category {
+                "input" => recorder.input_boundary_events.push(event),
+                "transition" => recorder.transition_boundary_events.push(event),
+                "kvc" => recorder.kvc_boundary_events.push(event),
+                "presentation" => recorder.presentation_boundary_events.push(event),
+                _ => (),
+            }
         }
         let call = recorder.begin(Call {
             thread: self.current_thread,

@@ -1659,6 +1659,18 @@ impl Environment {
                         ThreadBlock::Suspended(count, _) => (7, *count as u32),
                         ThreadBlock::FileObjectLock(pointer) => (8, pointer.to_bits()),
                     };
+                    let mut code = [0u8; 8];
+                    let pc = regs[15] & !1;
+                    let code_len = self
+                        .mem
+                        .get_bytes_fallible(
+                            mem::ConstVoidPtr::from_bits(pc),
+                            code.len() as GuestUSize,
+                        )
+                        .map_or(0, |bytes| {
+                            code.copy_from_slice(bytes);
+                            code.len() as u8
+                        });
                     thread_samples[thread_sample_count] = crate::diagnostics::ThreadSnapshot {
                         id: tid,
                         pc: regs[15],
@@ -1672,6 +1684,8 @@ impl Environment {
                         },
                         blocked,
                         detail,
+                        code,
+                        code_len,
                     };
                     thread_sample_count += 1;
                 }

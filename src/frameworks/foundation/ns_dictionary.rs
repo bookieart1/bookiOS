@@ -556,6 +556,36 @@ pub const CLASSES: ClassExports = objc_classes! {
     res
 }
 
+- (bool)writeToURL:(id)url // NSURL*
+        atomically:(bool)atomically {
+    if url == nil {
+        return false;
+    }
+    let is_file_url: bool = msg![env; url isFileURL];
+    if !is_file_url {
+        log_dbg!(
+            "[(NSDictionary *){:?} writeToURL:{:?} atomically:{}] -> false (non-file URL)",
+            this,
+            url,
+            atomically
+        );
+        return false;
+    }
+    let path: id = msg![env; url path];
+    if path == nil {
+        return false;
+    }
+    let res: bool = msg![env; this writeToFile:path atomically:atomically];
+    log_dbg!(
+        "[(NSDictionary *){:?} writeToURL:{:?} atomically:{}] -> {}",
+        this,
+        url,
+        atomically,
+        res
+    );
+    res
+}
+
 // TODO
 
 - (id)valueForKey:(id)key { // NSString*
@@ -1561,5 +1591,25 @@ mod tests {
             "\"lives\" = 3;\n"
         );
         release(env, dictionary);
+    }
+
+    #[test]
+    fn property_list_dictionary_writes_to_file_url() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let directory = GuestPath::new("/Documents");
+        env.fs.create_dir_all(directory).unwrap();
+        let key = get_static_str(env, "mode");
+        let value = get_static_str(env, "arcade");
+        let dictionary = dict_from_keys_and_objects(env, &[(key, value)]);
+        let path = from_rust_string(env, "/Documents/BikeRace.plist".to_owned());
+        let url: id = msg_class![env; NSURL fileURLWithPath:path];
+
+        let success: bool = msg![env; dictionary writeToURL:url atomically:true];
+
+        assert!(success);
+        assert!(!env.fs.read(GuestPath::new("/Documents/BikeRace.plist")).unwrap().is_empty());
+        release(env, dictionary);
+        release(env, path);
     }
 }

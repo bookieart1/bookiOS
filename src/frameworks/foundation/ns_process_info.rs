@@ -63,6 +63,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     1
 }
 
+- (i32)processIdentifier {
+    assert_process_info_singleton(env, this);
+    // The guest is one emulated process. Keep its identity stable and
+    // positive without exposing the host application's PID.
+    1
+}
+
 - (id)operatingSystemVersionString {
     assert_process_info_singleton(env, this); // TODO
     // Keep this consistent with UIDevice's emulated systemVersion.
@@ -139,5 +146,16 @@ mod tests {
         let value: id = msg![env; dictionary objectForKey:key];
         assert_eq!(ns_string::to_rust_string(env, value), "/guest/home");
         release(env, key);
+    }
+
+    #[test]
+    fn process_identifier_is_stable_positive_and_guest_local() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let process: id = msg_class![env; NSProcessInfo processInfo];
+        let first: i32 = msg![env; process processIdentifier];
+        let second: i32 = msg![env; process processIdentifier];
+        assert_eq!(first, 1);
+        assert_eq!(second, first);
     }
 }

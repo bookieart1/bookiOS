@@ -21,7 +21,7 @@ use super::cg_image::CGImageRef;
 use super::cg_path::{
     kCGLineCapButt, kCGLineCapRound, kCGLineCapSquare, kCGPathElementAddLineToPoint,
     kCGPathElementCloseSubpath, kCGPathElementMoveToPoint, CGLineCap, CGMutablePathHostObject,
-    CGMutablePathRef, CGPathCreateMutable, CGPathElement,
+    CGMutablePathRef, CGPathCloseSubpath, CGPathCreateMutable, CGPathElement,
 };
 use super::{cg_bitmap_context, cg_color, CGFloat, CGPoint, CGRect, CGSize};
 use crate::dyld::{export_c_func, FunctionExports};
@@ -1107,6 +1107,14 @@ fn CGContextAddLineToPoint(env: &mut Environment, context: CGContextRef, x: CGFl
     env.objc.borrow_mut::<CGContextHostObject>(context).path = host_obj;
 }
 
+fn CGContextClosePath(env: &mut Environment, context: CGContextRef) {
+    log_dbg!("CGContextClosePath({:?})", context);
+    let path = env.objc.borrow::<CGContextHostObject>(context).path;
+    if !path.is_null() {
+        CGPathCloseSubpath(env, path);
+    }
+}
+
 /// Append a path object to the context's current path without drawing it.
 ///
 /// Core Graphics path objects are immutable from the caller's perspective, so
@@ -1329,6 +1337,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGContextSetLineWidth(_, _)),
     export_c_func!(CGContextMoveToPoint(_, _, _)),
     export_c_func!(CGContextAddLineToPoint(_, _, _)),
+    export_c_func!(CGContextClosePath(_)),
     export_c_func!(CGContextAddPath(_, _)),
     export_c_func!(CGContextStrokePath(_)),
     export_c_func!(CGContextFillEllipseInRect(_, _)),
