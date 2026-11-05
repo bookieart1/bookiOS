@@ -15,11 +15,116 @@ on:
         description: Run only the native Foundation contract reference
         type: boolean
         default: false
+      force_preflight_failure:
+        description: Test the preflight gate without starting an IPA
+        type: boolean
+        default: false
+      build_ipa:
+        description: Build an IPA after a successful manual preflight
+        type: boolean
+        default: false
+
+# A newer ordinary development commit supersedes every job from an older one,
+# including queued/running preflight, IPA, Windows and Android work. Manual and
+# release-oriented runs receive unique groups and are never auto-cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ci/unsigned-ipa-baseline' }}
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  candidate-scope:
+    name: Identify workflow-only setup commits
+    if: ${{ !inputs.native_reference_only }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      workflow_only: ${{ steps.scope.outputs.workflow_only }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+      - name: Classify candidate scope conservatively
+        id: scope
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          workflow_only=false
+          if [[ "$GITHUB_EVENT_NAME" == "push" && -n "${BASE_SHA:-}" && ! "$BASE_SHA" =~ ^0+$ ]]; then
+            if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+              git fetch --no-tags --depth=1 origin "$BASE_SHA" || true
+            fi
+            if git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
+              mapfile -t changed_files < <(git diff --name-only "$BASE_SHA" "$GITHUB_SHA")
+              if (( ${#changed_files[@]} > 0 )); then
+                workflow_only=true
+                for path in "${changed_files[@]}"; do
+                  if [[ "$path" != .github/workflows/* ]]; then
+                    workflow_only=false
+                    break
+                  fi
+                done
+              fi
+            fi
+          fi
+          echo "workflow_only=$workflow_only" | tee -a "$GITHUB_OUTPUT"
+
+  fast-preflight-macos:
+    name: Fast macOS preflight
+    if: ${{ !inputs.native_reference_only && github.ref == 'refs/heads/ci/unsigned-ipa-baseline' }}
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          fetch-depth: 1
+      - name: Verify the exact candidate commit
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Exercise the failure gate when explicitly requested
+        if: ${{ inputs.force_preflight_failure }}
+        run: |
+          echo "Intentional preflight-gate test: the IPA job must remain skipped."
+          exit 1
+      - name: Restore CMake 3.31.6
+        id: cache-cmake
+        uses: actions/cache@v4
+        with:
+          path: vendor/cmake
+          key: cmake_3_31_6_macos
+      - name: Download CMake 3.31.6
+        if: ${{ steps.cache-cmake.outputs.cache-hit != 'true' }}
+        run: curl -L -O "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-macos-universal.tar.gz"
+      - name: Extract CMake 3.31.6
+        if: ${{ steps.cache-cmake.outputs.cache-hit != 'true' }}
+        run: tar xzvf "cmake-3.31.6-macos-universal.tar.gz" -C vendor && mv "vendor/cmake-3.31.6-macos-universal/CMake.app/Contents/" vendor/cmake && rm -rf vendor/cmake-3.31.6-macos-universal
+      - name: Restore LLVM 12
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: tests/llvm
+          key: llvm_12_0_0_macOS_x64
+      - name: Download LLVM 12
+        if: ${{ steps.cache-llvm.outputs.cache-hit != 'true' }}
+        run: curl -L -O "https://github.com/llvm/llvm-project/releases/download/llvmorg-12.0.0/clang+llvm-12.0.0-x86_64-apple-darwin.tar.xz"
+      - name: Extract LLVM 12
+        if: ${{ steps.cache-llvm.outputs.cache-hit != 'true' }}
+        run: tar -xf clang+llvm-12.0.0-x86_64-apple-darwin.tar.xz && mkdir tests/llvm && mv clang+llvm-12.0.0-x86_64-apple-darwin/* tests/llvm
+      - name: Get common iPhone OS 3.0 SDK fixtures
+        run: cd "$GITHUB_WORKSPACE/tests" && curl -L https://github.com/touchHLE/common-3.0-sdk/releases/latest/download/common-3.0.sdk-macOS-universal.tar.gz | tar xzv
+      - name: Install the x86_64 macOS Rust target
+        run: rustup target add x86_64-apple-darwin
+      - name: Compile and run the library tests
+        run: cargo test --lib --target x86_64-apple-darwin
+        env:
+          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+
   native-reference-only:
     if: ${{ inputs.native_reference_only }}
     runs-on: macos-15-intel
@@ -32,7 +137,10 @@ jobs:
           "$RUNNER_TEMP/foundation-contracts"
 
   lint-and-test-macos:
-    if: ${{ !inputs.native_reference_only }}
+    # The development branch uses the smaller preflight above. Preserve this
+    # full historical job for the release branch, pull requests and manual
+    # validation on other refs.
+    if: ${{ !inputs.native_reference_only && github.ref != 'refs/heads/ci/unsigned-ipa-baseline' }}
 
     # Tests already target x86_64; use its native pool after repeated ARM64
     # capacity cancellations. The arm64 iOS IPA workflow remains unchanged.
@@ -115,9 +223,10 @@ jobs:
         run: cc tests/TestApp_source/cli_tests.m tests/TestApp_source/CGAffineTransform.c tests/TestApp_source/SyncTester.m tests/TestApp_source/RespondsToSelector.m tests/TestApp_source/AutoReleasePoolTest.m tests/TestApp_source/Initialize.m -framework CoreFoundation -framework Foundation -framework CoreGraphics -DDEFINE_ME_WHEN_BUILDING_ON_MACOS -DTestApp_cli_tests_main=main -ObjC && ./a.out
 
   lint-and-test-win:
-    if: ${{ !inputs.native_reference_only }}
+    if: ${{ !inputs.native_reference_only && !inputs.force_preflight_failure }}
 
     runs-on: windows-2022
+    continue-on-error: ${{ github.ref == 'refs/heads/ci/unsigned-ipa-baseline' }}
 
     steps:
     - uses: actions/checkout@v4
@@ -176,9 +285,10 @@ jobs:
         CMAKE: ${{ github.workspace }}\vendor\cmake\bin\cmake
 
   lint-android:
-    if: ${{ !inputs.native_reference_only }}
+    if: ${{ !inputs.native_reference_only && !inputs.force_preflight_failure }}
 
     runs-on: ubuntu-latest
+    continue-on-error: ${{ github.ref == 'refs/heads/ci/unsigned-ipa-baseline' }}
 
     steps:
     - uses: actions/checkout@v4
@@ -223,3 +333,16 @@ jobs:
         ANDROID_NDK: '/usr/local/lib/android/sdk/ndk/28.2.13676358'
         ANDROID_NDK_HOME: '/usr/local/lib/android/sdk/ndk/28.2.13676358'
         CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+
+  build-unsigned-ipa:
+    name: Build IPA after successful preflight
+    needs: [candidate-scope, fast-preflight-macos]
+    if: >-
+      ${{
+        always() &&
+        needs.candidate-scope.result == 'success' &&
+        needs.fast-preflight-macos.result == 'success' &&
+        needs.candidate-scope.outputs.workflow_only != 'true' &&
+        (github.event_name == 'push' || inputs.build_ipa)
+      }}
+    uses: ./.github/workflows/unsigned-ios-ipa.yml

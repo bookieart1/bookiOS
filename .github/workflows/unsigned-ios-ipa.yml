@@ -4,9 +4,10 @@ name: Build unsigned development IPA
 # development branch below and install beside the App Store application.
 
 on:
-  push:
-    branches:
-      - ci/unsigned-ipa-baseline
+  # Ordinary development pushes reach this workflow only after the caller's
+  # fast macOS preflight succeeds. Manual runs remain available for preserved
+  # milestone/recovery builds.
+  workflow_call:
   workflow_dispatch:
 
 # This workflow only needs to read the repository and upload its build artifact.
@@ -40,8 +41,12 @@ jobs:
       - name: Check out the fork
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.sha }}
           submodules: recursive
           fetch-depth: 1
+
+      - name: Verify the exact candidate commit
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
 
       - name: Show build tools
         run: |
