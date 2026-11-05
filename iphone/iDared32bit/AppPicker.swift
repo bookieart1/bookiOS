@@ -493,7 +493,8 @@ private enum HostPresentationCoordinator {
             let windows = scene.windows.enumerated().map { index, window in
                 let root = window.rootViewController
                 let top = topViewController(root)
-                return "w\(index){id=\(objectLabel(window)),key=\(window.isKeyWindow),hidden=\(window.isHidden),alpha=\(String(format: \"%.2f\", window.alpha)),level=\(window.windowLevel.rawValue),root=\(objectLabel(root)),top=\(objectLabel(top))}"
+                let alpha = String(format: "%.2f", window.alpha)
+                return "w\(index){id=\(objectLabel(window)),key=\(window.isKeyWindow),hidden=\(window.isHidden),alpha=\(alpha),level=\(window.windowLevel.rawValue),root=\(objectLabel(root)),top=\(objectLabel(top))}"
             }.joined(separator: ";")
             emit(
                 "hierarchy",
@@ -604,9 +605,11 @@ private enum HostPresentationCoordinator {
             visible ? "yes" : "no",
             inFlight ? "yes" : "no"
         )
+        let targetSize = String(format: "%.0fx%.0f", size.width, size.height)
+        let duration = String(format: "%.3f", coordinator.transitionDuration)
         emit(
             "picker-transition-begin",
-            "targetSize=\(String(format: \"%.0fx%.0f\", size.width, size.height)) duration=\(String(format: \"%.3f\", coordinator.transitionDuration)) animated=\(coordinator.isAnimated) interactive=\(coordinator.isInteractive) initiallyInteractive=\(coordinator.initiallyInteractive) capturedOwner=\(currentOwner.label) capturedGeneration=\(currentGeneration) capturedVisible=\(visible) capturedInFlight=\(inFlight) sceneOrientation=\(activeWindowScene()?.interfaceOrientation.rawValue ?? 0)"
+            "targetSize=\(targetSize) duration=\(duration) animated=\(coordinator.isAnimated) interactive=\(coordinator.isInteractive) initiallyInteractive=\(coordinator.initiallyInteractive) capturedOwner=\(currentOwner.label) capturedGeneration=\(currentGeneration) capturedVisible=\(visible) capturedInFlight=\(inFlight) sceneOrientation=\(activeWindowScene()?.interfaceOrientation.rawValue ?? 0)"
         )
         hierarchySnapshot("picker-transition-begin")
     }
@@ -627,9 +630,11 @@ private enum HostPresentationCoordinator {
             activeWindowScene()?.interfaceOrientation.rawValue ?? 0,
             visible ? "yes" : "no"
         )
+        let percentComplete = String(format: "%.3f", context.percentComplete)
+        let completionVelocity = String(format: "%.3f", context.completionVelocity)
         emit(
             "picker-transition-completion",
-            "capturedOwner=\(currentOwner.label) capturedGeneration=\(currentGeneration) capturedVisible=\(visible) cancelled=\(context.isCancelled) percentComplete=\(String(format: \"%.3f\", context.percentComplete)) completionVelocity=\(String(format: \"%.3f\", context.completionVelocity)) sceneOrientation=\(activeWindowScene()?.interfaceOrientation.rawValue ?? 0)"
+            "capturedOwner=\(currentOwner.label) capturedGeneration=\(currentGeneration) capturedVisible=\(visible) cancelled=\(context.isCancelled) percentComplete=\(percentComplete) completionVelocity=\(completionVelocity) sceneOrientation=\(activeWindowScene()?.interfaceOrientation.rawValue ?? 0)"
         )
         hierarchySnapshot("picker-transition-completion")
         DispatchQueue.main.async {
