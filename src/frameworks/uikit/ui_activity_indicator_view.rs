@@ -95,6 +95,10 @@ mod tests {
     fn hides_when_stopped_defaults_true_and_controls_visibility() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        // UIView's initializer receives a CGRect and therefore spills part of
+        // the guest ABI argument to the emulated stack.
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let indicator: id = msg_class![env; UIActivityIndicatorView alloc];
         let indicator: id = msg![env; indicator initWithActivityIndicatorStyle:0i32];
         assert!(msg![env; indicator hidesWhenStopped]);
@@ -109,5 +113,7 @@ mod tests {
         assert!(!msg![env; indicator hidesWhenStopped]);
         assert!(!msg![env; indicator isHidden]);
         release(env, indicator);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

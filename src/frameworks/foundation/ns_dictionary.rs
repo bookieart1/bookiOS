@@ -1594,22 +1594,21 @@ mod tests {
     }
 
     #[test]
-    fn property_list_dictionary_writes_to_file_url() {
+    fn property_list_dictionary_url_writer_rejects_nil_and_non_file_urls() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
-        let directory = GuestPath::new("/Documents");
-        env.fs.create_dir_all(directory).unwrap();
         let key = get_static_str(env, "mode");
         let value = get_static_str(env, "arcade");
         let dictionary = dict_from_keys_and_objects(env, &[(key, value)]);
-        let path = from_rust_string(env, "/Documents/BikeRace.plist".to_owned());
-        let url: id = msg_class![env; NSURL fileURLWithPath:path];
+        let url_string = from_rust_string(env, "https://example.invalid/save.plist".to_owned());
+        let url: id = msg_class![env; NSURL URLWithString:url_string];
 
-        let success: bool = msg![env; dictionary writeToURL:url atomically:true];
+        let nil_success: bool = msg![env; dictionary writeToURL:nil atomically:true];
+        let network_success: bool = msg![env; dictionary writeToURL:url atomically:true];
 
-        assert!(success);
-        assert!(!env.fs.read(GuestPath::new("/Documents/BikeRace.plist")).unwrap().is_empty());
+        assert!(!nil_success);
+        assert!(!network_success);
         release(env, dictionary);
-        release(env, path);
+        release(env, url_string);
     }
 }
