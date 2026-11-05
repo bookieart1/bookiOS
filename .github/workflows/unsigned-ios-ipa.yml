@@ -249,6 +249,7 @@ jobs:
             echo "bundled_sdl_base=${{ steps.diagnostic-sdl.outputs.sdl_base_commit }}"
             echo "bundled_sdl_diagnostic=${{ steps.diagnostic-sdl.outputs.sdl_diagnostic_commit }}"
             echo "diagnostic_bundle_sha256=${{ steps.diagnostic-sdl.outputs.bundle_sha256 }}"
+            echo "diagnostic_bridge_patch_blob=${{ steps.diagnostic-sdl.outputs.bridge_patch_blob }}"
             echo "diagnostic_bridge_patch_sha256=${{ steps.diagnostic-sdl.outputs.bridge_patch_sha256 }}"
             printf 'linked_marker=%s\n' "${markers[@]}"
           } | tee build/diagnostic-provenance/identity.txt
@@ -258,7 +259,8 @@ jobs:
             echo "- rust-sdl2: \`${{ steps.diagnostic-sdl.outputs.rust_sdl2_commit }}\`"
             echo "- bundled SDL base: \`${{ steps.diagnostic-sdl.outputs.sdl_base_commit }}\`"
             echo "- bundled SDL diagnostic: \`${{ steps.diagnostic-sdl.outputs.sdl_diagnostic_commit }}\`"
-            echo "- Diagnostic bridge patch: \`${{ steps.diagnostic-sdl.outputs.bridge_patch_sha256 }}\`"
+            echo "- Diagnostic bridge patch blob: \`${{ steps.diagnostic-sdl.outputs.bridge_patch_blob }}\`"
+            echo "- Diagnostic bridge patch SHA-256: \`${{ steps.diagnostic-sdl.outputs.bridge_patch_sha256 }}\`"
             echo "- Native rebuild: sdl2-sys build script and dependent rebuild observed"
             echo "- Linked markers: ${#markers[@]} of ${#markers[@]}"
           } >> "$GITHUB_STEP_SUMMARY"

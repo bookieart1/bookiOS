@@ -11,7 +11,7 @@ readonly EXPECTED_RUST_SDL2_COMMIT='50a369c061496c25f32f965172d67282d4623b63'
 readonly EXPECTED_SDL_BASE_COMMIT='701a47dc7e626b3142ccdfc26a07db2c43a91c02'
 readonly EXPECTED_SDL_DIAGNOSTIC_COMMIT='07318edcc53abdc0ffa1ac5d53e585ba5489cf28'
 readonly EXPECTED_BUNDLE_SHA256='9d99602243e725c38b45e6c92ab1bc7f4196abba99b5287616e446f924f25d18'
-readonly EXPECTED_BRIDGE_PATCH_SHA256='c24a381137e963ab6ab575c999dcf7061c5e2258f6886557467996dadd699b50'
+readonly EXPECTED_BRIDGE_PATCH_BLOB='7cbecd10467a367c3b41377895cc1f5977e87d76'
 readonly DIAGNOSTIC_REF='refs/heads/bookios/dev235-presentation-diagnostics'
 
 workspace="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must identify the checked-out iDared repository}"
@@ -22,8 +22,11 @@ metadata="$runner_temp/idared-ios-cargo-metadata.json"
 
 actual_bundle_sha256="$(shasum -a 256 "$bundle" | awk '{ print $1 }')"
 test "$actual_bundle_sha256" = "$EXPECTED_BUNDLE_SHA256"
+actual_bridge_patch_blob="$(
+    git -C "$workspace" rev-parse HEAD:iphone/diagnostics/dev235-diagnostic-sdl-rust-bridge.patch
+)"
+test "$actual_bridge_patch_blob" = "$EXPECTED_BRIDGE_PATCH_BLOB"
 actual_bridge_patch_sha256="$(shasum -a 256 "$bridge_patch" | awk '{ print $1 }')"
-test "$actual_bridge_patch_sha256" = "$EXPECTED_BRIDGE_PATCH_SHA256"
 
 # This is target-specific on purpose: it proves which sdl2-sys instance the
 # aarch64 iPhone dependency graph resolves, rather than assuming that the
@@ -93,6 +96,7 @@ echo "Resolved bundled SDL source: $sdl_dir"
 echo "Bundled SDL base commit: $actual_sdl_base"
 echo "Applied SDL diagnostic commit: $EXPECTED_SDL_DIAGNOSTIC_COMMIT"
 echo "Diagnostic bundle SHA-256: $actual_bundle_sha256"
+echo "Diagnostic Rust-bridge patch Git blob: $actual_bridge_patch_blob"
 echo "Diagnostic Rust-bridge patch SHA-256: $actual_bridge_patch_sha256"
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
@@ -103,6 +107,7 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
         echo "sdl_base_commit=$actual_sdl_base"
         echo "sdl_diagnostic_commit=$EXPECTED_SDL_DIAGNOSTIC_COMMIT"
         echo "bundle_sha256=$actual_bundle_sha256"
+        echo "bridge_patch_blob=$actual_bridge_patch_blob"
         echo "bridge_patch_sha256=$actual_bridge_patch_sha256"
     } >> "$GITHUB_OUTPUT"
 fi
