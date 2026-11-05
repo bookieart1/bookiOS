@@ -237,8 +237,11 @@ jobs:
             echo "Linked diagnostic marker: $marker"
           done
 
-          grep -Eq 'Running .*/sdl2-sys-[^/]*/build-script-build' "$RUNNER_TEMP/idared-xcodebuild.log"
-          grep -Fq 'the dependency `sdl2-sys` was rebuilt' "$RUNNER_TEMP/idared-xcodebuild.log"
+          clean_build_log="$RUNNER_TEMP/idared-xcodebuild-no-ansi.log"
+          /usr/bin/perl -pe 's/\e\[[0-9;]*[mK]//g' \
+            "$RUNNER_TEMP/idared-xcodebuild.log" > "$clean_build_log"
+          grep -Eq 'Running .*/sdl2-sys-[^/]*/build-script-build' "$clean_build_log"
+          grep -Fq 'the dependency `sdl2-sys` was rebuilt' "$clean_build_log"
           echo "Confirmed the sdl2-sys native build script ran and its Rust dependent rebuilt."
 
           mkdir -p build/diagnostic-provenance
