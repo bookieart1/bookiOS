@@ -230,6 +230,25 @@ pub extern "C" fn idared_set_host_diagnostic(callback: HostDiagnosticFn) {
     let _ = HOST_DIAGNOSTIC.set(callback);
 }
 
+/// Entry used by the bundled native SDL UIKit backend. SDL is linked while
+/// Cargo is still producing the Rust library, before the final Swift app
+/// executable (and its callback symbol) exists. Forward through the callback
+/// registered by `SDL_uikit_main.c` instead of making SDL depend directly on
+/// that later Swift link product.
+#[cfg(target_os = "ios")]
+#[no_mangle]
+pub unsafe extern "C" fn idared_sdl_presentation_diagnostic_event(
+    source: *const std::ffi::c_char,
+    detail: *const std::ffi::c_char,
+) {
+    if source.is_null() || detail.is_null() {
+        return;
+    }
+    if let Some(report) = HOST_DIAGNOSTIC.get() {
+        report(source, detail);
+    }
+}
+
 #[cfg(target_os = "ios")]
 fn host_presentation_diagnostic(source: &str, detail: &str) {
     let (Ok(source), Ok(detail)) = (CString::new(source), CString::new(detail)) else {

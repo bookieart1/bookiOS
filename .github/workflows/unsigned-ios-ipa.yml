@@ -237,8 +237,9 @@ jobs:
             echo "Linked diagnostic marker: $marker"
           done
 
-          grep -Fq 'Compiling sdl2-sys v0.37.0' "$RUNNER_TEMP/idared-xcodebuild.log"
-          echo "Confirmed a fresh sdl2-sys v0.37.0 compilation in the archive log."
+          grep -Eq 'Running .*/sdl2-sys-[^/]*/build-script-build' "$RUNNER_TEMP/idared-xcodebuild.log"
+          grep -Fq 'the dependency `sdl2-sys` was rebuilt' "$RUNNER_TEMP/idared-xcodebuild.log"
+          echo "Confirmed the sdl2-sys native build script ran and its Rust dependent rebuilt."
 
           mkdir -p build/diagnostic-provenance
           {
@@ -248,6 +249,7 @@ jobs:
             echo "bundled_sdl_base=${{ steps.diagnostic-sdl.outputs.sdl_base_commit }}"
             echo "bundled_sdl_diagnostic=${{ steps.diagnostic-sdl.outputs.sdl_diagnostic_commit }}"
             echo "diagnostic_bundle_sha256=${{ steps.diagnostic-sdl.outputs.bundle_sha256 }}"
+            echo "diagnostic_bridge_patch_sha256=${{ steps.diagnostic-sdl.outputs.bridge_patch_sha256 }}"
             printf 'linked_marker=%s\n' "${markers[@]}"
           } | tee build/diagnostic-provenance/identity.txt
 
@@ -256,7 +258,8 @@ jobs:
             echo "- rust-sdl2: \`${{ steps.diagnostic-sdl.outputs.rust_sdl2_commit }}\`"
             echo "- bundled SDL base: \`${{ steps.diagnostic-sdl.outputs.sdl_base_commit }}\`"
             echo "- bundled SDL diagnostic: \`${{ steps.diagnostic-sdl.outputs.sdl_diagnostic_commit }}\`"
-            echo "- Native rebuild: sdl2-sys v0.37.0 compilation observed"
+            echo "- Diagnostic bridge patch: \`${{ steps.diagnostic-sdl.outputs.bridge_patch_sha256 }}\`"
+            echo "- Native rebuild: sdl2-sys build script and dependent rebuild observed"
             echo "- Linked markers: ${#markers[@]} of ${#markers[@]}"
           } >> "$GITHUB_STEP_SUMMARY"
 
