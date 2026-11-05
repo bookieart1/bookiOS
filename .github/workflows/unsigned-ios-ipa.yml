@@ -37,6 +37,9 @@ env:
   # original App Store identity, while this development IPA installs beside it.
   DEV_BUNDLE_ID: com.bookieart1.idared32bit.dev
   DEV_DISPLAY_NAME: iDared Dev
+  # This diagnostic commit deliberately restores the ordinary iOS Cargo cache
+  # but never saves its patched native SDL output back into that cache.
+  IDARED_SDL_DIAGNOSTIC: "1"
 
 jobs:
   build-unsigned-ipa:
@@ -61,16 +64,6 @@ jobs:
 
       - name: Verify the exact candidate commit
         run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-
-      # Diagnostic-only: keep the shared SDL submodule's public URL unchanged,
-      # then load the isolated observation commit from a small Git bundle in
-      # this candidate. Reverting this diagnostic commit restores the exact
-      # Dev 2.35 dependency without requiring an external SDL fork.
-      - name: Apply bounded Dev 2.35 UIKit diagnostics
-        run: |
-          git -C vendor/SDL fetch "$GITHUB_WORKSPACE/iphone/diagnostics/dev235-presentation-diagnostics.bundle" refs/heads/bookios/dev235-presentation-diagnostics
-          git -C vendor/SDL checkout --detach FETCH_HEAD
-          test "$(git -C vendor/SDL rev-parse HEAD)" = "07318edcc53abdc0ffa1ac5d53e585ba5489cf28"
 
       - name: Show build tools
         run: |
@@ -147,6 +140,23 @@ jobs:
             echo "- Matched: \`${MATCHED_KEY:-<none>}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Resolve and instrument the actual iPhone sdl2-sys SDL source
+        id: diagnostic-sdl
+        run: bash iphone/diagnostics/prepare-dev235-diagnostic-sdl.sh
+
+      # A restored target cache may contain sdl2-sys output compiled from the
+      # uninstrumented nested SDL checkout. Clean only this native dependency;
+      # its dependents will relink normally while unrelated Rust artifacts stay
+      # warm. The final executable checks below are the authoritative proof.
+      - name: Force the instrumented native SDL dependency to rebuild
+        run: |
+          set -euo pipefail
+          cargo clean \
+            --package sdl2-sys \
+            --release \
+            --target aarch64-apple-ios \
+            --target-dir "$IOS_CARGO_TARGET_DIR"
+
       # SDL's current CMake project still needs the pre-CMake-4 compatibility
       # mode. This is the same known-good CMake release used by the repository's
       # existing macOS lint/test workflow.
@@ -199,6 +209,55 @@ jobs:
             echo "### iOS archive timing"
             echo "- Xcode archive including Cargo: ${elapsed}s"
             echo "- Nested Cargo: ${cargo_summary:-not emitted by this Xcode build}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify Diagnostic 2 native SDL provenance in the linked app
+        run: |
+          set -euo pipefail
+          APP_PATH="$RUNNER_TEMP/iDared32bit.xcarchive/Products/Applications/iDared 32bit.app"
+          EXECUTABLE_NAME="$(plutil -extract CFBundleExecutable raw "$APP_PATH/Info.plist")"
+          EXECUTABLE="$APP_PATH/$EXECUTABLE_NAME"
+          strings_file="$RUNNER_TEMP/idared-diagnostic-strings.txt"
+          /usr/bin/strings "$EXECUTABLE" > "$strings_file"
+
+          # Each marker originates in a different actual SDL UIKit compilation
+          # unit. Their presence in the linked executable proves that Cargo's
+          # bundled native SDL—not the unrelated vendor/SDL copy—was rebuilt.
+          markers=(
+            'sdl-scene-delegate-supported-orientations-query'
+            'sdl-controller-supported-orientations-query'
+            'sdl-controller-transition-begin'
+            'sdl-orientation-policy-consumed'
+            'sdl-window-destroy-begin'
+            'sdl-status-bar-orientation-notification'
+            'sdl-view-window-change-begin'
+          )
+          for marker in "${markers[@]}"; do
+            grep -Fqx "$marker" "$strings_file"
+            echo "Linked diagnostic marker: $marker"
+          done
+
+          grep -Fq 'Compiling sdl2-sys v0.37.0' "$RUNNER_TEMP/idared-xcodebuild.log"
+          echo "Confirmed a fresh sdl2-sys v0.37.0 compilation in the archive log."
+
+          mkdir -p build/diagnostic-provenance
+          {
+            echo "app_commit=$GITHUB_SHA"
+            echo "sdl2_sys_source=git+https://github.com/iDared32bit-emu/rust-sdl2?branch=touchhle-ios-host#${{ steps.diagnostic-sdl.outputs.rust_sdl2_commit }}"
+            echo "sdl2_sys_manifest=${{ steps.diagnostic-sdl.outputs.sdl2_sys_manifest }}"
+            echo "bundled_sdl_base=${{ steps.diagnostic-sdl.outputs.sdl_base_commit }}"
+            echo "bundled_sdl_diagnostic=${{ steps.diagnostic-sdl.outputs.sdl_diagnostic_commit }}"
+            echo "diagnostic_bundle_sha256=${{ steps.diagnostic-sdl.outputs.bundle_sha256 }}"
+            printf 'linked_marker=%s\n' "${markers[@]}"
+          } | tee build/diagnostic-provenance/identity.txt
+
+          {
+            echo "### Diagnostic 2 native SDL provenance"
+            echo "- rust-sdl2: \`${{ steps.diagnostic-sdl.outputs.rust_sdl2_commit }}\`"
+            echo "- bundled SDL base: \`${{ steps.diagnostic-sdl.outputs.sdl_base_commit }}\`"
+            echo "- bundled SDL diagnostic: \`${{ steps.diagnostic-sdl.outputs.sdl_diagnostic_commit }}\`"
+            echo "- Native rebuild: sdl2-sys v0.37.0 compilation observed"
+            echo "- Linked markers: ${#markers[@]} of ${#markers[@]}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify separate identity and package the unsigned IPA
@@ -262,8 +321,16 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+      - name: Upload Diagnostic 2 provenance
+        uses: actions/upload-artifact@v7
+        with:
+          name: iDared32bit-diagnostic-provenance-${{ github.sha }}
+          path: build/diagnostic-provenance/
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Measure iOS Cargo cache contents
-        if: ${{ success() && !inputs.cold_cargo_cache && steps.ios-cache-restore.outputs.cache-hit != 'true' }}
+        if: ${{ success() && env.IDARED_SDL_DIAGNOSTIC != '1' && !inputs.cold_cargo_cache && steps.ios-cache-restore.outputs.cache-hit != 'true' }}
         run: |
           set -euo pipefail
           total_kib=0
@@ -280,7 +347,7 @@ jobs:
 
       - name: Save iOS release Cargo cache
         id: ios-cache-save
-        if: ${{ success() && !inputs.cold_cargo_cache && steps.ios-cache-restore.outputs.cache-hit != 'true' }}
+        if: ${{ success() && env.IDARED_SDL_DIAGNOSTIC != '1' && !inputs.cold_cargo_cache && steps.ios-cache-restore.outputs.cache-hit != 'true' }}
         continue-on-error: true
         uses: actions/cache/save@v4
         with:
@@ -298,6 +365,8 @@ jobs:
         run: |
           if [[ "${{ inputs.cold_cargo_cache }}" == "true" ]]; then
             message="bypassed by cold_cargo_cache"
+          elif [[ "$IDARED_SDL_DIAGNOSTIC" == "1" ]]; then
+            message="not saved; Diagnostic 2 native SDL output is intentionally isolated"
           elif [[ "$CACHE_HIT" == "true" ]]; then
             message="skipped for exact cache hit"
           elif [[ -n "${IOS_CACHE_SAVE_STARTED_AT:-}" ]]; then
