@@ -32,7 +32,7 @@ use crate::objc::{
     HostObject, NSZonePtr, ObjC,
 };
 use crate::{fs, Environment};
-use encoding_rs::{EUC_KR, SHIFT_JIS, WINDOWS_1252};
+use encoding_rs::{EUC_KR, MACINTOSH, SHIFT_JIS, WINDOWS_1252};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Write;
@@ -156,13 +156,15 @@ impl StringHostObject {
                 let string = unsafe { String::from_utf8_unchecked(bytes.into_owned()) };
                 StringHostObject::Utf8(Cow::Owned(string))
             }
-            NSMacOSRomanStringEncoding | NSISOLatin1StringEncoding => {
-                // TODO: support non ASCII symbols
-                assert!(bytes.iter().all(|byte| byte.is_ascii()));
-                // Safety: guaranteed by above assertion
-                let string = unsafe { String::from_utf8_unchecked(bytes.into_owned()) };
-                StringHostObject::Utf8(Cow::Owned(string))
+            NSMacOSRomanStringEncoding => {
+                let (cow, encoding_used, had_errors) = MACINTOSH.decode(&bytes);
+                assert_eq!(encoding_used, MACINTOSH);
+                assert!(!had_errors);
+                StringHostObject::Utf8(Cow::Owned(cow.into_owned()))
             }
+            NSISOLatin1StringEncoding => StringHostObject::Utf8(Cow::Owned(
+                bytes.iter().map(|&byte| char::from(byte)).collect(),
+            )),
             NSUTF8StringEncoding => {
                 let string = String::from_utf8(bytes.into_owned()).unwrap();
                 StringHostObject::Utf8(Cow::Owned(string))
@@ -496,7 +498,11 @@ impl StringsFileParser {
 
     fn skip_trivia(&mut self) -> Option<()> {
         loop {
-            while self.chars.get(self.position).is_some_and(|c| c.is_whitespace()) {
+            while self
+                .chars
+                .get(self.position)
+                .is_some_and(|c| c.is_whitespace())
+            {
                 self.position += 1;
             }
             if self.chars.get(self.position) == Some(&'/')
@@ -565,13 +571,23 @@ impl StringsFileParser {
 
     fn parse_bare_until(&mut self, delimiter: char) -> Option<String> {
         let start = self.position;
-        while self.chars.get(self.position).is_some_and(|c| *c != delimiter) {
+        while self
+            .chars
+            .get(self.position)
+            .is_some_and(|c| *c != delimiter)
+        {
             self.position += 1;
         }
         if self.position == start {
             return None;
         }
-        Some(self.chars[start..self.position].iter().collect::<String>().trim().to_owned())
+        Some(
+            self.chars[start..self.position]
+                .iter()
+                .collect::<String>()
+                .trim()
+                .to_owned(),
+        )
     }
 
     fn parse_value(&mut self, delimiter: char) -> Option<String> {
@@ -849,7 +865,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (NSUInteger)lengthOfBytesUsingEncoding:(NSStringEncoding)encoding {
-    if encoding == NSDOSKoreanStringEncoding {
+    if C_STRING_FRIENDLY_ENCODINGS.contains(&encoding) {
         let length: NSUInteger = msg![env; this length];
         let units: Vec<u16> = (0..length)
             .map(|index| msg![env; this characterAtIndex:index])
@@ -858,13 +874,7 @@ pub const CLASSES: ClassExports = objc_classes! {
             .map(|bytes| bytes.len().try_into().unwrap())
             .unwrap_or(0);
     }
-    if C_STRING_FRIENDLY_ENCODINGS.contains(&encoding) {
-        let string = to_rust_string(env, this);
-        assert!(string.as_bytes().iter().all(|byte| byte.is_ascii())); // TODO
-        string.len().try_into().unwrap()
-    } else {
-        unimplemented!("lengthOfBytesUsingEncoding: {}", encoding)
-    }
+    unimplemented!("lengthOfBytesUsingEncoding: {}", encoding)
 }
 
 - (NSRange)rangeOfString:(id)search_string {
@@ -1177,23 +1187,14 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (ConstPtr<u8>)cStringUsingEncoding:(NSStringEncoding)encoding {
-    // TODO: avoid copying
-    let string = to_rust_string(env, this);
-    // TODO: other encodings
-    let bytes: Vec<u8> = match encoding {
-        NSASCIIStringEncoding | NSMacOSRomanStringEncoding | NSISOLatin1StringEncoding => {
-            // TODO: properly support Mac OS Roman and ISO Latin 1 encodings.
-            // The first 128 characters are identical to the ASCII
-            assert!(string.as_bytes().iter().all(|byte| byte.is_ascii()));
-            string.as_bytes().to_vec()
-        },
-        NSUTF8StringEncoding => {
-            string.as_bytes().to_vec()
-        },
-        NSUTF16LittleEndianStringEncoding => string.encode_utf16().flat_map(u16::to_le_bytes).collect(),
-        NSUTF32LittleEndianStringEncoding => string.chars().flat_map(|c| (c as u32).to_le_bytes()).collect(),
-        NSUTF32BigEndianStringEncoding => string.chars().flat_map(|c| (c as u32).to_be_bytes()).collect(),
-        _ => unimplemented!("{}", encoding),
+    let length: NSUInteger = msg![env; this length];
+    let units: Vec<u16> = (0..length)
+        .map(|index| msg![env; this characterAtIndex:index])
+        .collect();
+    // Foundation returns NULL when the receiver cannot be represented in the
+    // requested encoding. Valid Latin-1 text must not trip an ASCII assertion.
+    let Some(bytes) = encode_utf16_units(&units, encoding, false, false) else {
+        return Ptr::null();
     };
     let null_size: GuestUSize = match encoding {
         NSUTF8StringEncoding | NSASCIIStringEncoding | NSMacOSRomanStringEncoding | NSISOLatin1StringEncoding => 1,
@@ -2795,6 +2796,28 @@ mod ns_string_tests {
     }
 
     #[test]
+    fn latin1_non_ascii_is_encoded_without_an_ascii_only_panic() {
+        assert_eq!(
+            encode_utf16_units(
+                &"café".encode_utf16().collect::<Vec<_>>(),
+                NSISOLatin1StringEncoding,
+                false,
+                false,
+            ),
+            Some(vec![b'c', b'a', b'f', 0xe9])
+        );
+        assert_eq!(
+            encode_utf16_units(
+                &"snowman ☃".encode_utf16().collect::<Vec<_>>(),
+                NSISOLatin1StringEncoding,
+                false,
+                false,
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn signed_long_long_parses_prefix_and_clamps_overflow() {
         assert_eq!(parse_signed_decimal_prefix_i64("  -42px"), -42);
         assert_eq!(parse_signed_decimal_prefix_i64("+17"), 17);
@@ -2835,7 +2858,10 @@ mod ns_string_tests {
         let user_info: id = msg![env; error userInfo];
         let key = get_static_str(env, NSFilePathErrorKey);
         let stored_path: id = msg![env; user_info objectForKey:key];
-        assert_eq!(to_rust_string(env, stored_path), "/definitely-missing/idared-string.txt");
+        assert_eq!(
+            to_rust_string(env, stored_path),
+            "/definitely-missing/idared-string.txt"
+        );
 
         env.mem.free(out_error.cast());
         release(env, path);
@@ -2870,7 +2896,10 @@ mod ns_string_tests {
             crate::frameworks::foundation::ns_url_connection::NSErrorFailingURLStringKey,
         );
         let failed_url: id = msg![env; user_info objectForKey:key];
-        assert_eq!(to_rust_string(env, failed_url), "https://offline.invalid/ad.txt");
+        assert_eq!(
+            to_rust_string(env, failed_url),
+            "https://offline.invalid/ad.txt"
+        );
 
         env.mem.free(out_error.cast());
         release(env, url_string);
@@ -3104,7 +3133,7 @@ fn encode_utf16_units(
 
     let mut bytes = match encoding {
         NSUTF8StringEncoding => string.into_bytes(),
-        NSASCIIStringEncoding | NSMacOSRomanStringEncoding => {
+        NSASCIIStringEncoding => {
             if !lossy && !string.is_ascii() {
                 return None;
             }
@@ -3118,6 +3147,13 @@ fn encode_utf16_units(
                     }
                 })
                 .collect()
+        }
+        NSMacOSRomanStringEncoding => {
+            let (encoded, _, had_errors) = MACINTOSH.encode(&string);
+            if had_errors && !lossy {
+                return None;
+            }
+            encoded.into_owned()
         }
         NSISOLatin1StringEncoding => {
             if !lossy && string.chars().any(|character| character as u32 > 0xff) {

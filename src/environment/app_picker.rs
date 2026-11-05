@@ -448,23 +448,18 @@ fn enumerate_apps(
     // Normalized display names, bundle identifiers and archive filenames cover
     // the mixed naming in this batch and keep every requested test reachable
     // even when an archive's display-name metadata differs from its filename.
-    const DEV_231_TEST_NAMES: &[&str] = &[
-        "100CHAMBERS",
-        "BIKERACEPRO",
-        "CANNONCADETS",
-        "CARNIVAL",
-        "CURRENT",
-        "DISMOUNT",
-        "FIELDRUNNERS2",
-        "KICKTHEBUDDY",
-        "LABYRINTH2",
-        "LEGENDSOFOOO",
-        "MXMAYHEM",
-        "PARAPANICHD",
-        "SPOING",
-        "THESIMS3",
-        "TRISM",
-        "WIREWAY",
+    const DEV_232_TEST_NAMES: &[&str] = &[
+        "1112EP01",
+        "DOODLEGRUB",
+        "HIGHWAYRIDER",
+        "ISTUNTRELOADEDPRO",
+        "JUNKJACKRETRO",
+        "RRACINGGTI",
+        "REALRACING",
+        "SKYBURGER",
+        "STICKSTUNTBIKER",
+        "TIKITOTEMSPREMIUM",
+        "TOWERBLOXX",
     ];
     let started = Instant::now();
     apps.sort_by_key(|app| {
@@ -482,7 +477,7 @@ fn enumerate_apps(
                 .and_then(|name| name.to_str())
                 .unwrap_or_default(),
         );
-        let rank = DEV_231_TEST_NAMES
+        let rank = DEV_232_TEST_NAMES
             .iter()
             .position(|&name| {
                 [&display_name, &bundle_identifier, &filename]
@@ -567,23 +562,74 @@ fn log_library_performance(performance: PickerPerformance, timing: &LibraryTimin
         timing.packages_skipped,
         archive_entries
     );
-    echo!("Loose IPA/import check:       {:.3} ms", duration_ms(timing.loose_import));
-    echo!("Language selection:           {:.3} ms", duration_ms(timing.language_selection));
-    echo!("Directory enumeration:        {:.3} ms", duration_ms(timing.directory_enumeration));
-    echo!("ZIP open/central directory:   {:.3} ms", duration_ms(zip_open));
-    echo!("Archive entry validation:     {:.3} ms", duration_ms(archive_validation));
-    echo!("Application bundle discovery:{:>10.3} ms", duration_ms(bundle_discovery));
-    echo!("Info.plist reading:           {:.3} ms", duration_ms(info_plist_read));
-    echo!("Info.plist parsing:           {:.3} ms", duration_ms(info_plist_parse));
-    echo!("Guest filesystem creation:    {:.3} ms", duration_ms(filesystem_creation));
-    echo!("Localization:                 {:.3} ms", duration_ms(localization));
-    echo!("Icon candidate discovery:     {:.3} ms", duration_ms(icon_candidates));
-    echo!("Icon reads/decompression:     {:.3} ms", duration_ms(icon_reads));
-    echo!("Icon decoding:                {:.3} ms", duration_ms(icon_decoding));
-    echo!("Icon processing:              {:.3} ms", duration_ms(icon_processing));
-    echo!("Per-package remainder:        {:.3} ms", duration_ms(package_remainder));
-    echo!("Sorting/classification:       {:.3} ms", duration_ms(timing.sorting));
-    echo!("Unattributed scan overhead:   {:.3} ms", duration_ms(outside_packages));
+    echo!(
+        "Loose IPA/import check:       {:.3} ms",
+        duration_ms(timing.loose_import)
+    );
+    echo!(
+        "Language selection:           {:.3} ms",
+        duration_ms(timing.language_selection)
+    );
+    echo!(
+        "Directory enumeration:        {:.3} ms",
+        duration_ms(timing.directory_enumeration)
+    );
+    echo!(
+        "ZIP open/central directory:   {:.3} ms",
+        duration_ms(zip_open)
+    );
+    echo!(
+        "Archive entry validation:     {:.3} ms",
+        duration_ms(archive_validation)
+    );
+    echo!(
+        "Application bundle discovery:{:>10.3} ms",
+        duration_ms(bundle_discovery)
+    );
+    echo!(
+        "Info.plist reading:           {:.3} ms",
+        duration_ms(info_plist_read)
+    );
+    echo!(
+        "Info.plist parsing:           {:.3} ms",
+        duration_ms(info_plist_parse)
+    );
+    echo!(
+        "Guest filesystem creation:    {:.3} ms",
+        duration_ms(filesystem_creation)
+    );
+    echo!(
+        "Localization:                 {:.3} ms",
+        duration_ms(localization)
+    );
+    echo!(
+        "Icon candidate discovery:     {:.3} ms",
+        duration_ms(icon_candidates)
+    );
+    echo!(
+        "Icon reads/decompression:     {:.3} ms",
+        duration_ms(icon_reads)
+    );
+    echo!(
+        "Icon decoding:                {:.3} ms",
+        duration_ms(icon_decoding)
+    );
+    echo!(
+        "Icon processing:              {:.3} ms",
+        duration_ms(icon_processing)
+    );
+    echo!(
+        "Per-package remainder:        {:.3} ms",
+        duration_ms(package_remainder)
+    );
+    echo!(
+        "Sorting/classification:       {:.3} ms",
+        duration_ms(timing.sorting)
+    );
+    echo!(
+        "Unattributed scan overhead:   {:.3} ms",
+        duration_ms(outside_packages)
+    );
     echo!("Total Rust library scan:      {:.3} ms", duration_ms(total));
     echo!(
         "Package timing median/p95:   {:.3} / {:.3} ms",
@@ -1126,7 +1172,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.31",
+            "iDared 32bit {}{}{} · Dev 2.32",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""

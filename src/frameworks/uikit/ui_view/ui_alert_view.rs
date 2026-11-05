@@ -106,14 +106,57 @@ mod tests {
 
         // Dismissing an alert that has not been shown is a no-op.
         () = msg![env; alert dismissWithClickedButtonIndex:0i32 animated:false];
-        assert!(!env.objc.borrow::<UIAlertViewHostObject>(alert).dismissal_scheduled);
+        assert!(
+            !env.objc
+                .borrow::<UIAlertViewHostObject>(alert)
+                .dismissal_scheduled
+        );
 
         env.objc.borrow_mut::<UIAlertViewHostObject>(alert).shown = true;
         () = msg![env; alert dismissWithClickedButtonIndex:0i32 animated:true];
-        assert!(env.objc.borrow::<UIAlertViewHostObject>(alert).dismissal_scheduled);
+        assert!(
+            env.objc
+                .borrow::<UIAlertViewHostObject>(alert)
+                .dismissal_scheduled
+        );
         () = msg![env; alert dismissWithClickedButtonIndex:0i32 animated:false];
-        assert!(env.objc.borrow::<UIAlertViewHostObject>(alert).dismissal_scheduled);
+        assert!(
+            env.objc
+                .borrow::<UIAlertViewHostObject>(alert)
+                .dismissal_scheduled
+        );
         release(env, alert);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
+
+    #[test]
+    fn action_sheet_orders_destructive_other_and_cancel_buttons() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let destructive = ns_string::get_static_str(env, "Delete");
+        let other = ns_string::get_static_str(env, "Save");
+        let sheet: id = msg_class![env; UIActionSheet alloc];
+        let sheet: id = msg![env; sheet init];
+        let destructive_index = add_button(env, sheet, destructive);
+        env.objc
+            .borrow_mut::<UIAlertViewHostObject>(sheet)
+            .destructive_button_index = destructive_index;
+        add_button(env, sheet, other);
+        let cancel = ns_string::get_static_str(env, "Cancel");
+        let cancel_index = add_button(env, sheet, cancel);
+        env.objc
+            .borrow_mut::<UIAlertViewHostObject>(sheet)
+            .cancel_button_index = cancel_index;
+        let destructive_index: NSInteger = msg![env; sheet destructiveButtonIndex];
+        let cancel_index: NSInteger = msg![env; sheet cancelButtonIndex];
+        let button_count: NSInteger = msg![env; sheet numberOfButtons];
+        assert_eq!(destructive_index, 0);
+        assert_eq!(cancel_index, 2);
+        assert_eq!(button_count, 3);
+        release(env, sheet);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);
     }
@@ -145,7 +188,11 @@ fn json_string(value: &str) -> String {
 
 fn collect_text_fields(env: &mut crate::Environment, view: id, result: &mut Vec<id>) {
     let text_field_class = env.objc.get_known_class("UITextField", &mut env.mem);
-    let subviews = env.objc.borrow::<super::UIViewHostObject>(view).subviews.clone();
+    let subviews = env
+        .objc
+        .borrow::<super::UIViewHostObject>(view)
+        .subviews
+        .clone();
     for subview in subviews {
         let class: Class = msg![env; subview class];
         if env.objc.class_is_subclass_of(class, text_field_class) {
@@ -254,6 +301,7 @@ pub struct UIAlertViewHostObject {
     /// `NSString*`s, in index order.
     button_titles: Vec<id>,
     default_button_index: NSInteger,
+    destructive_button_index: NSInteger,
     cancel_button_index: NSInteger,
     shown: bool,
     dismissal_scheduled: bool,
@@ -297,6 +345,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 + (id)allocWithZone:(NSZonePtr)_zone {
     let host_object = Box::new(UIAlertViewHostObject {
         default_button_index: -1,
+        destructive_button_index: -1,
         cancel_button_index: -1,
         ..Default::default()
     });
@@ -463,6 +512,18 @@ pub const CLASSES: ClassExports = objc_classes! {
     let buttons: Vec<String> = button_titles.iter().map(|&b| to_string(env, b)).collect();
     log!("UIAlertView: title: {:?}, message: {:?}, buttons: {:?}", title, message, buttons);
 
+    let action_sheet_class = env.objc.get_known_class("UIActionSheet", &mut env.mem);
+    let is_action_sheet: bool = msg![env; this isKindOfClass:action_sheet_class];
+    let delegate = env.objc.borrow::<UIAlertViewHostObject>(this).delegate;
+    if is_action_sheet && delegate != nil {
+        for name in ["willPresentActionSheet:", "didPresentActionSheet:"] {
+            let selector: SEL = env.objc.register_host_selector(name.to_string(), &mut env.mem);
+            if msg![env; delegate respondsToSelector:selector] {
+                () = crate::objc::msg_send(env, (delegate, selector, this));
+            }
+        }
+    }
+
     // UIKit owns an alert for the whole time that it is presented. The host
     // presentation below is synchronous and may yield to another guest run
     // loop/autorelease pool, so take that ownership before crossing into host
@@ -545,11 +606,22 @@ pub const CLASSES: ClassExports = objc_classes! {
         (host.delegate, std::mem::take(&mut host.presentation_owned))
     };
     if delegate != nil {
-        for name in [
-            "alertView:clickedButtonAtIndex:",
-            "alertView:willDismissWithButtonIndex:",
-            "alertView:didDismissWithButtonIndex:",
-        ] {
+        let action_sheet_class = env.objc.get_known_class("UIActionSheet", &mut env.mem);
+        let is_action_sheet: bool = msg![env; this isKindOfClass:action_sheet_class];
+        let names = if is_action_sheet {
+            [
+                "actionSheet:clickedButtonAtIndex:",
+                "actionSheet:willDismissWithButtonIndex:",
+                "actionSheet:didDismissWithButtonIndex:",
+            ]
+        } else {
+            [
+                "alertView:clickedButtonAtIndex:",
+                "alertView:willDismissWithButtonIndex:",
+                "alertView:didDismissWithButtonIndex:",
+            ]
+        };
+        for name in names {
             let sel: SEL = env.objc.register_host_selector(name.to_string(), &mut env.mem);
             let responds: bool = msg![env; delegate respondsToSelector:sel];
             if responds {
@@ -560,6 +632,52 @@ pub const CLASSES: ClassExports = objc_classes! {
     if release_presentation {
         release(env, this);
     }
+}
+
+@end
+
+@implementation UIActionSheet: UIAlertView
+
+- (id)initWithTitle:(id)title
+             delegate:(id)delegate
+    cancelButtonTitle:(id)cancel_title
+destructiveButtonTitle:(id)destructive_title
+ otherButtonTitles:(id)first_other, ...args {
+    let this: id = msg_super![env; this init];
+    () = msg![env; this setTitle:title];
+    () = msg![env; this setDelegate:delegate];
+    if destructive_title != nil {
+        let index = add_button(env, this, destructive_title);
+        env.objc.borrow_mut::<UIAlertViewHostObject>(this).destructive_button_index = index;
+    }
+    if first_other != nil {
+        add_button(env, this, first_other);
+        let mut varargs = args.start();
+        loop {
+            let title: id = varargs.next(env);
+            if title == nil { break; }
+            add_button(env, this, title);
+        }
+    }
+    if cancel_title != nil {
+        let index = add_button(env, this, cancel_title);
+        env.objc.borrow_mut::<UIAlertViewHostObject>(this).cancel_button_index = index;
+    }
+    this
+}
+
+- (NSInteger)destructiveButtonIndex {
+    env.objc.borrow::<UIAlertViewHostObject>(this).destructive_button_index
+}
+- (bool)isVisible {
+    env.objc.borrow::<UIAlertViewHostObject>(this).shown
+}
+- (())showInView:(id)_view { () = msg![env; this show]; }
+- (())showFromToolbar:(id)_toolbar { () = msg![env; this show]; }
+- (())showFromTabBar:(id)_tab_bar { () = msg![env; this show]; }
+- (())showFromBarButtonItem:(id)_item animated:(bool)_animated { () = msg![env; this show]; }
+- (())showFromRect:(crate::frameworks::core_graphics::CGRect)_rect inView:(id)_view animated:(bool)_animated {
+    () = msg![env; this show];
 }
 
 @end

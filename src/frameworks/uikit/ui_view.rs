@@ -110,6 +110,8 @@ pub struct UIViewHostObject {
     /// subclass while leaving ordinary UIViews at nil.
     pub(super) ui_web_view_delegate: id,
     tag: NSInteger,
+    /// UIViewContentMode. ScaleToFill (0) is UIKit's historical default.
+    content_mode: NSInteger,
     clears_context_before_drawing: bool,
     user_interaction_enabled: bool,
     multiple_touch_enabled: bool,
@@ -131,6 +133,7 @@ impl Default for UIViewHostObject {
             view_controller: nil,
             ui_web_view_delegate: nil,
             tag: 0,
+            content_mode: 0,
             clears_context_before_drawing: true,
             user_interaction_enabled: true,
             multiple_touch_enabled: false,
@@ -194,13 +197,7 @@ pub(crate) fn log_bounded_view_hierarchy(env: &mut Environment, reason: &str) {
     const MAX_VIEWS: usize = 24;
     const MAX_DEPTH: usize = 8;
 
-    fn visit(
-        env: &mut Environment,
-        view: id,
-        depth: usize,
-        emitted: &mut usize,
-        reason: &str,
-    ) {
+    fn visit(env: &mut Environment, view: id, depth: usize, emitted: &mut usize, reason: &str) {
         if view == nil || depth > MAX_DEPTH || *emitted >= MAX_VIEWS {
             return;
         }
@@ -245,9 +242,7 @@ pub(crate) fn log_bounded_view_hierarchy(env: &mut Environment, reason: &str) {
             break;
         }
     }
-    log!(
-        "UIKit bounded hierarchy ({reason}) complete: emitted {emitted} view(s), cap {MAX_VIEWS}"
-    );
+    log!("UIKit bounded hierarchy ({reason}) complete: emitted {emitted} view(s), cap {MAX_VIEWS}");
 }
 
 fn record_view_transition(env: &mut Environment, action: &'static str, view: id, detail: String) {
@@ -669,6 +664,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.borrow_mut::<UIViewHostObject>(this).tag = tag;
 }
 
+- (NSInteger)contentMode {
+    env.objc.borrow::<UIViewHostObject>(this).content_mode
+}
+
 - (id)viewWithTag:(NSInteger)tag {
     let &UIViewHostObject {
         ref subviews,
@@ -994,6 +993,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         view_controller,
         ui_web_view_delegate: _,
         tag: _,
+        content_mode: _,
         clears_context_before_drawing: _,
         user_interaction_enabled: _,
         multiple_touch_enabled: _,
@@ -1144,6 +1144,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())setContentMode:(NSInteger)content_mode { // should be UIViewContentMode
+    assert!((0..=13).contains(&content_mode), "invalid UIViewContentMode {content_mode}");
     if env.bundle.bundle_identifier() == "com.majesticsoftware.blot" {
         let frame: CGRect = msg![env; this frame];
         let bounds: CGRect = msg![env; this bounds];
@@ -1153,7 +1154,7 @@ pub const CLASSES: ClassExports = objc_classes! {
             content_mode,
         );
     }
-    todo_objc_setter!(this, content_mode);
+    env.objc.borrow_mut::<UIViewHostObject>(this).content_mode = content_mode;
 }
 
 - (bool)clearsContextBeforeDrawing {

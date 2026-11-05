@@ -173,6 +173,20 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 // NSCoding implementation
+- (())encodeWithCoder:(id)coder {
+    let (r, g, b, a) = get_rgba(&env.objc, this);
+    () = msg![env; coder encodeFloat:a forKey:(get_static_str(env, "UIAlpha"))];
+    if r == g && g == b {
+        () = msg![env; coder encodeInteger:2i32 forKey:(get_static_str(env, "UIColorComponentCount"))];
+        () = msg![env; coder encodeFloat:r forKey:(get_static_str(env, "UIWhite"))];
+    } else {
+        () = msg![env; coder encodeInteger:4i32 forKey:(get_static_str(env, "UIColorComponentCount"))];
+        () = msg![env; coder encodeFloat:r forKey:(get_static_str(env, "UIRed"))];
+        () = msg![env; coder encodeFloat:g forKey:(get_static_str(env, "UIGreen"))];
+        () = msg![env; coder encodeFloat:b forKey:(get_static_str(env, "UIBlue"))];
+    }
+}
+
 - (id)initWithCoder:(id)coder {
     let key_ns_string = get_static_str(env, "UIAlpha");
     let a: CGFloat = msg![env; coder decodeFloatForKey:key_ns_string];

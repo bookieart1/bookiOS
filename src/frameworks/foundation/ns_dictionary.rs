@@ -28,7 +28,7 @@ use crate::frameworks::foundation::ns_keyed_archiver::{
 };
 use crate::fs::GuestPath;
 use crate::libc::stdlib::qsort::qsort_generic;
-use crate::mem::{ConstPtr, MutPtr, Ptr, SafeRead};
+use crate::mem::{ConstPtr, MutPtr, MutVoidPtr, Ptr, SafeRead};
 use crate::objc::{
     autorelease, id, msg, msg_class, msg_send, nil, objc_classes, release, retain, Class,
     ClassExports, HostObject, NSZonePtr, TrivialHostObject, SEL,
@@ -36,6 +36,16 @@ use crate::objc::{
 use crate::{impl_HostObject_with_superclass, Environment};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+
+#[repr(C)]
+struct BlockLiteral {
+    _isa: MutVoidPtr,
+    _flags: i32,
+    _reserved: i32,
+    invoke: GuestFunction,
+    _descriptor: MutVoidPtr,
+}
+unsafe impl SafeRead for BlockLiteral {}
 
 /// Alias for the return type of the `hash` method of the `NSObject` protocol.
 type Hash = NSUInteger;
@@ -705,6 +715,28 @@ pub const CLASSES: ClassExports = objc_classes! {
     let (env, _, keys) = user_data;
     let sorted_keys = ns_array::from_vec(env, std::mem::take(keys));
     autorelease(env, sorted_keys)
+}
+
+- (())enumerateKeysAndObjectsUsingBlock:(MutPtr<BlockLiteral>)block {
+    assert!(!block.is_null(), "enumerateKeysAndObjectsUsingBlock: requires a block");
+    let invoke = env.mem.read(block).invoke;
+    assert_ne!(invoke.addr_without_thumb_bit(), 0);
+
+    // Snapshot keys before invoking guest code. NSDictionary is immutable;
+    // this also gives genuine subclasses their primitive-method behavior.
+    let keys: id = msg![env; this allKeys];
+    let count: NSUInteger = msg![env; keys count];
+    let stop = env.mem.alloc_and_write(false);
+    for index in 0..count {
+        let key: id = msg![env; keys objectAtIndex:index];
+        let value: id = msg![env; this objectForKey:key];
+        assert_ne!(value, nil, "NSDictionary subclass returned nil during enumeration");
+        () = invoke.call_from_host(env, (block.cast_void(), key, value, stop));
+        if env.mem.read(stop) {
+            break;
+        }
+    }
+    env.mem.free(stop.cast());
 }
 
 - (NSUInteger)hash {
@@ -1586,10 +1618,7 @@ mod tests {
         let value: id = msg_class![env; NSNumber numberWithInt:3i32];
         let dictionary = dict_from_keys_and_objects(env, &[(key, value)]);
         let description: id = msg![env; dictionary descriptionInStringsFileFormat];
-        assert_eq!(
-            to_rust_string(env, description),
-            "\"lives\" = 3;\n"
-        );
+        assert_eq!(to_rust_string(env, description), "\"lives\" = 3;\n");
         release(env, dictionary);
     }
 

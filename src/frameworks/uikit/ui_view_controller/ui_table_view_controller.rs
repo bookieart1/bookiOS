@@ -22,6 +22,20 @@ struct UITableViewControllerHostObject {
     style: UITableViewStyle,
     clears_selection_on_view_will_appear: bool,
 }
+
+fn make_table_view(env: &mut crate::Environment, this: id) -> id {
+    let style = env
+        .objc
+        .borrow::<UITableViewControllerHostObject>(this)
+        .style;
+    let screen: id = msg_class![env; UIScreen mainScreen];
+    let frame: CGRect = msg![env; screen applicationFrame];
+    let table: id = msg_class![env; UITableView alloc];
+    let table: id = msg![env; table initWithFrame:frame style:style];
+    () = msg![env; table setDataSource:this];
+    () = msg![env; table setDelegate:this];
+    table
+}
 impl_HostObject_with_superclass!(UITableViewControllerHostObject);
 impl Default for UITableViewControllerHostObject {
     fn default() -> Self {
@@ -52,15 +66,25 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     env.objc.borrow_mut::<UITableViewControllerHostObject>(this).style = style;
 
-    let screen: id = msg_class![env; UIScreen mainScreen];
-    let frame: CGRect = msg![env; screen applicationFrame];
-    let table: id = msg_class![env; UITableView alloc];
-    let table: id = msg![env; table initWithFrame:frame style:style];
-    () = msg![env; table setDataSource:this];
-    () = msg![env; table setDelegate:this];
+    let table = make_table_view(env, this);
     () = msg![env; this setTableView:table];
     release(env, table);
     this
+}
+
+- (())loadView {
+    // Give an explicitly supplied nib its normal chance to establish the
+    // view. If the fallback is not a table, enforce UITableViewController's
+    // historical root-view contract rather than leaking a plain UIView.
+    () = msg_super![env; this loadView];
+    let view: id = msg![env; this tableView];
+    let table_class = env.objc.get_known_class("UITableView", &mut env.mem);
+    let is_table: bool = msg![env; view isKindOfClass:table_class];
+    if !is_table {
+        let table = make_table_view(env, this);
+        () = msg![env; this setTableView:table];
+        release(env, table);
+    }
 }
 
 - (id)tableView {

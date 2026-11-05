@@ -20,8 +20,8 @@ pub mod ui_color;
 pub mod ui_device;
 pub mod ui_event;
 pub mod ui_font;
-pub mod ui_gesture_recognizer;
 pub mod ui_geometry;
+pub mod ui_gesture_recognizer;
 pub mod ui_graphics;
 pub mod ui_image;
 pub mod ui_image_picker_controller;
@@ -87,6 +87,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
         ui_application::CONSTANTS,
         ui_device::CONSTANTS,
         ui_geometry::CONSTANTS,
+        ui_local_notification::CONSTANTS,
         ui_pasteboard::CONSTANTS,
         ui_view::ui_control::ui_text_field::CONSTANTS,
         ui_view::ui_window::CONSTANTS,

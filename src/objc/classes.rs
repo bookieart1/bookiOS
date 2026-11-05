@@ -43,6 +43,8 @@ pub(super) struct ClassHostObject {
     pub(super) methods: HashMap<SEL, Method>,
     pub(super) guest_method_signatures: HashMap<SEL, ConstPtr<u8>>,
     pub(super) ivars: HashMap<String, IVar>,
+    /// Guest `property_t` entries declared by this class and its categories.
+    pub(super) properties: Vec<objc_property_t>,
     /// Protocol objects adopted directly by this class. Protocol inheritance
     /// and superclass adoption are evaluated when conformance is queried.
     pub(super) protocols: Vec<ConstVoidPtr>,
@@ -115,7 +117,7 @@ struct class_rw_t {
     base_protocols: ConstVoidPtr,
     ivars: ConstPtr<ivar_list_t>,
     _weak_ivar_layout: u32,
-    _base_properties: ConstVoidPtr, // property list (TODO)
+    base_properties: ConstPtr<property_list_t>,
 }
 unsafe impl SafeRead for class_rw_t {}
 
@@ -129,7 +131,7 @@ struct category_t {
     instance_methods: ConstPtr<method_list_t>,
     class_methods: ConstPtr<method_list_t>,
     protocols: ConstVoidPtr,
-    _property_list: ConstVoidPtr, // property list (TODO)
+    property_list: ConstPtr<property_list_t>,
 }
 unsafe impl SafeRead for category_t {}
 
@@ -149,7 +151,10 @@ fn read_protocol_list(list: ConstVoidPtr, mem: &Mem) -> Vec<ConstVoidPtr> {
     }
     let words: ConstPtr<u32> = list.cast();
     let count = mem.read(words);
-    assert!(count <= 1024, "Objective-C protocol list is implausibly large");
+    assert!(
+        count <= 1024,
+        "Objective-C protocol list is implausibly large"
+    );
     (0..count)
         .map(|index| Ptr::from_bits(mem.read(words + 1 + index)))
         .collect()
@@ -187,10 +192,18 @@ fn protocol_conforms_recursive(
 
 #[repr(C, packed)]
 pub struct objc_property {
-    // TODO: define fields?
-    _pad: u8,
+    name: ConstPtr<u8>,
+    attributes: ConstPtr<u8>,
 }
 unsafe impl SafeRead for objc_property {}
+
+#[repr(C, packed)]
+struct property_list_t {
+    entsize: u32,
+    count: u32,
+    first: objc_property,
+}
+unsafe impl SafeRead for property_list_t {}
 
 /// An opaque type that represents an Objective-C declared property.
 #[allow(non_camel_case_types)]
@@ -456,6 +469,7 @@ impl ClassHostObject {
             instance_start: size,
             instance_size: size,
             ivars: HashMap::default(),
+            properties: Vec::new(),
             is_initialized: InitializationStatus::NotInitialized,
         }
     }
@@ -471,6 +485,7 @@ impl ClassHostObject {
             base_methods,
             base_protocols,
             ivars,
+            base_properties,
             ..
         } = mem.read(data);
 
@@ -486,6 +501,7 @@ impl ClassHostObject {
             instance_start,
             instance_size,
             ivars: HashMap::new(),
+            properties: read_property_list(base_properties, mem),
             is_initialized: InitializationStatus::NotInitialized,
         };
 
@@ -501,6 +517,22 @@ impl ClassHostObject {
     }
 
     // See methods.rs for binary method parsing
+}
+
+fn read_property_list(list: ConstPtr<property_list_t>, mem: &Mem) -> Vec<objc_property_t> {
+    if list.is_null() {
+        return Vec::new();
+    }
+    let header: property_list_t = mem.read(list);
+    assert!(
+        header.count <= 4096,
+        "Objective-C property list is implausibly large"
+    );
+    assert!(header.entsize as usize >= std::mem::size_of::<objc_property>());
+    let first = list.to_bits() + 8;
+    (0..header.count)
+        .map(|index| Ptr::<objc_property, true>::from_bits(first + index * header.entsize))
+        .collect()
 }
 
 /// Decide whether a certain class/metaclass pair from the guest app should use
@@ -969,6 +1001,18 @@ impl ObjC {
             let class = data.class;
             let metaclass = Self::read_isa(class, mem);
 
+            if !data.property_list.is_null() {
+                let properties = read_property_list(data.property_list, mem);
+                if let Some(host) = self
+                    .get_host_object(class)
+                    .and_then(|host| host.as_any().downcast_ref::<ClassHostObject>())
+                {
+                    let mut combined = host.properties.clone();
+                    combined.extend(properties);
+                    self.borrow_mut::<ClassHostObject>(class).properties = combined;
+                }
+            }
+
             if !data.protocols.is_null() {
                 let protocols = read_protocol_list(data.protocols, mem);
                 if let Some(host) = self
@@ -1008,6 +1052,7 @@ impl ObjC {
                         superclass: nil,
                         methods: Default::default(),
                         guest_method_signatures: Default::default(),
+                        properties: Default::default(),
                         protocols: Default::default(),
                         instance_start: Default::default(),
                         instance_size: Default::default(),
@@ -1196,8 +1241,7 @@ pub(super) fn class_conformsToProtocol(
     cls: Class,
     protocol: ConstVoidPtr,
 ) -> bool {
-    env.objc
-        .class_conforms_to_protocol(cls, protocol, &env.mem)
+    env.objc.class_conforms_to_protocol(cls, protocol, &env.mem)
 }
 
 pub(super) fn protocol_conformsToProtocol(
@@ -1217,21 +1261,18 @@ pub(super) fn class_getProperty(
         return Ptr::null();
     }
     let c_name = env.mem.cstr_at_utf8(name).unwrap();
-    let class_name_string = env.objc.get_class_name(cls).to_owned();
-    if class_name_string == "UIScreen" && c_name == "scale" {
-        // Even if [UIScreen scale] is implemented, we're not yet having a
-        // proper support for `objc_property_t`, so we prefer to return a NULL
-        // here (e.g. property is not declared).
-        // Some games (such as Mirror's Edge) check for those to conditionally
-        // apply some parameters depending on the iOS version without actually
-        // using the property.
-        // We also prefer to not define this as a game-specific hack, because
-        // some other EA games may rely on the same logic.
-        // TODO: support `objc_property_t` properly
-        log!("TODO: class_getProperty(UIScreen, scale) -> NULL");
-        return Ptr::null();
+    let mut current = cls;
+    while current != nil {
+        let host = env.objc.borrow::<ClassHostObject>(current);
+        for &property in &host.properties {
+            let data: objc_property = env.mem.read(property);
+            if env.mem.cstr_at_utf8(data.name).unwrap() == c_name {
+                return property;
+            }
+        }
+        current = host.superclass;
     }
-    todo!()
+    Ptr::null()
 }
 
 pub(super) fn class_copyPropertyList(
@@ -1239,13 +1280,44 @@ pub(super) fn class_copyPropertyList(
     cls: Class,
     out_count: MutPtr<u32>,
 ) -> MutPtr<objc_property_t> {
+    let properties = if cls == nil {
+        Vec::new()
+    } else {
+        env.objc.borrow::<ClassHostObject>(cls).properties.clone()
+    };
     if !out_count.is_null() {
-        env.mem.write(out_count, 0);
+        env.mem.write(out_count, properties.len() as u32);
     }
-    if cls != nil {
-        log_once!("TODO: class_copyPropertyList returns an empty list");
+    if properties.is_empty() {
+        return Ptr::null();
     }
-    Ptr::null()
+    let list = env
+        .mem
+        .alloc(properties.len() as u32 * guest_size_of::<objc_property_t>())
+        .cast::<objc_property_t>();
+    for (index, property) in properties.into_iter().enumerate() {
+        env.mem.write(list + index as u32, property);
+    }
+    list
+}
+
+pub(super) fn property_getName(env: &mut Environment, property: objc_property_t) -> ConstPtr<u8> {
+    if property.is_null() {
+        Ptr::null()
+    } else {
+        env.mem.read(property).name
+    }
+}
+
+pub(super) fn property_getAttributes(
+    env: &mut Environment,
+    property: objc_property_t,
+) -> ConstPtr<u8> {
+    if property.is_null() {
+        Ptr::null()
+    } else {
+        env.mem.read(property).attributes
+    }
 }
 
 pub(super) fn class_replaceMethod(
@@ -1440,7 +1512,12 @@ pub(super) fn method_setImplementation(
         .method_handles
         .iter()
         .find_map(|(&(class, name), &handle)| (handle == method).then_some((class, name)))
-        .unwrap_or_else(|| panic!("method_setImplementation called with unknown Method {:?}", method));
+        .unwrap_or_else(|| {
+            panic!(
+                "method_setImplementation called with unknown Method {:?}",
+                method
+            )
+        });
 
     let old_imp = env.mem.read(method).imp;
     let (class, name) = owner;
@@ -1471,8 +1548,14 @@ pub(super) fn method_exchangeImplementations(
     first: MutPtr<method_t>,
     second: MutPtr<method_t>,
 ) {
-    assert!(!first.is_null(), "method_exchangeImplementations first Method is NULL");
-    assert!(!second.is_null(), "method_exchangeImplementations second Method is NULL");
+    assert!(
+        !first.is_null(),
+        "method_exchangeImplementations first Method is NULL"
+    );
+    assert!(
+        !second.is_null(),
+        "method_exchangeImplementations second Method is NULL"
+    );
     if first == second {
         return;
     }
