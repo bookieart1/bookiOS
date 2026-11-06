@@ -218,31 +218,8 @@ jobs:
           APP_PATH="$RUNNER_TEMP/iDared32bit.xcarchive/Products/Applications/iDared 32bit.app"
           EXECUTABLE_NAME="$(plutil -extract CFBundleExecutable raw "$APP_PATH/Info.plist")"
           EXECUTABLE="$APP_PATH/$EXECUTABLE_NAME"
-          strings_file="$RUNNER_TEMP/idared-diagnostic-strings.txt"
-          /usr/bin/strings "$EXECUTABLE" > "$strings_file"
-
-          # Each marker originates in a different actual SDL UIKit compilation
-          # unit. Their presence in the linked executable proves that Cargo's
-          # bundled native SDL—not the unrelated vendor/SDL copy—was rebuilt.
-          markers=(
-            'sdl-scene-delegate-supported-orientations-query'
-            'reason=native-key-root'
-            'reason=native-host-fallback'
-            'sdl-first-frame-cover-installed'
-            'sdl-first-frame-cover-removed'
-            'sdl-controller-supported-orientations-query'
-            'sdl-controller-transition-begin'
-            'sdl-orientation-policy-consumed'
-            'sdl-window-destroy-begin'
-            'sdl-status-bar-orientation-notification'
-            'sdl-view-window-change-begin'
-          )
-          for marker in "${markers[@]}"; do
-            grep -Fq "$marker" "$strings_file"
-            echo "Linked diagnostic marker: $marker"
-          done
-          /usr/bin/nm -gU "$EXECUTABLE" | grep -Fq '_idared_sdl_host_orientation_policy'
-          echo "Linked phase-policy bridge: idared_sdl_host_orientation_policy"
+          iphone/diagnostics/verify-dev237-linked-app.sh \
+            "$EXECUTABLE" "$RUNNER_TEMP"
 
           clean_build_log="$RUNNER_TEMP/idared-xcodebuild-no-ansi.log"
           /usr/bin/perl -pe 's/\e\[[0-9;]*[mK]//g' \
