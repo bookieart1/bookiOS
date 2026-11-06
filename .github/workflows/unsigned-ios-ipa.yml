@@ -228,6 +228,10 @@ jobs:
           grep -Fq 'the dependency `sdl2-sys` was rebuilt' "$clean_build_log"
           echo "Confirmed the sdl2-sys native build script ran and its Rust dependent rebuilt."
 
+          verified_markers_file="$RUNNER_TEMP/idared-dev237-linked-markers.txt"
+          marker_count="$(wc -l < "$verified_markers_file" | tr -d ' ')"
+          test "$marker_count" = 15
+
           mkdir -p build/diagnostic-provenance
           {
             echo "app_commit=$GITHUB_SHA"
@@ -242,7 +246,7 @@ jobs:
             echo "scene_policy_patch_sha256=${{ steps.diagnostic-sdl.outputs.scene_policy_patch_sha256 }}"
             echo "first_frame_gate_patch_blob=${{ steps.diagnostic-sdl.outputs.first_frame_gate_patch_blob }}"
             echo "first_frame_gate_patch_sha256=${{ steps.diagnostic-sdl.outputs.first_frame_gate_patch_sha256 }}"
-            printf 'linked_marker=%s\n' "${markers[@]}"
+            sed 's/^/linked_marker=/' "$verified_markers_file"
           } | tee build/diagnostic-provenance/identity.txt
 
           {
@@ -257,7 +261,7 @@ jobs:
             echo "- First-frame gate patch blob: \`${{ steps.diagnostic-sdl.outputs.first_frame_gate_patch_blob }}\`"
             echo "- First-frame gate patch SHA-256: \`${{ steps.diagnostic-sdl.outputs.first_frame_gate_patch_sha256 }}\`"
             echo "- Native rebuild: sdl2-sys build script and dependent rebuild observed"
-            echo "- Linked markers: ${#markers[@]} of ${#markers[@]}"
+            echo "- Linked markers: $marker_count of $marker_count"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify separate identity and package the unsigned IPA

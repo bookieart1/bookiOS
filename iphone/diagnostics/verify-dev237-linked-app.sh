@@ -13,6 +13,7 @@ executable="$1"
 scratch_directory="$2"
 strings_file="$scratch_directory/idared-dev237-linked-strings.txt"
 symbols_file="$scratch_directory/idared-dev237-linked-symbols.txt"
+verified_markers_file="$scratch_directory/idared-dev237-linked-markers.txt"
 
 /usr/bin/strings "$executable" > "$strings_file"
 
@@ -36,8 +37,10 @@ markers=(
     'guest-presentation-committed'
     'guest-termination-begin'
 )
+: > "$verified_markers_file"
 for marker in "${markers[@]}"; do
     grep -Fq "$marker" "$strings_file"
+    printf '%s\n' "$marker" >> "$verified_markers_file"
     echo "Linked diagnostic marker: $marker"
 done
 
