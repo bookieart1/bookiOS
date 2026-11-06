@@ -1167,6 +1167,7 @@ dependencies = [
  "digest",
  "encoding_rs",
  "flate2",
+ "getrandom",
  "gl_generator",
  "hound",
  "libc",

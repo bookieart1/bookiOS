@@ -333,6 +333,18 @@ pub const CLASSES: ClassExports = objc_classes! {
         .unwrap_or(nil)
 }
 
+- (NSInteger)numberOfRowsInSection:(NSInteger)section {
+    if section < 0 {
+        return 0;
+    }
+    env.objc
+        .borrow::<UITableViewHostObject>(this)
+        .section_row_counts
+        .get(section as usize)
+        .copied()
+        .unwrap_or(0)
+}
+
 - (())dealloc {
     let reusable_cells = std::mem::take(
         &mut env.objc.borrow_mut::<UITableViewHostObject>(this).reusable_cells,
@@ -497,6 +509,22 @@ mod tests {
         assert_eq!(index_path_for_flat_row(&rows, 2), Some((2, 0)));
         assert_eq!(index_path_for_flat_row(&rows, 4), Some((2, 2)));
         assert_eq!(index_path_for_flat_row(&rows, 5), None);
+    }
+
+    #[test]
+    fn row_count_query_uses_cached_model_and_rejects_invalid_sections() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let table: id = msg_class![env; UITableView new];
+        env.objc
+            .borrow_mut::<UITableViewHostObject>(table)
+            .section_row_counts = vec![3, 0, 7];
+        assert_eq!(msg![env; table numberOfRowsInSection:0i32], 3i32);
+        assert_eq!(msg![env; table numberOfRowsInSection:1i32], 0i32);
+        assert_eq!(msg![env; table numberOfRowsInSection:2i32], 7i32);
+        assert_eq!(msg![env; table numberOfRowsInSection:(-1i32)], 0i32);
+        assert_eq!(msg![env; table numberOfRowsInSection:3i32], 0i32);
+        release(env, table);
     }
 
     #[test]

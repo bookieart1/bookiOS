@@ -266,6 +266,7 @@ struct DefaultsLookup {
 struct DefaultsEvent {
     sequence: u64,
     thread: usize,
+    action: &'static str,
     receiver: u32,
     key: u32,
     key_description: Text,
@@ -1167,12 +1168,12 @@ impl Recorder {
             echo_no_panic!("flight bundle directory entry name=\"{}\"", entry);
         }
         echo_no_panic!(
-            "flight defaults lookups: newest {DEFAULTS_EVENTS}; total={} (bounded key/domain/result provenance; no ownership changes)",
+            "flight defaults events: newest {DEFAULTS_EVENTS}; total={} (bounded key/domain/value provenance; no ownership changes)",
             self.defaults_events.written
         );
         for event in self.defaults_events.iter() {
-            echo_no_panic!("flight defaults #{} tid={} receiver={:#x} key={:#x} key-description=\"{}\" result={:#x} result-class=\"{}\" domain={} pc={:#x} lr={:#x}",
-                event.sequence, event.thread, event.receiver, event.key,
+            echo_no_panic!("flight defaults #{} tid={} action={} receiver={:#x} key={:#x} key-description=\"{}\" value={:#x} value-class=\"{}\" domain={} pc={:#x} lr={:#x}",
+                event.sequence, event.thread, event.action, event.receiver, event.key,
                 event.key_description, event.result, event.result_class,
                 event.domain.as_str(), event.pc, event.lr);
         }
@@ -1785,6 +1786,9 @@ impl Environment {
                 b"Invocation",
                 b"operation",
                 b"Operation",
+                b"lastTag",
+                b"LastTag",
+                b"foundCharacters",
             ],
         ) {
             Some("callback")
@@ -1866,6 +1870,12 @@ impl Environment {
                 "presentation" => recorder.presentation_boundary_events.push(event),
                 _ => (),
             }
+            if name.bytes() == b"setLastTag:" && regs[2] != 0 {
+                recorder.watch_object(regs[2]);
+                if let Some(history) = &mut self.mem.object_history {
+                    history.watch_address(regs[2]);
+                }
+            }
         }
         let call = recorder.begin(Call {
             thread: self.current_thread,
@@ -1916,6 +1926,57 @@ impl Environment {
         result: u32,
         domain: &'static str,
     ) {
+        self.diagnostic_user_defaults_event("lookup", receiver, key, result, domain);
+    }
+
+    /// Record an application-domain write before the dictionary takes
+    /// ownership. The value address is pinned in the bounded object-history
+    /// table so a later serializer failure can distinguish address reuse from
+    /// an intentional property-list value.
+    pub fn diagnostic_user_defaults_write(
+        &mut self,
+        action: &'static str,
+        receiver: u32,
+        key: u32,
+        value: u32,
+    ) {
+        if value != 0 {
+            let regs = *self.cpu.regs();
+            let class = describe_object(&self.objc, &self.mem, value, false);
+            let refcount = self
+                .objc
+                .refcount_for_diagnostics(id::from_bits(value))
+                .unwrap_or(0);
+            if let Some(history) = &mut self.mem.object_history {
+                history.watch_address(value);
+            }
+            if let Some(recorder) = &mut self.diagnostics {
+                recorder.watch_object(value);
+                recorder.object_lifetime_events.push(ObjectLifetimeEvent {
+                    sequence: recorder.object_lifetime_events.written.saturating_add(1),
+                    thread: self.current_thread,
+                    action: "observed-at-defaults-write",
+                    object: value,
+                    class,
+                    before: refcount,
+                    after: refcount,
+                    pc: regs[15],
+                    lr: regs[14],
+                    context: key,
+                });
+            }
+        }
+        self.diagnostic_user_defaults_event(action, receiver, key, value, "application");
+    }
+
+    fn diagnostic_user_defaults_event(
+        &mut self,
+        action: &'static str,
+        receiver: u32,
+        key: u32,
+        result: u32,
+        domain: &'static str,
+    ) {
         let regs = *self.cpu.regs();
         let key_description = describe_object(&self.objc, &self.mem, key, true);
         let result_class = describe_object(&self.objc, &self.mem, result, false);
@@ -1929,6 +1990,7 @@ impl Environment {
             recorder.defaults_events.push(DefaultsEvent {
                 sequence: recorder.sequence,
                 thread: self.current_thread,
+                action,
                 receiver,
                 key,
                 key_description,
@@ -1938,6 +2000,30 @@ impl Environment {
                 pc: regs[15],
                 lr: regs[14],
             });
+        }
+    }
+
+    /// Failure-only property-list evidence. This does not accept, discard, or
+    /// transform the invalid value; the existing failure remains authoritative.
+    pub fn diagnostic_property_list_rejection(&mut self, object: id) {
+        let address = object.to_bits();
+        let description = describe_object(&self.objc, &self.mem, address, false);
+        echo_no_panic!(
+            "flight property-list rejection object={address:#010x} class=\"{description}\" pc={:#010x} lr={:#010x}",
+            self.cpu.regs()[15],
+            self.cpu.regs()[14]
+        );
+        if let Some(history) = &self.mem.object_history {
+            if !history.dump(address) {
+                echo_no_panic!(
+                    "flight property-list object history: no retained record for {address:#010x}"
+                );
+            }
+            if !history.dump_heap(address) {
+                echo_no_panic!(
+                    "flight property-list heap history: no recent allocation record for {address:#010x}"
+                );
+            }
         }
     }
     /// Retain the exact failed candidate without writing a per-lookup log or
@@ -2513,6 +2599,11 @@ mod tests {
             b"getAllGamesTarget:action:",
             &[b"Target", b"Action"]
         ));
+        assert!(selector_matches(
+            b"parser:foundCharacters:",
+            &[b"foundCharacters"]
+        ));
+        assert!(selector_matches(b"setLastTag:", &[b"lastTag", b"LastTag"]));
         assert!(!selector_matches(
             b"setFrame:",
             &[b"resource", b"Target", b"Action"]

@@ -2223,6 +2223,37 @@ impl Environment {
         self.yield_thread(ThreadBlock::WaitingForDebugger(reason));
     }
 
+    /// Failure-only snapshot for assertions, unexpected SVCs, and CPU faults.
+    /// It records bounded register/code/stack context and never changes guest
+    /// execution or attempts to repair the target.
+    pub(crate) fn diagnostic_control_flow_snapshot(&self, reason: &str, target: u32) {
+        let regs = self.cpu.regs();
+        echo_no_panic!(
+            "focused control-flow failure reason={reason} target={target:#010x} tid={} regs={regs:08x?}",
+            self.current_thread
+        );
+        for (label, address, before, length) in [
+            ("target", target, 16u32, 48u32),
+            ("lr", regs[cpu::Cpu::LR], 24u32, 48u32),
+            ("sp", regs[cpu::Cpu::SP], 0u32, 64u32),
+        ] {
+            let start = address.saturating_sub(before);
+            if let Some(bytes) = self
+                .mem
+                .get_bytes_fallible(mem::ConstVoidPtr::from_bits(start), length)
+            {
+                echo_no_panic!(
+                    "focused control-flow {label} address={address:#010x} bytes-at={start:#010x} data={bytes:02x?}"
+                );
+            } else {
+                echo_no_panic!(
+                    "focused control-flow {label} address={address:#010x} data=<unavailable>"
+                );
+            }
+        }
+        self.stack_trace_current();
+    }
+
     #[inline(always)]
     /// Respond to the new CPU state (do nothing, execute an SVC or enter
     /// debugging) and decide what to do next.
@@ -2245,6 +2276,9 @@ impl Environment {
                     dyld::Dyld::SVC_LAZY_LINK
                     | dyld::Dyld::SVC_LAZY_LINK_RET_FLAG
                     | dyld::Dyld::SVC_LINKED_FUNCTIONS_BASE.. => {
+                        if !self.dyld.has_svc_handler(svc) {
+                            self.diagnostic_control_flow_snapshot("unexpected-svc", svc_pc);
+                        }
                         if let Some(f) = self.dyld.get_svc_handler(
                             &self.bins,
                             &mut self.mem,
@@ -2295,7 +2329,17 @@ impl Environment {
                     }
                 }
             }
-            cpu::CpuState::Error(e) => ThreadNextAction::DebugCpuError(e),
+            cpu::CpuState::Error(e) => {
+                self.diagnostic_control_flow_snapshot(
+                    match &e {
+                        cpu::CpuError::MemoryError => "cpu-memory-error",
+                        cpu::CpuError::UndefinedInstruction => "cpu-undefined-instruction",
+                        cpu::CpuError::Breakpoint => "cpu-breakpoint",
+                    },
+                    self.cpu.regs()[cpu::Cpu::PC],
+                );
+                ThreadNextAction::DebugCpuError(e)
+            }
         }
     }
 

@@ -37,6 +37,9 @@ pub struct State {
     /// NSNumber and CFNumber are toll-free bridged, so Foundation factory and
     /// initializer paths must share the same process-lifetime objects.
     small_integer_cache: HashMap<i32, id>,
+    /// Stable Foundation boolean singletons. Keep these separate from the
+    /// integer cache so boolean type identity (`objCType`, coding) is retained.
+    boolean_cache: [Option<id>; 2],
 }
 
 #[derive(Debug)]
@@ -165,6 +168,36 @@ fn cached_small_integer(env: &mut Environment, class: Class, value: i64) -> Opti
 fn replace_with_cached_small_integer(env: &mut Environment, this: id, value: i64) -> Option<id> {
     let class: Class = msg![env; this class];
     let cached = cached_small_integer(env, class, value)?;
+    release(env, this);
+    Some(cached)
+}
+
+fn replace_with_cached_boolean(env: &mut Environment, this: id, value: bool) -> Option<id> {
+    let class: Class = msg![env; this class];
+    let ns_number = env.objc.get_known_class("NSNumber", &mut env.mem);
+    if class != ns_number {
+        return None;
+    }
+    let index = usize::from(value);
+    let cached = if let Some(number) = env
+        .framework_state
+        .foundation
+        .ns_value
+        .boolean_cache[index]
+    {
+        number
+    } else {
+        let number = env.objc.alloc_static_object(
+            ns_number,
+            Box::new(NSNumberHostObject::Bool(value)),
+            &mut env.mem,
+        );
+        env.framework_state
+            .foundation
+            .ns_value
+            .boolean_cache[index] = Some(number);
+        number
+    };
     release(env, this);
     Some(cached)
 }
@@ -332,8 +365,6 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 + (id)numberWithBool:(bool)value {
-    // TODO: for greater efficiency we could return a static-lifetime value
-
     let new: id = msg![env; this alloc];
     let new: id = msg![env; new initWithBool:value];
     autorelease(env, new)
@@ -491,6 +522,12 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)initWithBool:(bool)value {
+    // Historical Foundation uses stable cached boolean number objects. This
+    // also protects old applications that stored a convenience boolean
+    // without retaining it across an autorelease-pool drain.
+    if let Some(cached) = replace_with_cached_boolean(env, this, value) {
+        return cached;
+    }
     *env.objc.borrow_mut(this) = NSNumberHostObject::Bool(value);
     this
 }
@@ -864,5 +901,27 @@ mod tests {
         let above: id = msg_class![env; NSNumber numberWithInt:(MAX_CACHED_INTEGER + 1)];
         assert!(!env.objc.has_static_lifetime(below));
         assert!(!env.objc.has_static_lifetime(above));
+    }
+
+    #[test]
+    fn boolean_factories_return_stable_boolean_typed_objects() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        for (value, integer) in [(false, 0), (true, 1)] {
+            let pool: id = msg_class![env; NSAutoreleasePool new];
+            let boolean: id = msg_class![env; NSNumber numberWithBool:value];
+            release(env, pool);
+            let repeated: id = msg_class![env; NSNumber numberWithBool:value];
+            let numeric: id = msg_class![env; NSNumber numberWithInt:integer];
+            assert_eq!(boolean, repeated);
+            assert_ne!(boolean, numeric);
+            assert!(env.objc.has_static_lifetime(boolean));
+            assert!(matches!(
+                env.objc.borrow::<NSNumberHostObject>(boolean),
+                NSNumberHostObject::Bool(stored) if *stored == value
+            ));
+            let round_trip: bool = msg![env; boolean boolValue];
+            assert_eq!(round_trip, value);
+        }
     }
 }

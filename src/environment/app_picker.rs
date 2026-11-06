@@ -818,18 +818,19 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
     // Exact bundle identifiers avoid prefix collisions such as Glyder/Glyder 2
     // and keep the focused device-test batch deterministic even when filenames
     // or localized display names differ.
-    const DEV_241_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
-        "COMGLUTHOUSAND",
-        "COMAGHARTASTUDIOPROJECT1112E01",
-        "COMMAJESTICSOFTWAREBLOT",
-        "COMDIGITALPRUNESBUNGEEBALL2PRO",
-        "COMINMOTIONSOFTWARECATACOMBS",
-        "COMT04APP",
-        "COMGLUGLYDER",
-        "COMGLUGLYDER2",
-        "COMGLUCLOCKWORK",
-        "COMYOYOGAMESKAROSHI",
-        "COMYOYOGAMESPOLLUSHOT",
+    const DEV_242_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
+        "COMYOURCOMPANYARCADECRANE",
+        "COMTAYASUICATAGUGL",
+        "COMCONTINUITYGAMECONTINUITY2",
+        "COMDTPENTERTAINMENTCRAZYGOLF",
+        "COMIUGOIMPLODE",
+        "COMSQUAREENIXLARACROFTANDTHEGUARDIANOFLIGHT",
+        "COMSULAKENIKO",
+        "COMKONAMIEUROPEPES2012",
+        "COMREIGNDESIGNPIGRUSH",
+        "COMWANDAKEROBOKILLIPHONE",
+        "COMMADFINGERGAMESSAMURAI2",
+        "COMTEAM17WORMSEXPRESS",
     ];
     let started = Instant::now();
     apps.sort_by_key(|app| {
@@ -840,7 +841,7 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
                 .collect()
         };
         let bundle_identifier = normalized(&app.bundle_identifier);
-        let rank = DEV_241_TEST_BUNDLE_IDENTIFIERS
+        let rank = DEV_242_TEST_BUNDLE_IDENTIFIERS
             .iter()
             .position(|&identifier| bundle_identifier == identifier)
             .unwrap_or(usize::MAX);
@@ -1684,7 +1685,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.41",
+            "iDared 32bit {}{}{} · Dev 2.42",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""
@@ -2948,41 +2949,46 @@ mod tests {
     }
 
     #[test]
-    fn dev_241_test_batch_and_controls_are_first_in_exact_alphabetical_order() {
+    fn dev_242_test_batch_is_first_in_exact_alphabetical_order() {
         let mut apps = vec![
             test_app("unrelated.bundle", "AAA unrelated"),
-            test_app("com.yoyogames.pollushot", "Pollushot"),
-            test_app("com.glu.glyder2", "Glyder2"),
-            test_app("com.digitalprunes.BungeeBall2Pro", "Bungee Ball"),
-            test_app("com.glu.thousand", "1000:Find'Em"),
-            test_app("com.yoyogames.karoshi", "Karoshi"),
-            test_app("com.inmotionsoftware.Catacombs", "Catacombs"),
-            test_app("com.glu.clockwork", "JumpO'Clock"),
-            test_app("com.aghartastudio.project1112e01", "1112 ep.01"),
-            test_app("com.majesticsoftware.blot", "BLOT"),
-            test_app("com.glu.glyder", "Glyder"),
-            test_app("com.t04.app", "Demolish"),
+            test_app("com.team17.wormsexpress", "Worms"),
+            test_app("com.continuitygame.continuity2", "Continuity 2"),
+            test_app("com.wandake.robokilliphone", "Robokill"),
+            test_app("com.yourcompany.ArcadeCrane", "Arcade Claw"),
+            test_app("com.konami-europe.pes2012", "PES2012"),
+            test_app("com.tayasui.catagugl", "CataGugl"),
+            test_app("com.reigndesign.Pigrush", "Pig Rush"),
+            test_app("com.iugo.Implode", "Implode!"),
+            test_app("com.sulake.niko", "Niko"),
+            test_app("com.madfingergames.Samurai2", "Samurai2"),
+            test_app("com.dtp-entertainment.crazygolf", "CrazyGolf"),
+            test_app(
+                "com.square-enix.laracroftandtheguardianoflight",
+                "Lara Croft and the Guardian of Light",
+            ),
         ];
         sort_picker_apps(&mut apps, &mut LibraryTiming::default());
         let names: Vec<&str> = apps
             .iter()
-            .take(11)
+            .take(12)
             .map(|app| app.display_name.as_str())
             .collect();
         assert_eq!(
             names,
             [
-                "1000:Find'Em",
-                "1112 ep.01",
-                "BLOT",
-                "Bungee Ball",
-                "Catacombs",
-                "Demolish",
-                "Glyder",
-                "Glyder2",
-                "JumpO'Clock",
-                "Karoshi",
-                "Pollushot",
+                "Arcade Claw",
+                "CataGugl",
+                "Continuity 2",
+                "CrazyGolf",
+                "Implode!",
+                "Lara Croft and the Guardian of Light",
+                "Niko",
+                "PES2012",
+                "Pig Rush",
+                "Robokill",
+                "Samurai2",
+                "Worms",
             ]
         );
     }

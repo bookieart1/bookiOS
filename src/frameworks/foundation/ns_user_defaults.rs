@@ -231,6 +231,9 @@ pub const CLASSES: ClassExports = objc_classes! {
     if object == nil {
         return msg![env; this removeObjectForKey:key];
     }
+    env.diagnostic_user_defaults_write(
+        "set", this.to_bits(), key.to_bits(), object.to_bits()
+    );
     // Only app domain gets affected!
     let dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict;
     () = msg![env; this willChangeValueForKey:key];
@@ -239,6 +242,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())removeObjectForKey:(id)key {
+    env.diagnostic_user_defaults_write("remove", this.to_bits(), key.to_bits(), 0);
     // Only app domain gets affected!
     let dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict;
     () = msg![env; this willChangeValueForKey:key];

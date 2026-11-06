@@ -290,6 +290,26 @@ impl Dyld {
             .map(|&(symbol, _)| symbol)
     }
 
+    /// Whether an SVC value names a currently linked host function. Used only
+    /// to emit failure context before the existing dispatch path rejects an
+    /// invalid SVC.
+    pub fn has_svc_handler(&self, svc: u32) -> bool {
+        if matches!(
+            svc,
+            Self::SVC_LAZY_LINK
+                | Self::SVC_LAZY_LINK_RET_FLAG
+                | Self::SVC_THREAD_EXIT
+                | Self::SVC_RETURN_TO_HOST
+        ) {
+            return true;
+        }
+        let svc = svc & !Self::SVC_LAZY_LINK_RET_FLAG;
+        let Some(index) = svc.checked_sub(Self::SVC_LINKED_FUNCTIONS_BASE) else {
+            return false;
+        };
+        (index as usize) < self.linked_host_functions.len()
+    }
+
     /// Do linking-related tasks that need doing right after loading the
     /// binaries.
     pub fn do_initial_linking(

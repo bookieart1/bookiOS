@@ -167,6 +167,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     let navigation_item: id = msg![env; view_controller navigationItem];
     () = msg![env; navigation_bar pushNavigationItem:navigation_item animated:false];
 
+    // UIKit has loaded the destination view (and therefore delivered its
+    // one-time viewDidLoad) before telling the navigation delegate that the
+    // controller is about to be shown. Older applications use that ordering
+    // to prepare appearance state from outlets populated in viewDidLoad.
+    let vc_view: id = msg![env; view_controller view];
+
     let delegate = env.objc.borrow::<UINavigationControllerHostObject>(this).delegate;
     let sel: SEL = env
         .objc
@@ -179,7 +185,6 @@ pub const CLASSES: ClassExports = objc_classes! {
         () = msg![env; delegate navigationController:this willShowViewController:view_controller animated:false];
     }
     let self_view: id = msg![env; this view];
-    let vc_view: id = msg![env; view_controller view];
     // TODO: animations
     () = msg![env; view_controller viewWillAppear:false];
     () = msg![env; self_view addSubview:vc_view];

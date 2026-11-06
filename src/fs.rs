@@ -380,6 +380,9 @@ pub enum GuestFile {
     File(File),
     IpaBundleFile(IpaFile),
     ResourceFile(paths::ResourceFile),
+    /// Read-only entropy device exposed through the ordinary POSIX file-
+    /// descriptor layer (`/dev/random` and `/dev/urandom`).
+    RandomDevice,
     Socket,
 }
 
@@ -403,7 +406,9 @@ impl GuestFile {
     pub fn sync_all(&self) -> std::io::Result<()> {
         match self {
             GuestFile::File(file) => file.sync_all(),
-            GuestFile::IpaBundleFile(_) | GuestFile::ResourceFile(_) => Ok(()),
+            GuestFile::IpaBundleFile(_)
+            | GuestFile::ResourceFile(_)
+            | GuestFile::RandomDevice => Ok(()),
             GuestFile::Directory => {
                 log!("Warning: syncing directory as a guest file.");
                 Ok(())
@@ -424,7 +429,14 @@ impl GuestFile {
                 panic!("Attempt to resize a read-only file: {file:?}")
             }
             GuestFile::Directory => panic!("Attempt to resize a directory as a guest file"),
-            _ => unimplemented!(),
+            GuestFile::RandomDevice => Err(std::io::Error::new(
+                std::io::ErrorKind::ReadOnlyFilesystem,
+                "Attempt to resize a read-only random device",
+            )),
+            GuestFile::Socket => Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "Resize operation not supported on socket",
+            )),
         }
     }
 
@@ -439,7 +451,7 @@ impl GuestFile {
     pub fn is_seekable(&self) -> bool {
         // Due to legacy directory iteration support, directories are seekable
         // https://stackoverflow.com/questions/65911066/what-does-lseek-mean-for-a-directory-file-descriptor
-        !matches!(self, GuestFile::Socket)
+        !matches!(self, GuestFile::RandomDevice | GuestFile::Socket)
     }
 }
 
@@ -453,7 +465,15 @@ impl Read for GuestFile {
                 std::io::ErrorKind::IsADirectory,
                 "Attempt to read from a directory as a guest file",
             )),
-            _ => unimplemented!(),
+            GuestFile::RandomDevice => getrandom::fill(buf)
+                .map(|()| buf.len())
+                .map_err(|error| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("host entropy source failed: {error}"),
+                    )
+                }),
+            GuestFile::Socket => unimplemented!(),
         }
     }
 }
@@ -469,7 +489,11 @@ impl Write for GuestFile {
                 panic!("Attempt to write to a read-only file: {file:?}")
             }
             GuestFile::Directory => panic!("Attempt to write to a directory as a guest file"),
-            _ => unimplemented!(),
+            GuestFile::RandomDevice => Err(std::io::Error::new(
+                std::io::ErrorKind::ReadOnlyFilesystem,
+                "Attempt to write to a read-only random device",
+            )),
+            GuestFile::Socket => unimplemented!(),
         }
     }
 
@@ -484,7 +508,8 @@ impl Write for GuestFile {
                 panic!("Attempt to flush a read-only file: {file:?}")
             }
             GuestFile::Directory => panic!("Attempt to flush a directory as a guest file"),
-            _ => unimplemented!(),
+            GuestFile::RandomDevice => Ok(()),
+            GuestFile::Socket => unimplemented!(),
         }
     }
 }
@@ -506,7 +531,10 @@ impl Seek for GuestFile {
                     "Attempt to seek a directory as a guest file",
                 ))
             }
-            _ => unimplemented!(),
+            GuestFile::RandomDevice | GuestFile::Socket => Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "Attempt to seek an unseekable guest file",
+            )),
         }
     }
 }

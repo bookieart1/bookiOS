@@ -418,6 +418,41 @@ fn exit(env: &mut Environment, exit_code: i32) {
     env.return_to_app_picker = true;
 }
 
+/// Darwin's assertion endpoint. Assertions remain terminal; this bounded
+/// implementation exists to preserve the original function/file/expression
+/// and caller state in the retrievable device log instead of failing first at
+/// an unresolved import.
+fn __assert_rtn(
+    env: &mut Environment,
+    function: ConstPtr<u8>,
+    file: ConstPtr<u8>,
+    line: i32,
+    expression: ConstPtr<u8>,
+) {
+    let function = env
+        .mem
+        .cstr_at_utf8(function)
+        .unwrap_or("<invalid function>")
+        .to_owned();
+    let file = env
+        .mem
+        .cstr_at_utf8(file)
+        .unwrap_or("<invalid file>")
+        .to_owned();
+    let expression = env
+        .mem
+        .cstr_at_utf8(expression)
+        .unwrap_or("<invalid expression>")
+        .to_owned();
+    echo_no_panic!(
+        "Guest assertion: function={function:?} file={file:?} line={line} expression={expression:?}"
+    );
+    env.diagnostic_control_flow_snapshot("guest-assertion", env.cpu.regs()[crate::cpu::Cpu::PC]);
+    panic!(
+        "Guest assertion failed: {expression} ({function}, {file}:{line})"
+    );
+}
+
 fn bsearch(
     env: &mut Environment,
     key: ConstVoidPtr,
@@ -792,6 +827,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(setenv(_, _, _)),
     export_c_func!(unsetenv(_)),
     export_c_func!(exit(_)),
+    export_c_func!(__assert_rtn(_, _, _, _)),
     export_c_func!(bsearch(_, _, _, _, _)),
     export_c_func!(strtof(_, _)),
     export_c_func!(strtof_l(_, _, _)),

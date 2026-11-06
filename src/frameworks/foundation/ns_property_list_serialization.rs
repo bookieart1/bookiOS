@@ -353,6 +353,7 @@ fn serialize_plist(env: &mut Environment, plist: id) -> Value {
         let time = apple_epoch().add(Duration::from_secs_f64(date.time_interval));
         Value::Date(time.into())
     } else {
+        env.diagnostic_property_list_rejection(plist);
         unimplemented!("class {}", env.objc.get_class_name(class))
     }
 }

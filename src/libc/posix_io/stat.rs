@@ -34,6 +34,7 @@ pub type blksize_t = u32;
 
 // enum values sourced from ```man 2 stat```
 pub const S_IFDIR: mode_t = 0o0040000;
+pub const S_IFCHR: mode_t = 0o0020000;
 pub const S_IFREG: mode_t = 0o0100000;
 
 #[allow(non_camel_case_types)]
@@ -117,6 +118,9 @@ fn fstat_inner(env: &mut Environment, fd: FileDescriptor, buf: MutPtr<stat>) -> 
             stat.st_mode |= S_IFDIR;
 
             // TODO: st_size
+        }
+        GuestFile::RandomDevice => {
+            stat.st_mode |= S_IFCHR;
         }
         _ => unimplemented!(),
     }
@@ -214,7 +218,9 @@ fn fchmod(env: &mut Environment, fd: FileDescriptor, mode: mode_t) -> i32 {
                 Ok(())
             }
         }
-        GuestFile::IpaBundleFile(_) | GuestFile::ResourceFile(_) => {
+        GuestFile::IpaBundleFile(_)
+        | GuestFile::ResourceFile(_)
+        | GuestFile::RandomDevice => {
             Err(FchmodError::Errno(EROFS))
         }
         GuestFile::Socket => Err(FchmodError::Errno(EINVAL)),

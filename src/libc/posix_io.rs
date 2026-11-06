@@ -210,6 +210,29 @@ pub fn open_direct(env: &mut Environment, path: ConstPtr<u8>, flags: i32) -> Fil
             return -1;
         }
     };
+    if matches!(path_string.as_str(), "/dev/random" | "/dev/urandom") {
+        if flags & O_ACCMODE != O_RDONLY
+            || flags & (O_APPEND | O_CREAT | O_TRUNC | O_EXCL) != 0
+        {
+            log!(
+                "Warning: entropy device {:?} is read-only; rejecting open flags {:#x}",
+                path_string,
+                flags
+            );
+            set_errno(env, EACCES);
+            return -1;
+        }
+        let host_object = PosixFileHostObject {
+            file: GuestFile::RandomDevice,
+            needs_flush: false,
+            reached_eof: false,
+            flags: 0,
+            status_flags: flags & (O_ACCMODE | O_NONBLOCK),
+        };
+        let fd = find_or_create_fd(env, host_object);
+        log!("Opened read-only entropy device {:?} as fd {}", path_string, fd);
+        return fd;
+    }
     // TODO: symlinks don't exist in the FS yet, so we can't "not follow" them.
     if flags & O_NOFOLLOW != 0 {
         log!("Ignoring O_NOFOLLOW when opening {:?}", path_string);
@@ -1218,6 +1241,33 @@ fn validate_lock(env: &mut Environment, fd: FileDescriptor, lock: &flock) -> Res
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn guest_c_string(env: &mut Environment, value: &[u8]) -> ConstPtr<u8> {
+        env.mem.alloc_and_write_cstr(value).cast_const()
+    }
+
+    #[test]
+    fn random_device_aliases_open_read_and_close_through_posix_descriptors() {
+        let mut env = Environment::new_fake_for_test();
+        for path in [b"/dev/random".as_slice(), b"/dev/urandom".as_slice()] {
+            let path = guest_c_string(&mut env, path);
+            let fd = open_direct(&mut env, path, O_RDONLY);
+            assert!(fd >= NORMAL_FILENO_BASE);
+            let buffer = env.mem.alloc(32);
+            assert_eq!(read(&mut env, fd, buffer.cast(), 32), 32);
+            assert_eq!(lseek(&mut env, fd, 0, SEEK_SET), -1);
+            assert_eq!(crate::libc::errno::get_errno(&mut env), ESPIPE);
+            assert_eq!(close(&mut env, fd), 0);
+        }
+    }
+
+    #[test]
+    fn random_devices_reject_write_access() {
+        let mut env = Environment::new_fake_for_test();
+        let path = guest_c_string(&mut env, b"/dev/urandom");
+        assert_eq!(open_direct(&mut env, path, O_WRONLY), -1);
+        assert_eq!(crate::libc::errno::get_errno(&mut env), EACCES);
+    }
 
     #[test]
     fn fcntl_on_negative_descriptor_reports_bad_file_descriptor() {

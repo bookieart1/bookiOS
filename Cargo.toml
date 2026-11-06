@@ -88,6 +88,7 @@ corosensei = "0.3.2"
 uuid = { version = "1.2.2", default-features = false, features = ["v4"] }
 regex-lite = "0.1.9"
 serde = { version = "1.0.228", features = ["derive"] }
+getrandom = "0.4.2"
 
 [patch.crates-io]
 cmake = { git = 'https://github.com/iDared32bit-emu/cmake-rs', branch = "fix-iphone-build" }
