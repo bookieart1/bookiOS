@@ -112,6 +112,14 @@ impl Bundle {
         self.plist["CFBundleVersion"].as_string().unwrap()
     }
 
+    /// The bundle version when it is present and is a string.
+    ///
+    /// Picker metadata treats this as optional because malformed historical
+    /// packages must be skippable rather than crashing cache construction.
+    pub fn bundle_version_optional(&self) -> Option<&str> {
+        self.plist.get("CFBundleVersion").and_then(Value::as_string)
+    }
+
     pub fn bundle_localizations(&self) -> &[Value] {
         static EMPTY_VAL: Vec<Value> = Vec::new();
         self.plist
@@ -125,6 +133,11 @@ impl Bundle {
         self.plist
             .get("CFBundleName")
             .map(|name| name.as_string().unwrap())
+    }
+
+    /// Canonical bundle name when the metadata field is a string.
+    pub fn canonical_bundle_name_optional(&self) -> Option<&str> {
+        self.plist.get("CFBundleName").and_then(Value::as_string)
     }
 
     /// Name for the bundle, either the canonical name or, if there isn't one,
@@ -189,6 +202,11 @@ impl Bundle {
         self.plist
             .get("MinimumOSVersion")
             .map(|v| v.as_string().unwrap())
+    }
+
+    /// Minimum OS version when the metadata field is a string.
+    pub fn minimum_os_version_optional(&self) -> Option<&str> {
+        self.plist.get("MinimumOSVersion").and_then(Value::as_string)
     }
 
     pub fn required_device_capabilities(&self) -> Vec<&str> {

@@ -1180,6 +1180,7 @@ dependencies = [
  "rusttype",
  "sdl2",
  "sdl2-sys",
+ "serde",
  "sha1",
  "sha2",
  "symphonia",

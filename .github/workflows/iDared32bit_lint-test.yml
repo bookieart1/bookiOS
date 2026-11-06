@@ -6,7 +6,7 @@ name: Lint and test
 
 on:
   push:
-    branches: [ "idared32bit", "ci/unsigned-ipa-baseline" ]
+    branches: [ "idared32bit", "ci/unsigned-ipa-baseline", "phase2/persistent-cold-start-index" ]
   pull_request:
     branches: [ "idared32bit" ]
   workflow_dispatch:
@@ -33,7 +33,7 @@ on:
 # release-oriented runs receive unique groups and are never auto-cancelled.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'push' && github.ref || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ci/unsigned-ipa-baseline' }}
+  cancel-in-progress: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/ci/unsigned-ipa-baseline' || github.ref == 'refs/heads/phase2/persistent-cold-start-index') }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -80,7 +80,7 @@ jobs:
 
   fast-preflight-macos:
     name: Fast macOS preflight
-    if: ${{ !inputs.native_reference_only && github.ref == 'refs/heads/ci/unsigned-ipa-baseline' }}
+    if: ${{ !inputs.native_reference_only && (github.ref == 'refs/heads/ci/unsigned-ipa-baseline' || github.ref == 'refs/heads/phase2/persistent-cold-start-index') }}
     runs-on: macos-15-intel
     timeout-minutes: 30
     env:
@@ -253,7 +253,7 @@ jobs:
     # The development branch uses the smaller preflight above. Preserve this
     # full historical job for the release branch, pull requests and manual
     # validation on other refs.
-    if: ${{ !inputs.native_reference_only && github.ref != 'refs/heads/ci/unsigned-ipa-baseline' }}
+    if: ${{ !inputs.native_reference_only && github.ref != 'refs/heads/ci/unsigned-ipa-baseline' && github.ref != 'refs/heads/phase2/persistent-cold-start-index' }}
 
     # Tests already target x86_64; use its native pool after repeated ARM64
     # capacity cancellations. The arm64 iOS IPA workflow remains unchanged.
@@ -339,7 +339,7 @@ jobs:
     if: ${{ !inputs.native_reference_only && !inputs.force_preflight_failure }}
 
     runs-on: windows-2022
-    continue-on-error: ${{ github.ref == 'refs/heads/ci/unsigned-ipa-baseline' }}
+    continue-on-error: ${{ github.ref == 'refs/heads/ci/unsigned-ipa-baseline' || github.ref == 'refs/heads/phase2/persistent-cold-start-index' }}
 
     steps:
     - uses: actions/checkout@v4
@@ -366,7 +366,7 @@ jobs:
     # This is the earliest point at which we can do linting: we don't need
     # LLVM until building tests.
     - name: Lint
-      continue-on-error: ${{ github.ref == 'refs/heads/ci/unsigned-ipa-baseline' }}
+      continue-on-error: ${{ github.ref == 'refs/heads/ci/unsigned-ipa-baseline' || github.ref == 'refs/heads/phase2/persistent-cold-start-index' }}
       shell: bash # no command output without this
       run: dev-scripts/lint.sh
       env:
@@ -387,7 +387,7 @@ jobs:
     - name: Get copy of common-3.0-sdk
       run: cd ${{ github.workspace }}/tests && curl -L --output ${{ runner.temp }}\sdk.tar.gz https://github.com/touchHLE/common-3.0-sdk/releases/latest/download/common-3.0.sdk-windows-x86_64.tar.gz && tar xzvf ${{ runner.temp }}\sdk.tar.gz
     - name: Test library (development branch)
-      if: github.ref == 'refs/heads/ci/unsigned-ipa-baseline'
+      if: github.ref == 'refs/heads/ci/unsigned-ipa-baseline' || github.ref == 'refs/heads/phase2/persistent-cold-start-index'
       run: cargo test --lib
       env:
         CMAKE: ${{ github.workspace }}\vendor\cmake\bin\cmake
@@ -401,7 +401,7 @@ jobs:
     if: ${{ !inputs.native_reference_only && !inputs.force_preflight_failure }}
 
     runs-on: ubuntu-latest
-    continue-on-error: ${{ github.ref == 'refs/heads/ci/unsigned-ipa-baseline' }}
+    continue-on-error: ${{ github.ref == 'refs/heads/ci/unsigned-ipa-baseline' || github.ref == 'refs/heads/phase2/persistent-cold-start-index' }}
 
     steps:
     - uses: actions/checkout@v4
@@ -438,7 +438,7 @@ jobs:
         fi
     # Tests can't run on Android, so this is lint-only (clippy cross-compile).
     - name: Lint
-      continue-on-error: ${{ github.ref == 'refs/heads/ci/unsigned-ipa-baseline' }}
+      continue-on-error: ${{ github.ref == 'refs/heads/ci/unsigned-ipa-baseline' || github.ref == 'refs/heads/phase2/persistent-cold-start-index' }}
       run: dev-scripts/lint.sh ndk -t arm64-v8a
       env:
         # The version should match the ndkVersion defined in `android/app/build.gradle.kts`

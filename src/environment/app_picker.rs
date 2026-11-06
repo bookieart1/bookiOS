@@ -6,6 +6,7 @@
 //! On iOS, a native SwiftUI picker is used instead when the app provides one
 //! (see `app_picker/swiftui.rs`).
 
+mod persistent_index;
 #[cfg(target_os = "ios")]
 mod swiftui;
 
@@ -42,9 +43,12 @@ use crate::objc::{
 use crate::options::Options;
 use crate::paths;
 use crate::Environment;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 #[cfg(target_os = "ios")]
 use std::cell::{Cell, RefCell};
 use std::ffi::OsStr;
+use std::fs::Metadata;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime};
@@ -125,16 +129,29 @@ struct LibraryTiming {
     packages_succeeded: usize,
     packages_skipped: usize,
     packages: Vec<PackageTiming>,
+    persistent_index: Option<persistent_index::ReconcileStats>,
 }
 
-/// Cheap process-lifetime identity for direct entries in the Games directory.
-/// It deliberately does not open IPA archives or walk .app packages.
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct LibraryEntryFingerprint {
-    relative_path: PathBuf,
+/// Cheap picker identity for a package in the Games directory.
+///
+/// IPA contents are never hashed: file metadata is sufficient for the normal
+/// Files-app replacement/import paths and keeps an unchanged 16 GiB library
+/// cheap to reconcile. Loose `.app` packages additionally receive a recursive
+/// metadata-only digest because changing a child does not reliably update the
+/// parent directory timestamp.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub(super) struct LibraryEntryFingerprint {
+    relative_path: String,
+    package_type: String,
     file_kind: u8,
     len: u64,
-    modified_nanos: u128,
+    modified_secs: u64,
+    modified_nanos: u32,
+    device_id: u64,
+    file_id: u64,
+    directory_entries: u64,
+    directory_bytes: u64,
+    directory_metadata_sha256: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -159,6 +176,7 @@ struct AppInfo {
     path: PathBuf,
     bundle_identifier: String,
     display_name: String,
+    compatibility: String,
     icon: Option<Image>,
     /// `NSString*`
     display_name_ns_string: Option<id>,
@@ -170,7 +188,7 @@ struct AppInfo {
 /// ledger. This never changes guest behavior; it only powers the native
 /// picker's optional Playable / Needs Work filter. "Playable" deliberately
 /// includes titles with a useful gameplay path but a known later defect.
-fn picker_compatibility(app: &AppInfo) -> &'static str {
+fn classify_picker_compatibility(bundle_identifier: &str, display_name: &str) -> &'static str {
     const PLAYABLE_IDENTIFIERS: &[&str] = &[
         "CW-Gunner",
         "com.BaneGames.FlickBuddies",
@@ -234,14 +252,132 @@ fn picker_compatibility(app: &AppInfo) -> &'static str {
         "TOYBOT",
     ];
 
-    let name = app.display_name.to_uppercase();
-    if PLAYABLE_IDENTIFIERS.contains(&app.bundle_identifier.as_str())
-        || PLAYABLE_NAMES.contains(&name.as_str())
+    let name = display_name.to_uppercase();
+    if PLAYABLE_IDENTIFIERS.contains(&bundle_identifier) || PLAYABLE_NAMES.contains(&name.as_str())
     {
         "playable"
     } else {
         "needsWork"
     }
+}
+
+fn picker_compatibility(app: &AppInfo) -> &str {
+    &app.compatibility
+}
+
+fn modified_parts(metadata: &Metadata, path: &Path) -> Result<(u64, u32), String> {
+    let modified = metadata
+        .modified()
+        .map_err(|error| format!("couldn't read mtime for {}: {error}", path.display()))?;
+    let duration = modified
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_err(|error| format!("invalid mtime for {}: {error}", path.display()))?;
+    Ok((duration.as_secs(), duration.subsec_nanos()))
+}
+
+#[cfg(unix)]
+fn file_identity(metadata: &Metadata) -> (u64, u64) {
+    use std::os::unix::fs::MetadataExt;
+    (metadata.dev(), metadata.ino())
+}
+
+#[cfg(not(unix))]
+fn file_identity(_metadata: &Metadata) -> (u64, u64) {
+    (0, 0)
+}
+
+fn directory_metadata_fingerprint(directory: &Path) -> Result<(u64, u64, String), String> {
+    let mut pending = vec![directory.to_path_buf()];
+    let mut count = 0u64;
+    let mut bytes = 0u64;
+    let mut digest = Sha256::new();
+
+    while let Some(current) = pending.pop() {
+        let entries = std::fs::read_dir(&current)
+            .map_err(|error| format!("couldn't read {}: {error}", current.display()))?;
+        let mut entries = entries
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("couldn't read an entry in {}: {error}", current.display()))?;
+        entries.sort_by_key(std::fs::DirEntry::file_name);
+
+        for entry in entries {
+            let path = entry.path();
+            let metadata = std::fs::symlink_metadata(&path)
+                .map_err(|error| format!("couldn't inspect {}: {error}", path.display()))?;
+            let relative = path
+                .strip_prefix(directory)
+                .map_err(|error| format!("couldn't normalize {}: {error}", path.display()))?;
+            let (modified_secs, modified_nanos) = modified_parts(&metadata, &path)?;
+            let (device_id, file_id) = file_identity(&metadata);
+            let kind = if metadata.is_file() {
+                1u8
+            } else if metadata.is_dir() {
+                2u8
+            } else {
+                3u8
+            };
+
+            count = count.saturating_add(1);
+            if metadata.is_file() {
+                bytes = bytes.saturating_add(metadata.len());
+            }
+            digest.update(relative.to_string_lossy().as_bytes());
+            digest.update([0]);
+            digest.update([kind]);
+            digest.update(metadata.len().to_le_bytes());
+            digest.update(modified_secs.to_le_bytes());
+            digest.update(modified_nanos.to_le_bytes());
+            digest.update(device_id.to_le_bytes());
+            digest.update(file_id.to_le_bytes());
+
+            if metadata.is_dir() {
+                pending.push(path);
+            }
+        }
+    }
+
+    Ok((count, bytes, format!("{:x}", digest.finalize())))
+}
+
+fn fingerprint_entry(path: &Path, prefix: &str) -> Result<LibraryEntryFingerprint, String> {
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("couldn't inspect {}: {error}", path.display()))?;
+    let name = path
+        .file_name()
+        .and_then(OsStr::to_str)
+        .ok_or_else(|| format!("package path is not valid UTF-8: {}", path.display()))?;
+    let (modified_secs, modified_nanos) = modified_parts(&metadata, path)?;
+    let (device_id, file_id) = file_identity(&metadata);
+    let file_kind = if metadata.is_file() {
+        1
+    } else if metadata.is_dir() {
+        2
+    } else {
+        3
+    };
+    let (directory_entries, directory_bytes, directory_metadata_sha256) = if metadata.is_dir() {
+        directory_metadata_fingerprint(path)?
+    } else {
+        (0, 0, String::new())
+    };
+
+    Ok(LibraryEntryFingerprint {
+        relative_path: format!("{prefix}/{name}"),
+        package_type: path
+            .extension()
+            .and_then(OsStr::to_str)
+            .unwrap_or_default()
+            .to_ascii_lowercase(),
+        file_kind,
+        len: metadata.len(),
+        modified_secs,
+        modified_nanos,
+        device_id,
+        file_id,
+        directory_entries,
+        directory_bytes,
+        directory_metadata_sha256,
+    })
 }
 
 fn snapshot_entries(
@@ -260,29 +396,7 @@ fn snapshot_entries(
         if !include(&path) {
             continue;
         }
-        let metadata = entry
-            .metadata()
-            .map_err(|error| format!("couldn't inspect {}: {error}", path.display()))?;
-        let modified = metadata
-            .modified()
-            .map_err(|error| format!("couldn't read mtime for {}: {error}", path.display()))?;
-        let modified_nanos = modified
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map_err(|error| format!("invalid mtime for {}: {error}", path.display()))?
-            .as_nanos();
-        let file_kind = if metadata.is_file() {
-            1
-        } else if metadata.is_dir() {
-            2
-        } else {
-            3
-        };
-        output.push(LibraryEntryFingerprint {
-            relative_path: PathBuf::from(prefix).join(entry.file_name()),
-            file_kind,
-            len: metadata.len(),
-            modified_nanos,
-        });
+        output.push(fingerprint_entry(&path, prefix)?);
     }
     Ok(())
 }
@@ -549,7 +663,11 @@ fn find_apps(
 /// Games folder, where they're looked for.
 #[cfg(any(target_os = "ios", target_os = "android"))]
 fn move_loose_ipas(apps_dir: &Path) {
-    let Ok(entries) = std::fs::read_dir(paths::user_data_base_path()) else {
+    move_loose_ipas_from(&paths::user_data_base_path(), apps_dir);
+}
+
+fn move_loose_ipas_from(source_directory: &Path, apps_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(source_directory) else {
         return;
     };
     for entry in entries.flatten() {
@@ -586,112 +704,114 @@ fn enumerate_apps(
     best_icons: bool,
     timing: &mut LibraryTiming,
 ) -> Result<Vec<AppInfo>, std::io::Error> {
-    let mut apps = Vec::new();
-    let started = Instant::now();
-    let mut entries = std::fs::read_dir(apps_dir)?;
-    timing.directory_enumeration += started.elapsed();
-    loop {
-        let started = Instant::now();
-        let entry = entries.next();
-        timing.directory_enumeration += started.elapsed();
-        let Some(app) = entry else {
-            break;
-        };
-        let app_path = app?.path();
-        if app_path.extension() != Some(OsStr::new("app"))
-            && app_path.extension() != Some(OsStr::new("ipa"))
-        {
-            continue;
-        }
-
-        timing.packages_attempted += 1;
-        let package_started = Instant::now();
-        let mut package = PackageTiming {
-            name: app_path
-                .file_name()
-                .map(|name| name.to_string_lossy().into_owned())
-                .unwrap_or_else(|| app_path.display().to_string()),
-            ..PackageTiming::default()
-        };
-
-        // TODO: avoid loading the whole FS somehow?
-        let (bundle_data, open_timings) = match BundleData::open_any_timed(&app_path) {
-            Ok(ok) => ok,
-            Err(e) => {
-                package.total = package_started.elapsed();
-                timing.packages_skipped += 1;
-                timing.packages.push(package);
-                log!(
-                    "Warning: couldn't open app bundle {}: {} (skipping)",
-                    app_path.display(),
-                    e
-                );
-                continue;
-            }
-        };
-        package.zip_open = open_timings.zip_open;
-        package.archive_validation = open_timings.archive_validation;
-        package.bundle_discovery = open_timings.bundle_discovery;
-        package.archive_entries = open_timings.archive_entries;
-        let (bundle, fs, construction_timings) =
-            match Bundle::new_bundle_and_fs_from_host_path_timed(
-                bundle_data,
-                /* read_only_mode: */ true,
-            ) {
-                Ok(ok) => ok,
-                Err(e) => {
-                    package.total = package_started.elapsed();
-                    timing.packages_skipped += 1;
-                    timing.packages.push(package);
-                    log!(
-                        "Warning: couldn't open app bundle {}: {} (skipping)",
-                        app_path.display(),
-                        e
-                    );
-                    continue;
-                }
-            };
-        package.info_plist_read = construction_timings.info_plist_read;
-        package.info_plist_parse = construction_timings.info_plist_parse;
-        package.filesystem_creation = construction_timings.filesystem_creation;
-
-        // TODO: what if this crashes?
-        let started = Instant::now();
-        let display_name = bundle.localized_display_name(&fs, languages);
-        package.localization = started.elapsed();
-
-        let icon = if best_icons {
-            bundle.load_best_icon_timed(&fs)
-        } else {
-            bundle.load_icon_timed(&fs)
-        };
-        let icon = match icon {
-            Ok((icon, icon_timings)) => {
-                package.icon_candidates = icon_timings.candidate_discovery;
-                package.icon_reads = icon_timings.reads;
-                package.icon_decoding = icon_timings.decoding;
-                package.icon_processing = icon_timings.processing;
-                Some(icon)
-            }
-            Err(e) => {
-                log!("Warning: couldn't load icon for app bundle {}: {} (displaying placeholder instead)", app_path.display(), e);
-                None
-            }
-        };
-
-        apps.push(AppInfo {
-            path: app_path,
-            bundle_identifier: bundle.bundle_identifier().to_string(),
-            display_name,
-            icon,
-            display_name_ns_string: None,
-            icon_ui_image: None,
-        });
-        package.total = package_started.elapsed();
-        timing.packages_succeeded += 1;
-        timing.packages.push(package);
+    #[cfg(target_os = "ios")]
+    if best_icons {
+        return enumerate_apps_persistent(apps_dir, languages, timing);
     }
 
+    enumerate_apps_uncached(apps_dir, languages, best_icons, timing)
+}
+
+fn inspect_app_package(
+    app_path: &Path,
+    languages: &[String],
+    best_icons: bool,
+) -> (persistent_index::InspectionResult, PackageTiming) {
+    let package_started = Instant::now();
+    let mut package = PackageTiming {
+        name: app_path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| app_path.display().to_string()),
+        ..PackageTiming::default()
+    };
+
+    let reject = |error: String, mut package: PackageTiming| {
+        package.total = package_started.elapsed();
+        log!(
+            "Warning: couldn't open app bundle {}: {} (skipping)",
+            app_path.display(),
+            error
+        );
+        (persistent_index::InspectionResult::Rejected(error), package)
+    };
+
+    // TODO: avoid loading the whole FS somehow? The persistent index makes
+    // this cost package-incremental instead of paying it for every unchanged
+    // package on every process launch.
+    let (bundle_data, open_timings) = match BundleData::open_any_timed(app_path) {
+        Ok(ok) => ok,
+        Err(error) => return reject(error.to_string(), package),
+    };
+    package.zip_open = open_timings.zip_open;
+    package.archive_validation = open_timings.archive_validation;
+    package.bundle_discovery = open_timings.bundle_discovery;
+    package.archive_entries = open_timings.archive_entries;
+    let (bundle, fs, construction_timings) = match Bundle::new_bundle_and_fs_from_host_path_timed(
+        bundle_data,
+        /* read_only_mode: */ true,
+    ) {
+        Ok(ok) => ok,
+        Err(error) => return reject(error.to_string(), package),
+    };
+    package.info_plist_read = construction_timings.info_plist_read;
+    package.info_plist_parse = construction_timings.info_plist_parse;
+    package.filesystem_creation = construction_timings.filesystem_creation;
+
+    let started = Instant::now();
+    let display_name = bundle.localized_display_name(&fs, languages);
+    package.localization = started.elapsed();
+
+    let icon = if best_icons {
+        bundle.load_best_icon_timed(&fs)
+    } else {
+        bundle.load_icon_timed(&fs)
+    };
+    let icon = match icon {
+        Ok((icon, icon_timings)) => {
+            package.icon_candidates = icon_timings.candidate_discovery;
+            package.icon_reads = icon_timings.reads;
+            package.icon_decoding = icon_timings.decoding;
+            package.icon_processing = icon_timings.processing;
+            Some(icon)
+        }
+        Err(error) => {
+            log!(
+                "Warning: couldn't load icon for app bundle {}: {} (displaying placeholder instead)",
+                app_path.display(),
+                error
+            );
+            None
+        }
+    };
+
+    let bundle_identifier = bundle.bundle_identifier().to_owned();
+    let compatibility = classify_picker_compatibility(&bundle_identifier, &display_name).to_owned();
+    let canonical_name = bundle.canonical_bundle_name_optional().map(str::to_owned);
+    let bundle_version = bundle.bundle_version_optional().map(str::to_owned);
+    let minimum_os_version = bundle.minimum_os_version_optional().map(str::to_owned);
+    let app = AppInfo {
+        path: app_path.to_owned(),
+        bundle_identifier,
+        display_name,
+        compatibility,
+        icon,
+        display_name_ns_string: None,
+        icon_ui_image: None,
+    };
+    package.total = package_started.elapsed();
+    (
+        persistent_index::InspectionResult::App(persistent_index::InspectedApp {
+            app,
+            canonical_name,
+            bundle_version,
+            minimum_os_version,
+        }),
+        package,
+    )
+}
+
+fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
     // Put the current focused device-test batch first, in alphabetical order,
     // so a full round can be exercised without repeatedly paging through the
     // library. Everything else remains alphabetical.
@@ -744,6 +864,106 @@ fn enumerate_apps(
         (rank, app.display_name.to_uppercase())
     });
     timing.sorting = started.elapsed();
+}
+
+fn enumerate_apps_persistent(
+    apps_dir: &Path,
+    languages: &[String],
+    timing: &mut LibraryTiming,
+) -> Result<Vec<AppInfo>, std::io::Error> {
+    let started = Instant::now();
+    let mut sources = Vec::new();
+    for entry in std::fs::read_dir(apps_dir)? {
+        let path = entry?.path();
+        if path.extension() != Some(OsStr::new("app"))
+            && path.extension() != Some(OsStr::new("ipa"))
+        {
+            continue;
+        }
+        let relative_path = path
+            .file_name()
+            .map(|name| format!("{}/{}", paths::apps_dir(), name.to_string_lossy()))
+            .unwrap_or_else(|| path.display().to_string());
+        let fingerprint = match fingerprint_entry(&path, paths::apps_dir()) {
+            Ok(fingerprint) => Some(fingerprint),
+            Err(error) => {
+                log!(
+                    "Warning: {} cannot be persistently identified; inspecting it for this launch: {}",
+                    path.display(),
+                    error
+                );
+                None
+            }
+        };
+        sources.push(persistent_index::SourcePackage {
+            path,
+            relative_path,
+            fingerprint,
+        });
+    }
+    sources.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    timing.directory_enumeration += started.elapsed();
+    timing.packages_attempted = sources.len();
+
+    let result = persistent_index::reconcile(
+        &persistent_index::default_cache_root(),
+        sources,
+        languages,
+        |path| {
+            let (result, package) = inspect_app_package(path, languages, true);
+            timing.packages.push(package);
+            result
+        },
+    );
+    timing.packages_succeeded = result.apps.len();
+    timing.packages_skipped = timing
+        .packages_attempted
+        .saturating_sub(timing.packages_succeeded);
+    timing.persistent_index = Some(result.stats);
+    let mut apps = result.apps;
+    sort_picker_apps(&mut apps, timing);
+    Ok(apps)
+}
+
+fn enumerate_apps_uncached(
+    apps_dir: &Path,
+    languages: &[String],
+    best_icons: bool,
+    timing: &mut LibraryTiming,
+) -> Result<Vec<AppInfo>, std::io::Error> {
+    let mut apps = Vec::new();
+    let started = Instant::now();
+    let mut entries = std::fs::read_dir(apps_dir)?;
+    timing.directory_enumeration += started.elapsed();
+    loop {
+        let started = Instant::now();
+        let entry = entries.next();
+        timing.directory_enumeration += started.elapsed();
+        let Some(app) = entry else {
+            break;
+        };
+        let app_path = app?.path();
+        if app_path.extension() != Some(OsStr::new("app"))
+            && app_path.extension() != Some(OsStr::new("ipa"))
+        {
+            continue;
+        }
+
+        timing.packages_attempted += 1;
+        let (result, package) = inspect_app_package(&app_path, languages, best_icons);
+        timing.packages.push(package);
+        match result {
+            persistent_index::InspectionResult::App(inspected) => {
+                timing.packages_succeeded += 1;
+                apps.push(inspected.app);
+            }
+            persistent_index::InspectionResult::Rejected(_) => {
+                timing.packages_skipped += 1;
+            }
+        }
+    }
+
+    sort_picker_apps(&mut apps, timing);
 
     Ok(apps)
 }
@@ -818,6 +1038,59 @@ fn log_library_performance(performance: PickerPerformance, timing: &LibraryTimin
         timing.packages_skipped,
         archive_entries
     );
+    if let Some(index) = timing.persistent_index.as_ref() {
+        echo!("--- Persistent Picker Index ---");
+        echo!(
+            "Schema: {}; existed: {}; state: {}",
+            persistent_index::INDEX_SCHEMA_VERSION,
+            index.index_existed,
+            index.index_state
+        );
+        echo!(
+            "Cache results: {} successful hits, {} negative hits, {} new, {} changed, {} uncacheable, {} missing/corrupt icons",
+            index.successful_hits,
+            index.negative_hits,
+            index.new_misses,
+            index.changed_misses,
+            index.uncacheable_misses,
+            index.icon_misses,
+        );
+        echo!(
+            "Focused inspection: {} succeeded, {} rejected; {} deleted; {} records persisted",
+            index.inspected_successes,
+            index.inspected_failures,
+            index.deleted_entries,
+            index.persisted_entries,
+        );
+        echo!(
+            "Index read/decode:          {:.3} / {:.3} ms",
+            duration_ms(index.index_read),
+            duration_ms(index.index_decode)
+        );
+        echo!(
+            "Incremental reconciliation:{:>10.3} ms",
+            duration_ms(index.reconciliation)
+        );
+        echo!(
+            "Icon cache work:            {:.3} ms ({} stale removed)",
+            duration_ms(index.icon_cache),
+            index.icons_removed
+        );
+        echo!(
+            "Index write/cleanup:        {:.3} ms",
+            duration_ms(index.index_write)
+        );
+        if index.index_state != "loaded" {
+            echo!("Full/focused rescan reason: {}", index.index_state);
+        }
+        if let Some(error) = index.write_error.as_deref() {
+            echo!(
+                "Warning: persistent index was usable for this launch but could not be saved: {}",
+                error
+            );
+        }
+        echo!("--- End Persistent Picker Index ---");
+    }
     echo!(
         "Loose IPA/import check:       {:.3} ms",
         duration_ms(timing.loose_import)
@@ -2617,10 +2890,11 @@ mod tests {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let directory = std::env::temp_dir().join(format!(
-            "idared-library-snapshot-{}-{unique}",
-            std::process::id()
-        ));
+        let directory = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("idared-app-picker-tests")
+            .join(format!("{}-{unique}", std::process::id()));
         std::fs::create_dir_all(&directory).unwrap();
         directory
     }
@@ -2647,6 +2921,7 @@ mod tests {
             path: PathBuf::new(),
             bundle_identifier: identifier.to_owned(),
             display_name: name.to_owned(),
+            compatibility: classify_picker_compatibility(identifier, name).to_owned(),
             icon: None,
             display_name_ns_string: None,
             icon_ui_image: None,
@@ -2722,6 +2997,49 @@ mod tests {
         let removed = test_snapshot(&directory);
         assert_ne!(replaced, removed);
 
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn library_snapshot_detects_nested_app_directory_changes() {
+        let directory = snapshot_test_directory();
+        let app = directory.join("Loose.app");
+        std::fs::create_dir_all(app.join("Resources")).unwrap();
+        let resource = app.join("Resources").join("asset.bin");
+        std::fs::write(&resource, b"one").unwrap();
+
+        let original = test_snapshot(&directory);
+        assert_eq!(original, test_snapshot(&directory));
+
+        std::fs::write(&resource, b"replacement with a different size").unwrap();
+        let changed = test_snapshot(&directory);
+        assert_ne!(original, changed);
+
+        std::fs::remove_file(&resource).unwrap();
+        assert_ne!(changed, test_snapshot(&directory));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn loose_ipa_import_moves_only_new_ipa_files() {
+        let directory = snapshot_test_directory();
+        let games = directory.join("Games");
+        std::fs::create_dir_all(&games).unwrap();
+        std::fs::write(directory.join("Imported.ipa"), b"ipa").unwrap();
+        std::fs::write(directory.join("ignored.txt"), b"not an ipa").unwrap();
+        std::fs::write(directory.join("Existing.ipa"), b"do not replace").unwrap();
+        std::fs::write(games.join("Existing.ipa"), b"existing game").unwrap();
+
+        move_loose_ipas_from(&directory, &games);
+
+        assert!(!directory.join("Imported.ipa").exists());
+        assert_eq!(std::fs::read(games.join("Imported.ipa")).unwrap(), b"ipa");
+        assert!(directory.join("ignored.txt").is_file());
+        assert_eq!(
+            std::fs::read(games.join("Existing.ipa")).unwrap(),
+            b"existing game"
+        );
+        assert!(directory.join("Existing.ipa").is_file());
         std::fs::remove_dir_all(directory).unwrap();
     }
 
