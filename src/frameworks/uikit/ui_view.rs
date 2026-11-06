@@ -1423,6 +1423,8 @@ mod tests {
     fn detached_view_converts_points_and_rects_to_and_from_window_coordinates() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let parent_frame = CGRect {
             origin: CGPoint { x: 10.0, y: 20.0 },
             size: CGSize {
@@ -1466,5 +1468,7 @@ mod tests {
 
         release(env, child);
         release(env, parent);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

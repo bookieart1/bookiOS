@@ -630,6 +630,7 @@ mod tests {
     #[test]
     fn all_bundles_contains_the_single_modeled_main_bundle() {
         let mut env = Environment::new_fake_for_test_with_thread();
+        env.bundle.set_fake_identity_for_test();
         let env = &mut env;
         let main: id = msg_class![env; NSBundle mainBundle];
         let bundles: id = msg_class![env; NSBundle allBundles];

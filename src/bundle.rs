@@ -100,6 +100,18 @@ impl Bundle {
         }
     }
 
+    #[cfg(test)]
+    pub fn set_fake_identity_for_test(&mut self) {
+        self.plist.insert(
+            "CFBundleIdentifier".to_owned(),
+            Value::String("com.touchhle.test".to_owned()),
+        );
+        self.plist.insert(
+            "CFBundleVersion".to_owned(),
+            Value::String("1".to_owned()),
+        );
+    }
+
     pub fn bundle_path(&self) -> &GuestPath {
         &self.path
     }
