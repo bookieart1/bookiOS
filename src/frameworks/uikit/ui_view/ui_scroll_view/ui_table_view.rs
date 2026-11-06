@@ -240,6 +240,15 @@ pub const CLASSES: ClassExports = objc_classes! {
             .borrow::<UITableViewHostObject>(this)
             .section_row_counts
             .clone();
+        // CGRect/CGSize use the guest ABI's packed representation. Copy their
+        // fields before formatting so the logger never creates unaligned
+        // references to packed members.
+        let bounds_x = bounds.origin.x;
+        let bounds_y = bounds.origin.y;
+        let bounds_width = bounds.size.width;
+        let bounds_height = bounds.size.height;
+        let content_width = size.width;
+        let content_height = size.height;
         log!(
             "UITableView bounded reload: table={:?} data-source={:?} sections={:?} total-rows={} row-height={} bounds=({}, {}, {}, {}) content-size=({}, {}) visible-cells={} reusable-cells={}",
             this,
@@ -247,12 +256,12 @@ pub const CLASSES: ClassExports = objc_classes! {
             counts,
             total_rows,
             row_height,
-            bounds.origin.x,
-            bounds.origin.y,
-            bounds.size.width,
-            bounds.size.height,
-            size.width,
-            size.height,
+            bounds_x,
+            bounds_y,
+            bounds_width,
+            bounds_height,
+            content_width,
+            content_height,
             visible_count,
             reusable_count
         );
@@ -429,14 +438,19 @@ pub const CLASSES: ClassExports = objc_classes! {
         should_log
     };
     if should_log {
+        // CGPoint is packed for the guest ABI; copy before formatting.
+        let point_x = point.x;
+        let point_y = point.y;
+        let offset_x = offset.x;
+        let offset_y = offset.y;
         log!(
             "UITableView bounded selection: table={:?} touch={:?} point=({}, {}) content-offset=({}, {}) row-height={} flat-row={} sections={:?} selected={:?}",
             this,
             touch,
-            point.x,
-            point.y,
-            offset.x,
-            offset.y,
+            point_x,
+            point_y,
+            offset_x,
+            offset_y,
             row_height,
             flat,
             counts,
