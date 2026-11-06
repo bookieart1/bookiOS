@@ -515,6 +515,9 @@ mod tests {
     fn row_count_query_uses_cached_model_and_rejects_invalid_sections() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack_size = 0x1000;
+        let stack = env.mem.alloc(stack_size);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + stack_size;
         let table: id = msg_class![env; UITableView new];
         env.objc
             .borrow_mut::<UITableViewHostObject>(table)
