@@ -519,11 +519,16 @@ mod tests {
         env.objc
             .borrow_mut::<UITableViewHostObject>(table)
             .section_row_counts = vec![3, 0, 7];
-        assert_eq!(msg![env; table numberOfRowsInSection:0i32], 3i32);
-        assert_eq!(msg![env; table numberOfRowsInSection:1i32], 0i32);
-        assert_eq!(msg![env; table numberOfRowsInSection:2i32], 7i32);
-        assert_eq!(msg![env; table numberOfRowsInSection:(-1i32)], 0i32);
-        assert_eq!(msg![env; table numberOfRowsInSection:3i32], 0i32);
+        let first: NSInteger = msg![env; table numberOfRowsInSection:0i32];
+        let empty: NSInteger = msg![env; table numberOfRowsInSection:1i32];
+        let last: NSInteger = msg![env; table numberOfRowsInSection:2i32];
+        let negative: NSInteger = msg![env; table numberOfRowsInSection:(-1i32)];
+        let past_end: NSInteger = msg![env; table numberOfRowsInSection:3i32];
+        assert_eq!(first, 3);
+        assert_eq!(empty, 0);
+        assert_eq!(last, 7);
+        assert_eq!(negative, 0);
+        assert_eq!(past_end, 0);
         release(env, table);
     }
 
