@@ -109,6 +109,7 @@ pub struct State {
     ui_font: ui_font::State,
     ui_graphics: ui_graphics::State,
     ui_image: ui_image::State,
+    ui_image_picker_controller: ui_image_picker_controller::State,
     ui_pasteboard: ui_pasteboard::State,
     ui_screen: ui_screen::State,
     ui_touch: ui_touch::State,

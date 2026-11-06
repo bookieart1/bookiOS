@@ -144,6 +144,16 @@ fn CATransform3DMakeScale(
     CATransform3D::make_scale(sx, sy, sz)
 }
 
+fn CATransform3DMakeRotation(
+    _env: &mut Environment,
+    angle: CGFloat,
+    x: CGFloat,
+    y: CGFloat,
+    z: CGFloat,
+) -> CATransform3D {
+    CATransform3D::make_rotation(angle, x, y, z)
+}
+
 fn CATransform3DScale(
     _env: &mut Environment,
     t: CATransform3D,
@@ -188,6 +198,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CATransform3DIsAffine(_)),
     export_c_func!(CATransform3DGetAffineTransform(_)),
     export_c_func!(CATransform3DMakeScale(_, _, _)),
+    export_c_func!(CATransform3DMakeRotation(_, _, _, _)),
     export_c_func!(CATransform3DScale(_, _, _, _)),
     export_c_func!(CATransform3DTranslate(_, _, _, _)),
     export_c_func!(CATransform3DRotate(_, _, _, _, _)),
@@ -230,6 +241,18 @@ mod tests {
         };
         assert!(rotation.is_affine());
         assert_eq!(rotation.affine_part(), affine);
+    }
+
+    #[test]
+    fn dev_239_make_rotation_export_matches_rotate_from_identity() {
+        let angle: CGFloat = 0.75;
+        let mut env = Environment::new_fake_for_test();
+        let made = CATransform3DMakeRotation(&mut env, angle, 1.0, 2.0, 3.0);
+        let rotated = CATransform3D::concat(
+            CATransform3D::make_rotation(angle, 1.0, 2.0, 3.0),
+            CATransform3D::from(CGAffineTransformIdentity),
+        );
+        assert_eq!(made, rotated);
     }
 
     #[test]

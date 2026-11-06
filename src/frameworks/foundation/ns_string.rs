@@ -10,7 +10,10 @@
 
 mod path_algorithms;
 
-use super::ns_error::{NSCocoaErrorDomain, NSFilePathErrorKey, NSFileReadNoSuchFileError};
+use super::ns_error::{
+    NSCocoaErrorDomain, NSFilePathErrorKey, NSFileReadInapplicableStringEncodingError,
+    NSFileReadNoSuchFileError,
+};
 use super::ns_keyed_archiver::set_value_to_encode_for_current_key;
 use super::ns_url_connection::{make_url_error_for_url, NSURLErrorNotConnectedToInternet};
 use super::{ns_array, ns_dictionary, ns_keyed_unarchiver};
@@ -103,6 +106,38 @@ fn populate_file_read_error(env: &mut Environment, path: id, out_error: MutPtr<i
                                                  code:NSFileReadNoSuchFileError
                                              userInfo:user_info];
     env.mem.write(out_error, error);
+}
+
+fn populate_string_encoding_error(env: &mut Environment, path: id, out_error: MutPtr<id>) {
+    if out_error.is_null() {
+        return;
+    }
+    let user_info = if path == nil {
+        nil
+    } else {
+        let key = get_static_str(env, NSFilePathErrorKey);
+        msg_class![env; NSDictionary dictionaryWithObject:path forKey:key]
+    };
+    let domain = get_static_str(env, NSCocoaErrorDomain);
+    let error: id = msg_class![env; NSError errorWithDomain:domain
+                                                 code:NSFileReadInapplicableStringEncodingError
+                                             userInfo:user_info];
+    env.mem.write(out_error, error);
+}
+
+/// Reuse the historical BOM/default-C-string detection used by the deprecated
+/// convenience initializer. The `usedEncoding:error:` family exposes the
+/// selected value to its caller instead of silently discarding it.
+fn detect_file_string_encoding(bytes: &[u8]) -> NSStringEncoding {
+    if bytes.len() > 1 && (bytes[..2] == [0xfe, 0xff] || bytes[..2] == [0xff, 0xfe]) {
+        NSUTF16StringEncoding
+    } else if bytes.len() > 2 && bytes[..3] == [0xef, 0xbb, 0xbf] {
+        NSUTF8StringEncoding
+    } else {
+        // The existing Foundation implementation uses this value as its
+        // default C-string encoding.
+        NSUTF8StringEncoding
+    }
 }
 
 /// Constant strings embedded in the app binary use this struct. The name is
@@ -699,6 +734,16 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, new)
 }
 
++ (id)stringWithContentsOfFile:(id)path // NSString*
+                  usedEncoding:(MutPtr<NSStringEncoding>)used_encoding
+                         error:(MutPtr<id>)error { // NSError**
+    let new: id = msg![env; this alloc];
+    let new: id = msg![env; new initWithContentsOfFile:path
+                                         usedEncoding:used_encoding
+                                                error:error];
+    autorelease(env, new)
+}
+
 + (id)stringWithContentsOfURL:(id)url // NSURL*
                      encoding:(NSStringEncoding)encoding
                          error:(MutPtr<id>)error { // NSError**
@@ -1197,7 +1242,11 @@ pub const CLASSES: ClassExports = objc_classes! {
         return Ptr::null();
     };
     let null_size: GuestUSize = match encoding {
-        NSUTF8StringEncoding | NSASCIIStringEncoding | NSMacOSRomanStringEncoding | NSISOLatin1StringEncoding => 1,
+        NSUTF8StringEncoding
+        | NSASCIIStringEncoding
+        | NSMacOSRomanStringEncoding
+        | NSISOLatin1StringEncoding
+        | NSWindowsCP1252StringEncoding => 1,
         NSUTF16LittleEndianStringEncoding => 2,
         NSUTF32LittleEndianStringEncoding | NSUTF32BigEndianStringEncoding => 4,
         _ => unimplemented!()
@@ -1206,7 +1255,9 @@ pub const CLASSES: ClassExports = objc_classes! {
     let total_size: GuestUSize = bytes_size + null_size;
     let c_string: MutPtr<u8> = env.mem.alloc(total_size).cast();
     _ = env.mem.bytes_at_mut(c_string, bytes_size).write(&bytes).unwrap();
-    assert_eq!(env.mem.read(c_string + total_size - 1), b'\0');
+    env.mem
+        .bytes_at_mut(c_string + bytes_size, null_size)
+        .fill(0);
     // NSData will handle releasing the string (it is autoreleased)
     let _: id = msg_class![env; NSData dataWithBytesNoCopy:(c_string.cast_void())
                                                     length:total_size];
@@ -1868,20 +1919,39 @@ pub const CLASSES: ClassExports = objc_classes! {
     let Ok(bytes) = env.fs.read(GuestPath::new(&path)) else {
         return nil;
     };
-    let len = bytes.len();
-
-    let encoding = if len > 1 && (bytes[..2] == [0xFE, 0xFF] || bytes[..2] == [0xFF, 0xFE]) {
-        NSUTF16StringEncoding
-    } else if len > 2 && bytes[..3] == [0xEF, 0xBB, 0xBF] {
-        NSUTF8StringEncoding
-    } else {
-        msg_class![env; NSString defaultCStringEncoding]
-    };
+    let encoding = detect_file_string_encoding(&bytes);
 
     let Some(host_object) = StringHostObject::try_decode(Cow::Owned(bytes), encoding) else {
         release(env, this);
         return nil;
     };
+    *env.objc.borrow_mut(this) = host_object;
+    this
+}
+
+- (id)initWithContentsOfFile:(id)path // NSString*
+                usedEncoding:(MutPtr<NSStringEncoding>)used_encoding
+                       error:(MutPtr<id>)error { // NSError**
+    if path == nil {
+        populate_file_read_error(env, path, error);
+        release(env, this);
+        return nil;
+    }
+    let path_string = to_rust_string(env, path);
+    let Ok(bytes) = env.fs.read(GuestPath::new(&path_string)) else {
+        populate_file_read_error(env, path, error);
+        release(env, this);
+        return nil;
+    };
+    let encoding = detect_file_string_encoding(&bytes);
+    let Some(host_object) = StringHostObject::try_decode(Cow::Owned(bytes), encoding) else {
+        populate_string_encoding_error(env, path, error);
+        release(env, this);
+        return nil;
+    };
+    if !used_encoding.is_null() {
+        env.mem.write(used_encoding, encoding);
+    }
     *env.objc.borrow_mut(this) = host_object;
     this
 }
@@ -2814,6 +2884,49 @@ mod ns_string_tests {
                 false,
             ),
             None
+        );
+    }
+
+    #[test]
+    fn dev_239_cp1252_c_string_is_encoded_and_nul_terminated() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let string = from_rust_string(env, "cost €5".to_owned());
+        let c_string: ConstPtr<u8> =
+            msg![env; string cStringUsingEncoding:NSWindowsCP1252StringEncoding];
+        assert!(!c_string.is_null());
+        assert_eq!(env.mem.cstr_at(c_string), b"cost \x805");
+        assert_eq!(env.mem.read(c_string + 7), 0u8);
+        release(env, string);
+        release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
+
+    #[test]
+    fn dev_239_detected_file_encoding_reports_the_encoding_used() {
+        assert_eq!(detect_file_string_encoding(b"plain text"), NSUTF8StringEncoding);
+        assert_eq!(
+            detect_file_string_encoding(&[0xef, 0xbb, 0xbf, b'x']),
+            NSUTF8StringEncoding
+        );
+        assert_eq!(
+            detect_file_string_encoding(&[0xff, 0xfe, b'x', 0]),
+            NSUTF16StringEncoding
+        );
+
+        assert_eq!(
+            StringHostObject::try_decode(
+                Cow::Borrowed(b"plain text"),
+                detect_file_string_encoding(b"plain text"),
+            )
+            .unwrap()
+            .to_utf8()
+            .unwrap(),
+            "plain text"
         );
     }
 

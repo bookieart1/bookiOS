@@ -21,6 +21,7 @@ const NSLocalizedFailureReasonErrorKey: &str = "NSLocalizedFailureReasonErrorKey
 pub const NSFilePathErrorKey: &str = "NSFilePath";
 
 pub const NSFileReadNoSuchFileError: NSInteger = 260;
+pub const NSFileReadInapplicableStringEncodingError: NSInteger = 261;
 pub const NSFileWriteUnknownError: NSInteger = 512;
 pub const NSFileWriteFileExistsError: NSInteger = 516;
 

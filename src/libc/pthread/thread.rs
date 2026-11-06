@@ -7,7 +7,7 @@
 
 use crate::abi::GuestFunction;
 use crate::dyld::{export_c_func, FunctionExports};
-use crate::libc::errno::{EDEADLK, EINVAL, ESRCH};
+use crate::libc::errno::{EDEADLK, EINVAL, ENOTSUP, ESRCH};
 use crate::mem::{self, ConstPtr, GuestUSize, MutPtr, MutVoidPtr, Ptr, SafeRead, PAGE_SIZE};
 use crate::objc::{id, ObjC};
 use crate::{Environment, ThreadId};
@@ -91,6 +91,11 @@ const PTHREAD_CANCEL_ENABLE: i32 = 1;
 const PTHREAD_CANCEL_ASYNCHRONOUS: i32 = 0;
 const PTHREAD_CANCEL_DEFERRED: i32 = 2;
 
+// Darwin exposes process and system contention-scope constants, but only the
+// system scope is supported by its 1:1 thread implementation.
+const PTHREAD_SCOPE_SYSTEM: i32 = 1;
+const PTHREAD_SCOPE_PROCESS: i32 = 2;
+
 /// Value taken from an iOS 2.0 simulator
 const PTHREAD_STACK_MIN: GuestUSize = 2 * PAGE_SIZE;
 
@@ -147,6 +152,20 @@ pub fn pthread_attr_setstacksize(
     attr_copy.stacksize = stacksize;
     env.mem.write(attr, attr_copy);
     0 // success
+}
+fn pthread_attr_setscope(
+    env: &mut Environment,
+    attr: MutPtr<pthread_attr_t>,
+    contentionscope: i32,
+) -> i32 {
+    if attr.is_null() || env.mem.read(attr).magic != MAGIC_ATTR {
+        return EINVAL;
+    }
+    match contentionscope {
+        PTHREAD_SCOPE_SYSTEM => 0,
+        PTHREAD_SCOPE_PROCESS => ENOTSUP,
+        _ => EINVAL,
+    }
 }
 fn pthread_attr_setinheritsched(
     env: &mut Environment,
@@ -566,6 +585,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(pthread_attr_setdetachstate(_, _)),
     export_c_func!(pthread_attr_getstacksize(_, _)),
     export_c_func!(pthread_attr_setstacksize(_, _)),
+    export_c_func!(pthread_attr_setscope(_, _)),
     export_c_func!(pthread_attr_setinheritsched(_, _)),
     export_c_func!(pthread_attr_getschedpolicy(_, _)),
     export_c_func!(pthread_attr_setschedpolicy(_, _)),
@@ -589,3 +609,27 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(pthread_getschedparam(_, _, _)),
     export_c_func!(pthread_setschedparam(_, _, _)),
 ];
+
+#[cfg(test)]
+mod dev_239_tests {
+    use super::*;
+
+    #[test]
+    fn dev_239_attr_setscope_accepts_system_and_rejects_unsupported_scope() {
+        let mut env = Environment::new_fake_for_test();
+        let attr = env.mem.alloc_and_write(DEFAULT_ATTR);
+        assert_eq!(pthread_attr_init(&mut env, attr), 0);
+        assert_eq!(pthread_attr_setscope(&mut env, attr, PTHREAD_SCOPE_SYSTEM), 0);
+        assert_eq!(
+            pthread_attr_setscope(&mut env, attr, PTHREAD_SCOPE_PROCESS),
+            ENOTSUP
+        );
+        assert_eq!(pthread_attr_setscope(&mut env, attr, 99), EINVAL);
+        assert_eq!(
+            pthread_attr_setscope(&mut env, MutPtr::null(), PTHREAD_SCOPE_SYSTEM),
+            EINVAL
+        );
+        assert_eq!(pthread_attr_destroy(&mut env, attr), 0);
+        env.mem.free(attr.cast());
+    }
+}

@@ -49,10 +49,10 @@ use crate::Environment;
 use classes::{
     class_addMethod, class_conformsToProtocol, class_copyPropertyList, class_getClassMethod,
     class_getInstanceMethod, class_getInstanceSize, class_getMethodImplementation,
-    class_getProperty, class_getSuperclass, class_replaceMethod, method_exchangeImplementations,
-    method_getImplementation, method_getTypeEncoding, method_setImplementation, objc_getClass,
-    property_getAttributes, property_getName, protocol_conformsToProtocol, ClassHostObject,
-    FakeClass, UnimplementedClass,
+    class_getProperty, class_getSuperclass, class_isMetaClass, class_replaceMethod,
+    method_exchangeImplementations, method_getImplementation, method_getTypeEncoding,
+    method_setImplementation, objc_getClass, property_getAttributes, property_getName,
+    protocol_conformsToProtocol, ClassHostObject, FakeClass, UnimplementedClass,
 };
 pub(crate) use messages::objc_msgSend;
 use messages::{
@@ -288,6 +288,7 @@ const FUNCTIONS: FunctionExports = &[
     export_c_func!(class_copyPropertyList(_, _)),
     export_c_func!(class_getInstanceSize(_)),
     export_c_func!(class_getSuperclass(_)),
+    export_c_func!(class_isMetaClass(_)),
     export_c_func!(class_conformsToProtocol(_, _)),
     export_c_func!(protocol_conformsToProtocol(_, _)),
     export_c_func!(class_getProperty(_, _)),
@@ -324,3 +325,19 @@ const FUNCTIONS: FunctionExports = &[
     export_c_func!(_Block_object_assign(_, _, _)),
     export_c_func!(_Block_object_dispose(_, _)),
 ];
+
+#[cfg(test)]
+mod dev_239_tests {
+    use super::*;
+
+    #[test]
+    fn dev_239_class_is_meta_class_distinguishes_class_objects_and_nil() {
+        let mut env = Environment::new_fake_for_test();
+        let class = env.objc.get_known_class("NSObject", &mut env.mem);
+        let metaclass = object_getClass(&mut env, class);
+
+        assert!(!class_isMetaClass(&mut env, nil));
+        assert!(!class_isMetaClass(&mut env, class));
+        assert!(class_isMetaClass(&mut env, metaclass));
+    }
+}
