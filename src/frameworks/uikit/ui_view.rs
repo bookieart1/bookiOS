@@ -1443,7 +1443,8 @@ mod tests {
         let child: id = msg![env; child initWithFrame:child_frame];
         () = msg![env; parent addSubview:child];
 
-        assert_eq!(msg![env; child window], nil);
+        let child_window: id = msg![env; child window];
+        assert_eq!(child_window, nil);
         let local_point = CGPoint { x: 1.0, y: 2.0 };
         let window_point: CGPoint = msg![env; child convertPoint:local_point toView:nil];
         assert_eq!(window_point, CGPoint { x: 14.0, y: 26.0 });

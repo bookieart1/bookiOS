@@ -471,8 +471,9 @@ mod tests {
     #[test]
     fn image_named_nil_returns_nil_without_touching_the_bundle() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let image: id = msg_class![&mut env; UIImage imageNamed:nil];
+        let env = &mut env;
+        let image: id = msg_class![env; UIImage imageNamed:nil];
         assert_eq!(image, nil);
-        assert!(State::get(&env).cached_images.is_empty());
+        assert!(State::get(env).cached_images.is_empty());
     }
 }
