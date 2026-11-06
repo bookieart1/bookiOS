@@ -31,7 +31,7 @@ use std::num::NonZeroU32;
 use std::ptr::null_mut;
 #[cfg(target_os = "ios")]
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     OnceLock,
 };
 use std::time::{Duration, Instant};
@@ -156,6 +156,23 @@ pub enum DeviceOrientation {
     LandscapeLeft,
     LandscapeRight,
 }
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[repr(i32)]
+pub enum GuestPresentationSource {
+    EaglPresentRenderbuffer = 1,
+    CoreAnimationComposition = 2,
+}
+
+impl GuestPresentationSource {
+    fn label(self) -> &'static str {
+        match self {
+            Self::EaglPresentRenderbuffer => "eagl-present-renderbuffer",
+            Self::CoreAnimationComposition => "core-animation-composition",
+        }
+    }
+}
+
 fn size_for_orientation(
     (width, height): (u32, u32),
     orientation: DeviceOrientation,
@@ -189,7 +206,16 @@ fn rotate_fullscreen_size(orientation: DeviceOrientation, screen_size: (u32, u32
 pub type HostOrientationFn = unsafe extern "C" fn(i32);
 
 #[cfg(target_os = "ios")]
-pub type HostPresentationFn = unsafe extern "C" fn(i32);
+pub type HostPresentationFn = unsafe extern "C" fn(i32) -> u64;
+
+#[cfg(target_os = "ios")]
+pub type HostTerminationFn = unsafe extern "C" fn(u64);
+
+#[cfg(target_os = "ios")]
+pub type HostCommitFn = unsafe extern "C" fn(u64, i32);
+
+#[cfg(target_os = "ios")]
+pub type HostOrientationPolicyFn = unsafe extern "C" fn(usize) -> usize;
 
 #[cfg(target_os = "ios")]
 pub type HostDiagnosticFn =
@@ -200,6 +226,18 @@ static HOST_ORIENTATION: OnceLock<HostOrientationFn> = OnceLock::new();
 
 #[cfg(target_os = "ios")]
 static HOST_PRESENTATION: OnceLock<HostPresentationFn> = OnceLock::new();
+
+#[cfg(target_os = "ios")]
+static HOST_TERMINATION: OnceLock<HostTerminationFn> = OnceLock::new();
+
+#[cfg(target_os = "ios")]
+static HOST_COMMIT: OnceLock<HostCommitFn> = OnceLock::new();
+
+#[cfg(target_os = "ios")]
+static HOST_ORIENTATION_POLICY: OnceLock<HostOrientationPolicyFn> = OnceLock::new();
+
+#[cfg(target_os = "ios")]
+static CURRENT_HOST_PRESENTATION_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(target_os = "ios")]
 static HOST_DIAGNOSTIC: OnceLock<HostDiagnosticFn> = OnceLock::new();
@@ -219,6 +257,37 @@ pub extern "C" fn idared_set_host_orientation(callback: HostOrientationFn) {
 #[no_mangle]
 pub extern "C" fn idared_set_host_presentation(callback: HostPresentationFn) {
     let _ = HOST_PRESENTATION.set(callback);
+}
+
+#[cfg(target_os = "ios")]
+#[no_mangle]
+pub extern "C" fn idared_set_host_termination(callback: HostTerminationFn) {
+    let _ = HOST_TERMINATION.set(callback);
+}
+
+#[cfg(target_os = "ios")]
+#[no_mangle]
+pub extern "C" fn idared_set_host_commit(callback: HostCommitFn) {
+    let _ = HOST_COMMIT.set(callback);
+}
+
+#[cfg(target_os = "ios")]
+#[no_mangle]
+pub extern "C" fn idared_set_host_orientation_policy(callback: HostOrientationPolicyFn) {
+    let _ = HOST_ORIENTATION_POLICY.set(callback);
+}
+
+/// Synchronous policy bridge used by the actual Cargo-built SDL controller
+/// and scene delegate. During GuestPending both native layers receive portrait
+/// even though the guest's emulated framebuffer remains landscape.
+#[cfg(target_os = "ios")]
+#[no_mangle]
+pub extern "C" fn idared_sdl_host_orientation_policy(requested_mask: usize) -> usize {
+    unsafe {
+        HOST_ORIENTATION_POLICY
+            .get()
+            .map_or(2, |policy| policy(requested_mask))
+    }
 }
 
 /// Registered by the final iOS executable. The callback attaches the current
@@ -274,7 +343,8 @@ pub fn begin_picker_presentation() {
         );
         unsafe {
             if let Some(request) = HOST_PRESENTATION.get() {
-                request(0);
+                let generation = request(0);
+                CURRENT_HOST_PRESENTATION_GENERATION.store(generation, Ordering::Release);
             } else {
                 log!("Host presentation bridge is unavailable; picker ownership not reported");
             }
@@ -291,7 +361,8 @@ pub fn begin_guest_presentation() {
         host_presentation_diagnostic("rust-guest-owner", "guest-ownership-requested");
         unsafe {
             if let Some(request) = HOST_PRESENTATION.get() {
-                request(1);
+                let generation = request(1);
+                CURRENT_HOST_PRESENTATION_GENERATION.store(generation, Ordering::Release);
             } else {
                 log!("Host presentation bridge is unavailable; guest ownership not reported");
             }
@@ -526,6 +597,15 @@ pub struct Window {
     native_home_button: HostObjcId,
     #[cfg(target_os = "ios")]
     native_home_button_target: HostObjcId,
+    /// Generation of the guest presentation that owns this SDL window. A
+    /// first-frame callback carrying an older generation cannot authorize a
+    /// later guest's native orientation.
+    #[cfg(target_os = "ios")]
+    host_presentation_generation: u64,
+    /// Prevent repeated guest frames from issuing repeated native orientation
+    /// commits. Swift independently validates the same generation and phase.
+    #[cfg(target_os = "ios")]
+    host_presentation_committed: bool,
     /// Direct host touches which began on the emulated touchscreen. A touch
     /// may subsequently move into a letterbox bar and remains captured at the
     /// guest edge, just like a finger reaching an original device's edge.
@@ -725,6 +805,11 @@ impl Window {
             native_home_button: std::ptr::null_mut(),
             #[cfg(target_os = "ios")]
             native_home_button_target: std::ptr::null_mut(),
+            #[cfg(target_os = "ios")]
+            host_presentation_generation: CURRENT_HOST_PRESENTATION_GENERATION
+                .load(Ordering::Acquire),
+            #[cfg(target_os = "ios")]
+            host_presentation_committed: false,
             active_direct_touches: HashSet::new(),
             on_main_stack: true,
         };
@@ -2101,6 +2186,37 @@ impl Window {
         self.window.gl_swap_window();
     }
 
+    /// Commit native guest presentation immediately before the first genuine
+    /// application frame is swapped. Internal guest dimensions/orientation are
+    /// already active; this only lets the host scene begin following them.
+    /// Splash rendering deliberately never calls this method.
+    pub fn commit_guest_presentation(&mut self, source: GuestPresentationSource) {
+        #[cfg(target_os = "ios")]
+        {
+            if self.host_presentation_committed {
+                return;
+            }
+            self.host_presentation_committed = true;
+            host_presentation_diagnostic(
+                "rust-guest-first-frame",
+                &format!(
+                    "generation={} source={}",
+                    self.host_presentation_generation,
+                    source.label()
+                ),
+            );
+            unsafe {
+                if let Some(commit) = HOST_COMMIT.get() {
+                    commit(self.host_presentation_generation, source as i32);
+                } else {
+                    log!("Host presentation commit bridge is unavailable");
+                }
+            }
+        }
+        #[cfg(not(target_os = "ios"))]
+        let _ = source;
+    }
+
     #[cfg(target_os = "ios")]
     fn get_sys_wm_info_ios(&self) -> SDL_SysWMinfoUIKit {
         use sdl2_sys::{SDL_GetVersion, SDL_GetWindowWMInfo, SDL_SysWMinfo};
@@ -2426,6 +2542,15 @@ impl Window {
 impl Drop for Window {
     fn drop(&mut self) {
         use std::os::raw::c_char;
+
+        // Invalidate a not-yet-committed frame before Rust drops SDL's native
+        // controller/window fields. This phase change is synchronous and does
+        // not wait for UIKit or issue a second geometry request.
+        unsafe {
+            if let Some(begin_termination) = HOST_TERMINATION.get() {
+                begin_termination(self.host_presentation_generation);
+            }
+        }
 
         unsafe {
             #[link(name = "objc")]

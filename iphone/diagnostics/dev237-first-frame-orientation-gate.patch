@@ -1,0 +1,238 @@
+diff --git a/src/video/uikit/SDL_uikitappdelegate.m b/src/video/uikit/SDL_uikitappdelegate.m
+index 0a3bacb..224dcc9 100644
+--- a/src/video/uikit/SDL_uikitappdelegate.m
++++ b/src/video/uikit/SDL_uikitappdelegate.m
+@@ -443,17 +443,19 @@ SDL_LoadLaunchImageNamed(NSString *name, int screenh)
+         }
+         if ([window.accessibilityIdentifier isEqualToString:@"touchHLE.gameControls"]) {
+             UIInterfaceOrientationMask mask = [window.rootViewController supportedInterfaceOrientations];
++            UIInterfaceOrientationMask effectiveMask = idared_sdl_host_orientation_policy(mask);
+             idared_native_presentation_diagnostic_event(
+                 "sdl-scene-delegate-supported-orientations-query",
+                 [[NSString stringWithFormat:
+-                    @"scene=%@ sceneOrientation=%ld selectedWindow=%@ selectedRoot=%@ reason=game-controls resultMask=0x%lx hierarchy={%@}",
++                    @"scene=%@ sceneOrientation=%ld selectedWindow=%@ selectedRoot=%@ reason=game-controls requestedMask=0x%lx resultMask=0x%lx hierarchy={%@}",
+                     IDaredUIKitObjectLabel(windowScene),
+                     (long)windowScene.interfaceOrientation,
+                     IDaredUIKitObjectLabel(window),
+                     IDaredUIKitObjectLabel(window.rootViewController),
+                     (unsigned long)mask,
++                    (unsigned long)effectiveMask,
+                     IDaredUIKitWindowSummary(windowScene)] UTF8String]);
+-            return mask;
++            return effectiveMask;
+         }
+     }
+     for (UIWindow *window in windowScene.windows) {
+@@ -462,17 +464,19 @@ SDL_LoadLaunchImageNamed(NSString *name, int screenh)
+         }
+         if ([window.rootViewController isKindOfClass:[SDL_uikitviewcontroller class]]) {
+             UIInterfaceOrientationMask mask = [window.rootViewController supportedInterfaceOrientations];
++            UIInterfaceOrientationMask effectiveMask = idared_sdl_host_orientation_policy(mask);
+             idared_native_presentation_diagnostic_event(
+                 "sdl-scene-delegate-supported-orientations-query",
+                 [[NSString stringWithFormat:
+-                    @"scene=%@ sceneOrientation=%ld selectedWindow=%@ selectedRoot=%@ reason=sdl-root resultMask=0x%lx hierarchy={%@}",
++                    @"scene=%@ sceneOrientation=%ld selectedWindow=%@ selectedRoot=%@ reason=sdl-root requestedMask=0x%lx resultMask=0x%lx hierarchy={%@}",
+                     IDaredUIKitObjectLabel(windowScene),
+                     (long)windowScene.interfaceOrientation,
+                     IDaredUIKitObjectLabel(window),
+                     IDaredUIKitObjectLabel(window.rootViewController),
+                     (unsigned long)mask,
++                    (unsigned long)effectiveMask,
+                     IDaredUIKitWindowSummary(windowScene)] UTF8String]);
+-            return mask;
++            return effectiveMask;
+         }
+     }
+ 
+@@ -492,32 +496,36 @@ SDL_LoadLaunchImageNamed(NSString *name, int screenh)
+ 
+         UIInterfaceOrientationMask mask = root.supportedInterfaceOrientations;
+         if (mask != 0) {
++            UIInterfaceOrientationMask effectiveMask = idared_sdl_host_orientation_policy(mask);
+             idared_native_presentation_diagnostic_event(
+                 "sdl-scene-delegate-supported-orientations-query",
+                 [[NSString stringWithFormat:
+-                    @"scene=%@ sceneOrientation=%ld selectedWindow=%@ selectedRoot=%@ reason=native-key-root resultMask=0x%lx hierarchy={%@}",
++                    @"scene=%@ sceneOrientation=%ld selectedWindow=%@ selectedRoot=%@ reason=native-key-root requestedMask=0x%lx resultMask=0x%lx hierarchy={%@}",
+                     IDaredUIKitObjectLabel(windowScene),
+                     (long)windowScene.interfaceOrientation,
+                     IDaredUIKitObjectLabel(window),
+                     IDaredUIKitObjectLabel(root),
+                     (unsigned long)mask,
++                    (unsigned long)effectiveMask,
+                     IDaredUIKitWindowSummary(windowScene)] UTF8String]);
+-            return mask;
++            return effectiveMask;
+         }
+     }
+ 
+     /* iDared's only non-guest scene is its portrait picker. This fallback
+      * covers the brief gap after SDL detaches and before that picker becomes
+      * key, and deliberately never returns an invalid zero mask. */
++    UIInterfaceOrientationMask effectiveFallback =
++        idared_sdl_host_orientation_policy(UIInterfaceOrientationMaskPortrait);
+     idared_native_presentation_diagnostic_event(
+         "sdl-scene-delegate-supported-orientations-query",
+         [[NSString stringWithFormat:
+             @"scene=%@ sceneOrientation=%ld selectedWindow=none selectedRoot=none reason=native-host-fallback resultMask=0x%lx hierarchy={%@}",
+             IDaredUIKitObjectLabel(windowScene),
+             (long)windowScene.interfaceOrientation,
+-            (unsigned long)UIInterfaceOrientationMaskPortrait,
++            (unsigned long)effectiveFallback,
+             IDaredUIKitWindowSummary(windowScene)] UTF8String]);
+-    return UIInterfaceOrientationMaskPortrait;
++    return effectiveFallback;
+ }
+ #endif
+ 
+diff --git a/src/video/uikit/SDL_uikitdiagnostics.h b/src/video/uikit/SDL_uikitdiagnostics.h
+index 512e287..0869021 100644
+--- a/src/video/uikit/SDL_uikitdiagnostics.h
++++ b/src/video/uikit/SDL_uikitdiagnostics.h
+@@ -16,6 +16,10 @@
+ extern void idared_sdl_presentation_diagnostic_event(const char *source, const char *detail);
+ #define idared_native_presentation_diagnostic_event idared_sdl_presentation_diagnostic_event
+ 
++/* Synchronous phase gate owned by iDared's Swift coordinator. Both the SDL
++ * controller and the scene delegate must return its compatible result. */
++extern NSUInteger idared_sdl_host_orientation_policy(NSUInteger requestedMask);
++
+ static inline NSString *
+ IDaredUIKitObjectLabel(id object)
+ {
+diff --git a/src/video/uikit/SDL_uikitviewcontroller.m b/src/video/uikit/SDL_uikitviewcontroller.m
+index 832727f..3bfac38 100644
+--- a/src/video/uikit/SDL_uikitviewcontroller.m
++++ b/src/video/uikit/SDL_uikitviewcontroller.m
+@@ -84,6 +84,20 @@ SDL_HideHomeIndicatorHintChanged(void *userdata, const char *name, const char *o
+ }
+ #endif
+ 
++#if !TARGET_OS_TV
++static UIInterfaceOrientationMask
++IDaredMaskForInterfaceOrientation(UIInterfaceOrientation orientation)
++{
++    switch (orientation) {
++        case UIInterfaceOrientationPortrait: return UIInterfaceOrientationMaskPortrait;
++        case UIInterfaceOrientationPortraitUpsideDown: return UIInterfaceOrientationMaskPortraitUpsideDown;
++        case UIInterfaceOrientationLandscapeLeft: return UIInterfaceOrientationMaskLandscapeLeft;
++        case UIInterfaceOrientationLandscapeRight: return UIInterfaceOrientationMaskLandscapeRight;
++        default: return 0;
++    }
++}
++#endif
++
+ @implementation SDL_uikitviewcontroller {
+     CADisplayLink *displayLink;
+     int animationInterval;
+@@ -98,6 +112,10 @@ SDL_HideHomeIndicatorHintChanged(void *userdata, const char *name, const char *o
+     NSString *committedText;
+     NSString *obligateForBackspace;
+ #endif
++#if !TARGET_OS_TV
++    UIView *idaredPresentationCover;
++    BOOL idaredPresentationCommitted;
++#endif
+ }
+ 
+ @synthesize window;
+@@ -124,6 +142,10 @@ SDL_HideHomeIndicatorHintChanged(void *userdata, const char *name, const char *o
+         SDL_AddHintCallback(SDL_HINT_IOS_HIDE_HOME_INDICATOR,
+                             SDL_HideHomeIndicatorHintChanged,
+                             (__bridge void *) self);
++        [[NSNotificationCenter defaultCenter]
++            addObserver:self
++               selector:@selector(idaredGuestPresentationCommitted:)
++                   name:@"iDaredGuestPresentationCommitted" object:nil];
+         idared_native_presentation_diagnostic_event(
+             "sdl-controller-init",
+             [[NSString stringWithFormat:
+@@ -161,6 +183,8 @@ SDL_HideHomeIndicatorHintChanged(void *userdata, const char *name, const char *o
+     SDL_DelHintCallback(SDL_HINT_IOS_HIDE_HOME_INDICATOR,
+                         SDL_HideHomeIndicatorHintChanged,
+                         (__bridge void *) self);
++    [[NSNotificationCenter defaultCenter]
++        removeObserver:self name:@"iDaredGuestPresentationCommitted" object:nil];
+ #endif
+ }
+ 
+@@ -250,16 +274,65 @@ SDL_HideHomeIndicatorHintChanged(void *userdata, const char *name, const char *o
+ }
+ 
+ #if !TARGET_OS_TV
++- (void)idaredRemovePresentationCover:(NSString *)reason
++{
++    if (idaredPresentationCover == nil) {
++        return;
++    }
++    idared_native_presentation_diagnostic_event(
++        "sdl-first-frame-cover-removed",
++        [[NSString stringWithFormat:
++            @"controller=%@ reason=%@ sceneOrientation=%ld",
++            IDaredUIKitObjectLabel(self), reason,
++            (long)IDaredUIKitSceneOrientation(self.view.window.windowScene)] UTF8String]);
++    [idaredPresentationCover removeFromSuperview];
++    idaredPresentationCover = nil;
++}
++
++- (void)idaredGuestPresentationCommitted:(NSNotification *)notification
++{
++    if (idaredPresentationCommitted) {
++        return;
++    }
++    idaredPresentationCommitted = YES;
++    UIView *coverHost = self.view.window ?: self.view;
++    idaredPresentationCover = [[UIView alloc] initWithFrame:coverHost.bounds];
++    idaredPresentationCover.backgroundColor = UIColor.blackColor;
++    idaredPresentationCover.autoresizingMask =
++        UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
++    idaredPresentationCover.userInteractionEnabled = NO;
++    [coverHost addSubview:idaredPresentationCover];
++
++    UIInterfaceOrientationMask guestMask = UIKit_GetSupportedOrientations(window);
++    UIInterfaceOrientation sceneOrientation = self.view.window.windowScene.interfaceOrientation;
++    UIInterfaceOrientationMask currentMask = IDaredMaskForInterfaceOrientation(sceneOrientation);
++    idared_native_presentation_diagnostic_event(
++        "sdl-first-frame-cover-installed",
++        [[NSString stringWithFormat:
++            @"controller=%@ generation=%@ source=%@ guestMask=0x%lx sceneOrientation=%ld currentMask=0x%lx",
++            IDaredUIKitObjectLabel(self),
++            notification.userInfo[@"generation"] ?: @"(null)",
++            notification.userInfo[@"source"] ?: @"(null)",
++            (unsigned long)guestMask,
++            (long)sceneOrientation,
++            (unsigned long)currentMask] UTF8String]);
++    if ((guestMask & currentMask) != 0) {
++        [self idaredRemovePresentationCover:@"scene-already-compatible"];
++    }
++}
++
+ - (NSUInteger)supportedInterfaceOrientations
+ {
+-    NSUInteger mask = UIKit_GetSupportedOrientations(window);
++    NSUInteger requestedMask = UIKit_GetSupportedOrientations(window);
++    NSUInteger mask = idared_sdl_host_orientation_policy(requestedMask);
+     idared_native_presentation_diagnostic_event(
+         "sdl-controller-supported-orientations-query",
+         [[NSString stringWithFormat:
+-            @"controller=%@ window=%p SDL_IOS_ORIENTATIONS=%s resultMask=0x%lx sceneOrientation=%ld",
++            @"controller=%@ window=%p SDL_IOS_ORIENTATIONS=%s requestedMask=0x%lx resultMask=0x%lx sceneOrientation=%ld",
+             IDaredUIKitObjectLabel(self),
+             window,
+             SDL_GetHint(SDL_HINT_ORIENTATIONS) ?: "(null)",
++            (unsigned long)requestedMask,
+             (unsigned long)mask,
+             (long)IDaredUIKitSceneOrientation(self.view.window.windowScene)] UTF8String]);
+     return mask;
+@@ -441,6 +514,9 @@ SDL_HideHomeIndicatorHintChanged(void *userdata, const char *name, const char *o
+                 context.completionVelocity,
+                 (long)IDaredUIKitSceneOrientation(self.view.window.windowScene),
+                 IDaredUIKitWindowSummary(self.view.window.windowScene)] UTF8String]);
++        if (!context.isCancelled && self->idaredPresentationCommitted) {
++            [self idaredRemovePresentationCover:@"native-transition-completed"];
++        }
+     }];
+ }
+ 

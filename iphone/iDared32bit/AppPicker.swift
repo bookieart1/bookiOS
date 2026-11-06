@@ -403,6 +403,22 @@ private enum HostPresentationOwner: Int32 {
     }
 }
 
+private enum HostPresentationPhase: Int32 {
+    case picker = 0
+    case guestPending = 1
+    case guestPresented = 2
+    case guestTerminating = 3
+
+    var label: String {
+        switch self {
+        case .picker: return "picker"
+        case .guestPending: return "guest-pending"
+        case .guestPresented: return "guest-presented"
+        case .guestTerminating: return "guest-terminating"
+        }
+    }
+}
+
 private struct HostPresentationToken: Equatable {
     let owner: HostPresentationOwner
     let generation: UInt64
@@ -414,11 +430,14 @@ private struct HostPresentationToken: Equatable {
 private enum HostPresentationCoordinator {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var owner = HostPresentationOwner.picker
+    nonisolated(unsafe) private static var phase = HostPresentationPhase.picker
     nonisolated(unsafe) private static var generation: UInt64 = 0
     nonisolated(unsafe) private static var sequenceID: UInt64 = 0
     nonisolated(unsafe) private static var pickerVisible = false
     nonisolated(unsafe) private static var transitionActive = false
     nonisolated(unsafe) private static var requestInFlight = false
+    nonisolated(unsafe) private static var guestTargetMask = UIInterfaceOrientationMask.portrait
+    nonisolated(unsafe) private static var guestTargetRawOrientation: Int32 = 0
 
     private static func token() -> HostPresentationToken {
         lock.lock()
@@ -429,6 +448,7 @@ private enum HostPresentationCoordinator {
     private static func diagnosticState() -> (
         sequence: UInt64,
         owner: HostPresentationOwner,
+        phase: HostPresentationPhase,
         generation: UInt64,
         pickerVisible: Bool,
         transitionActive: Bool,
@@ -439,6 +459,7 @@ private enum HostPresentationCoordinator {
         return (
             sequenceID,
             owner,
+            phase,
             generation,
             pickerVisible,
             transitionActive,
@@ -457,10 +478,11 @@ private enum HostPresentationCoordinator {
         let suffix = detail.isEmpty ? "" : " \(detail)"
         reportHostPresentationDiagnostic(
             String(
-                format: "seq=%llu uptime=%.6f owner=%@ generation=%llu pickerVisible=%@ transitionActive=%@ requestInFlight=%@ event=%@%@",
+                format: "seq=%llu uptime=%.6f owner=%@ phase=%@ generation=%llu pickerVisible=%@ transitionActive=%@ requestInFlight=%@ event=%@%@",
                 state.sequence,
                 performanceNow(),
                 state.owner.label,
+                state.phase.label,
                 state.generation,
                 state.pickerVisible ? "yes" : "no",
                 state.transitionActive ? "yes" : "no",
@@ -514,12 +536,17 @@ private enum HostPresentationCoordinator {
         return owner == token.owner && generation == token.generation
     }
 
-    static func setOwner(_ newOwner: HostPresentationOwner) {
+    @discardableResult
+    static func setOwner(_ newOwner: HostPresentationOwner) -> UInt64 {
         lock.lock()
         let oldOwner = owner
+        let oldPhase = phase
         let oldGeneration = generation
         generation &+= 1
         owner = newOwner
+        phase = newOwner == .picker ? .picker : .guestPending
+        guestTargetMask = .portrait
+        guestTargetRawOrientation = 0
         pickerVisible = false
         transitionActive = false
         requestInFlight = false
@@ -528,7 +555,7 @@ private enum HostPresentationCoordinator {
 
         emit(
             "owner-change",
-            "oldOwner=\(oldOwner.label) oldGeneration=\(oldGeneration) newOwner=\(newOwner.label) newGeneration=\(newToken.generation)"
+            "oldOwner=\(oldOwner.label) oldPhase=\(oldPhase.label) oldGeneration=\(oldGeneration) newOwner=\(newOwner.label) newPhase=\(newOwner == .picker ? HostPresentationPhase.picker.label : HostPresentationPhase.guestPending.label) newGeneration=\(newToken.generation)"
         )
         hierarchySnapshot("owner-changed-to-\(newOwner.label)")
 
@@ -548,11 +575,54 @@ private enum HostPresentationCoordinator {
         } else {
             DispatchQueue.main.async(execute: report)
         }
+        return newToken.generation
     }
 
     static func guestToken() -> HostPresentationToken? {
         let current = token()
-        return current.owner == .guest ? current : nil
+        lock.lock()
+        let acceptsGuestRequest = owner == .guest && phase != .guestTerminating
+        lock.unlock()
+        return acceptsGuestRequest ? current : nil
+    }
+
+    static func effectiveNativeOrientationMask(_ requestedMask: UInt) -> UInt {
+        lock.lock()
+        let currentPhase = phase
+        lock.unlock()
+        switch currentPhase {
+        case .guestPresented:
+            return requestedMask == 0 ? UIInterfaceOrientationMask.portrait.rawValue : requestedMask
+        case .picker, .guestPending, .guestTerminating:
+            return UIInterfaceOrientationMask.portrait.rawValue
+        }
+    }
+
+    static func beginGuestTermination(_ terminatingGeneration: UInt64) {
+        lock.lock()
+        guard owner == .guest,
+              generation == terminatingGeneration,
+              phase != .guestTerminating
+        else {
+            let currentGeneration = generation
+            let currentPhase = phase
+            lock.unlock()
+            emit(
+                "guest-termination-ignored",
+                "requestGeneration=\(terminatingGeneration) currentGeneration=\(currentGeneration) currentPhase=\(currentPhase.label)"
+            )
+            return
+        }
+        let oldPhase = phase
+        phase = .guestTerminating
+        guestTargetMask = .portrait
+        guestTargetRawOrientation = 0
+        requestInFlight = false
+        lock.unlock()
+        emit(
+            "guest-termination-begin",
+            "oldPhase=\(oldPhase.label) requestGeneration=\(terminatingGeneration) nativePolicyMask=0x\(String(UIInterfaceOrientationMask.portrait.rawValue, radix: 16))"
+        )
     }
 
     static func installPickerController(_ controller: UIViewController) {
@@ -642,16 +712,106 @@ private enum HostPresentationCoordinator {
         }
     }
 
-    static func applyGuestOrientation(
+    static func recordGuestOrientation(
         _ mask: UIInterfaceOrientationMask,
         rawOrientation: Int32,
         token: HostPresentationToken
     ) {
+        lock.lock()
+        guard owner == .guest, generation == token.generation else {
+            let currentGeneration = generation
+            let currentPhase = phase
+            lock.unlock()
+            emit(
+                "guest-orientation-rejected-stale",
+                "raw=\(rawOrientation) requestedMask=0x\(String(mask.rawValue, radix: 16)) requestGeneration=\(token.generation) currentGeneration=\(currentGeneration) currentPhase=\(currentPhase.label)"
+            )
+            return
+        }
+        guestTargetMask = mask
+        guestTargetRawOrientation = rawOrientation
+        let currentPhase = phase
+        lock.unlock()
+
+        if currentPhase == .guestPending {
+            emit(
+                "guest-orientation-recorded-pending",
+                "raw=\(rawOrientation) requestedMask=0x\(String(mask.rawValue, radix: 16)) nativePolicyMask=0x\(String(UIInterfaceOrientationMask.portrait.rawValue, radix: 16))"
+            )
+            return
+        }
+        guard currentPhase == .guestPresented else {
+            emit(
+                "guest-orientation-ignored-phase",
+                "raw=\(rawOrientation) requestedMask=0x\(String(mask.rawValue, radix: 16)) phase=\(currentPhase.label)"
+            )
+            return
+        }
         applyOrientation(
             mask,
             rawOrientation: rawOrientation,
             source: "guest-orientation",
             token: token,
+            preferredController: nil
+        )
+    }
+
+    static func commitGuestPresentation(
+        generation requestedGeneration: UInt64,
+        source: Int32
+    ) {
+        guard Thread.isMainThread else {
+            emit(
+                "guest-presentation-commit-rejected-off-main-thread",
+                "requestGeneration=\(requestedGeneration) source=\(source)"
+            )
+            return
+        }
+
+        lock.lock()
+        guard owner == .guest,
+              generation == requestedGeneration,
+              phase == .guestPending
+        else {
+            let currentGeneration = generation
+            let currentPhase = phase
+            lock.unlock()
+            emit(
+                "guest-presentation-commit-ignored",
+                "requestGeneration=\(requestedGeneration) currentGeneration=\(currentGeneration) currentPhase=\(currentPhase.label) source=\(source)"
+            )
+            return
+        }
+        phase = .guestPresented
+        let mask = guestTargetMask
+        let rawOrientation = guestTargetRawOrientation
+        let currentToken = HostPresentationToken(owner: owner, generation: generation)
+        lock.unlock()
+
+        emit(
+            "guest-presentation-committed",
+            "source=\(source) raw=\(rawOrientation) targetMask=0x\(String(mask.rawValue, radix: 16))"
+        )
+
+        // The compiled SDL controller installs a short-lived black cover in
+        // response to this notification. It is removed immediately for an
+        // already-correct portrait scene, or by the real UIKit transition
+        // completion for landscape. This keeps the prepared first guest frame
+        // from appearing sideways without blocking the main thread.
+        NotificationCenter.default.post(
+            name: Notification.Name("iDaredGuestPresentationCommitted"),
+            object: nil,
+            userInfo: [
+                "generation": requestedGeneration,
+                "targetMask": mask.rawValue,
+                "source": source,
+            ]
+        )
+        applyOrientation(
+            mask,
+            rawOrientation: rawOrientation,
+            source: "guest-first-frame",
+            token: currentToken,
             preferredController: nil
         )
     }
@@ -814,9 +974,27 @@ public func idaredNativePresentationDiagnosticEvent(
 }
 
 @_cdecl("idared_set_host_presentation_owner")
-public func idaredSetHostPresentationOwner(_ rawOwner: Int32) {
-    guard let owner = HostPresentationOwner(rawValue: rawOwner) else { return }
-    HostPresentationCoordinator.setOwner(owner)
+public func idaredSetHostPresentationOwner(_ rawOwner: Int32) -> UInt64 {
+    guard let owner = HostPresentationOwner(rawValue: rawOwner) else { return 0 }
+    return HostPresentationCoordinator.setOwner(owner)
+}
+
+@_cdecl("idared_begin_host_guest_termination")
+public func idaredBeginHostGuestTermination(_ generation: UInt64) {
+    HostPresentationCoordinator.beginGuestTermination(generation)
+}
+
+@_cdecl("idared_commit_host_guest_presentation")
+public func idaredCommitHostGuestPresentation(_ generation: UInt64, _ source: Int32) {
+    HostPresentationCoordinator.commitGuestPresentation(
+        generation: generation,
+        source: source
+    )
+}
+
+@_cdecl("idared_effective_host_orientation_mask")
+public func idaredEffectiveHostOrientationMask(_ requestedMask: UInt) -> UInt {
+    HostPresentationCoordinator.effectiveNativeOrientationMask(requestedMask)
 }
 
 /// SDL's orientation hint controls the SDL view controller, but after the
@@ -849,7 +1027,7 @@ public func idaredRequestHostOrientation(_ rawOrientation: Int32) {
         return
     }
     let update = {
-        HostPresentationCoordinator.applyGuestOrientation(
+        HostPresentationCoordinator.recordGuestOrientation(
             mask,
             rawOrientation: rawOrientation,
             token: token

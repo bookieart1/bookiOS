@@ -996,8 +996,15 @@ unsafe fn present_renderbuffer(env: &mut Environment, _context: id) {
     std::mem::drop(gles_boxed);
 
     // SDL2's documentation warns 0 should be bound to the draw framebuffer
-    // when swapping the window, so this is the perfect moment.
-    env.window.as_mut().unwrap().swap_window();
+    // when swapping the window, so this is the perfect moment. The frame is
+    // already prepared but not yet exposed: commit native guest orientation
+    // first, allowing the SDL controller to cover it through the real UIKit
+    // transition rather than flashing a landscape frame in a portrait scene.
+    let window = env.window.as_mut().unwrap();
+    window.commit_guest_presentation(
+        crate::window::GuestPresentationSource::EaglPresentRenderbuffer,
+    );
+    window.swap_window();
 
     let mut gles_boxed = gles_ctx.make_current(env.window.as_mut().unwrap());
     let gles = gles_boxed.as_mut();

@@ -2,7 +2,8 @@
 
 # Resolve the SDL source that Cargo will actually compile for the iPhone
 # target, then replace only that nested SDL checkout with the pinned Diagnostic
-# 2 source and Dev 2.36 native scene-policy correction stored here.
+# 2 source, Dev 2.36 native scene-policy correction, and Dev 2.37's
+# first-frame presentation gate stored here.
 
 set -euo pipefail
 
@@ -13,6 +14,7 @@ readonly EXPECTED_SDL_DIAGNOSTIC_COMMIT='07318edcc53abdc0ffa1ac5d53e585ba5489cf2
 readonly EXPECTED_BUNDLE_SHA256='9d99602243e725c38b45e6c92ab1bc7f4196abba99b5287616e446f924f25d18'
 readonly EXPECTED_BRIDGE_PATCH_BLOB='1d663ad7125255b9f79aacc6ef1b5cfaf07b1d7f'
 readonly EXPECTED_SCENE_POLICY_PATCH_BLOB='3be3e9715b250f4d47d6440edc56f21ea04180f0'
+readonly EXPECTED_FIRST_FRAME_GATE_PATCH_BLOB='feb1865891cf27791e75ac7b8d657b1075590618'
 readonly DIAGNOSTIC_REF='refs/heads/bookios/dev235-presentation-diagnostics'
 
 workspace="${GITHUB_WORKSPACE:?GITHUB_WORKSPACE must identify the checked-out iDared repository}"
@@ -20,6 +22,7 @@ runner_temp="${RUNNER_TEMP:?RUNNER_TEMP must be available}"
 bundle="$workspace/iphone/diagnostics/dev235-presentation-diagnostics.bundle"
 bridge_patch="$workspace/iphone/diagnostics/dev235-diagnostic-sdl-rust-bridge.patch"
 scene_policy_patch="$workspace/iphone/diagnostics/dev236-native-scene-orientation-policy.patch"
+first_frame_gate_patch="$workspace/iphone/diagnostics/dev237-first-frame-orientation-gate.patch"
 metadata="$runner_temp/idared-ios-cargo-metadata.json"
 
 actual_bundle_sha256="$(shasum -a 256 "$bundle" | awk '{ print $1 }')"
@@ -34,6 +37,11 @@ actual_scene_policy_patch_blob="$(
 )"
 test "$actual_scene_policy_patch_blob" = "$EXPECTED_SCENE_POLICY_PATCH_BLOB"
 actual_scene_policy_patch_sha256="$(shasum -a 256 "$scene_policy_patch" | awk '{ print $1 }')"
+actual_first_frame_gate_patch_blob="$(
+    git -C "$workspace" rev-parse HEAD:iphone/diagnostics/dev237-first-frame-orientation-gate.patch
+)"
+test "$actual_first_frame_gate_patch_blob" = "$EXPECTED_FIRST_FRAME_GATE_PATCH_BLOB"
+actual_first_frame_gate_patch_sha256="$(shasum -a 256 "$first_frame_gate_patch" | awk '{ print $1 }')"
 
 # This is target-specific on purpose: it proves which sdl2-sys instance the
 # aarch64 iPhone dependency graph resolves, rather than assuming that the
@@ -88,6 +96,8 @@ git -C "$sdl_dir" apply --check "$bridge_patch"
 git -C "$sdl_dir" apply "$bridge_patch"
 git -C "$sdl_dir" apply --check "$scene_policy_patch"
 git -C "$sdl_dir" apply "$scene_policy_patch"
+git -C "$sdl_dir" apply --check "$first_frame_gate_patch"
+git -C "$sdl_dir" apply "$first_frame_gate_patch"
 
 # Assert that Cargo's own build script compiles CARGO_MANIFEST_DIR/SDL and that
 # the exact native observation points expected by Diagnostic 2 are present.
@@ -100,7 +110,11 @@ grep -Fq 'sdl-status-bar-orientation-notification' "$sdl_dir/src/video/uikit/SDL
 grep -Fq 'idared_sdl_presentation_diagnostic_event' "$sdl_dir/src/video/uikit/SDL_uikitdiagnostics.h"
 grep -Fq 'reason=native-key-root' "$sdl_dir/src/video/uikit/SDL_uikitappdelegate.m"
 grep -Fq 'reason=native-host-fallback' "$sdl_dir/src/video/uikit/SDL_uikitappdelegate.m"
-grep -Fq 'return UIInterfaceOrientationMaskPortrait;' "$sdl_dir/src/video/uikit/SDL_uikitappdelegate.m"
+grep -Fq 'return effectiveFallback;' "$sdl_dir/src/video/uikit/SDL_uikitappdelegate.m"
+grep -Fq 'idared_sdl_host_orientation_policy' "$sdl_dir/src/video/uikit/SDL_uikitappdelegate.m"
+grep -Fq 'idared_sdl_host_orientation_policy' "$sdl_dir/src/video/uikit/SDL_uikitviewcontroller.m"
+grep -Fq 'sdl-first-frame-cover-installed' "$sdl_dir/src/video/uikit/SDL_uikitviewcontroller.m"
+grep -Fq 'sdl-first-frame-cover-removed' "$sdl_dir/src/video/uikit/SDL_uikitviewcontroller.m"
 if grep -Fq 'reason=fallback resultMask=0x%lx' "$sdl_dir/src/video/uikit/SDL_uikitappdelegate.m"; then
     echo 'The unrestricted Diagnostic 2 scene fallback is still present.' >&2
     exit 1
@@ -116,6 +130,8 @@ echo "Diagnostic Rust-bridge patch Git blob: $actual_bridge_patch_blob"
 echo "Diagnostic Rust-bridge patch SHA-256: $actual_bridge_patch_sha256"
 echo "Dev 2.36 scene-policy patch Git blob: $actual_scene_policy_patch_blob"
 echo "Dev 2.36 scene-policy patch SHA-256: $actual_scene_policy_patch_sha256"
+echo "Dev 2.37 first-frame gate patch Git blob: $actual_first_frame_gate_patch_blob"
+echo "Dev 2.37 first-frame gate patch SHA-256: $actual_first_frame_gate_patch_sha256"
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     {
@@ -129,5 +145,7 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
         echo "bridge_patch_sha256=$actual_bridge_patch_sha256"
         echo "scene_policy_patch_blob=$actual_scene_policy_patch_blob"
         echo "scene_policy_patch_sha256=$actual_scene_policy_patch_sha256"
+        echo "first_frame_gate_patch_blob=$actual_first_frame_gate_patch_blob"
+        echo "first_frame_gate_patch_sha256=$actual_first_frame_gate_patch_sha256"
     } >> "$GITHUB_OUTPUT"
 fi

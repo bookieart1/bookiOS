@@ -477,6 +477,9 @@ pub fn recomposite_if_necessary(env: &mut Environment, force: bool) -> Option<In
         );
     }
     std::mem::drop(gles);
+    window.commit_guest_presentation(
+        crate::window::GuestPresentationSource::CoreAnimationComposition,
+    );
     window.swap_window();
 
     animation_state.update_started_and_finished_animations(env);
