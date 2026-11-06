@@ -284,6 +284,12 @@ fn get_value_to_decode_for_key(env: &mut Environment, unarchiver: id, key: id) -
 /// The object returned is retained only by the archiver. Remember to retain and
 /// possibly autorelease it as appropriate.
 fn unarchive_key(env: &mut Environment, unarchiver: id, key: Uid) -> id {
+    // UID 0 is the keyed-archive null sentinel. Its `$objects` entry is the
+    // marker string "$null", not an NSString value to expose to the app.
+    if key.get() == 0 {
+        return nil;
+    }
+
     let host_obj = borrow_host_obj(env, unarchiver);
     if let Some(existing) = host_obj.already_unarchived[key.get() as usize] {
         return existing;
@@ -495,4 +501,27 @@ fn keys_for_key(env: &mut Environment, unarchiver: id, key: &str) -> Vec<Uid> {
     keys.iter()
         .map(|value| value.as_uid().copied().unwrap())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reserved_uid_zero_decodes_as_nil_instead_of_the_marker_string() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let unarchiver: id = msg_class![env; NSKeyedUnarchiver alloc];
+        {
+            let host = borrow_host_obj(env, unarchiver);
+            host.plist.insert(
+                "$objects".into(),
+                Value::Array(vec![Value::String("$null".into())]),
+            );
+            host.already_unarchived = vec![None];
+        }
+
+        assert_eq!(unarchive_key(env, unarchiver, Uid::new(0)), nil);
+        release(env, unarchiver);
+    }
 }

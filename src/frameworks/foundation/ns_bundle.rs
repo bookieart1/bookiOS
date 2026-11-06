@@ -56,8 +56,89 @@ pub struct NSBundleHostObject {
     bundle_url: Option<id>,
     /// `NSDictionary*` for the `Info.plist` content. [None] if not created yet.
     info_dictionary: Option<id>,
+    /// Bounded ownership evidence for convenience path accessors.
+    diagnostic_path_returns: u8,
+    /// Bounded summaries for complete resource searches which return nil.
+    diagnostic_resource_misses: u8,
 }
 impl HostObject for NSBundleHostObject {}
+
+fn record_bundle_path_return(
+    env: &mut Environment,
+    bundle: id,
+    method: &'static str,
+    path: id,
+) -> id {
+    let should_log = {
+        let host = env.objc.borrow_mut::<NSBundleHostObject>(bundle);
+        let should_log = host.diagnostic_path_returns < 12;
+        if should_log {
+            host.diagnostic_path_returns += 1;
+        }
+        should_log
+    };
+    if should_log {
+        env.diagnostic_selector_event(
+            "bundle-path-return",
+            bundle,
+            path,
+            method,
+            path,
+            None,
+        );
+        log!(
+            "NSBundle bounded path return: method={} bundle={:?} value={:?} path={:?}",
+            method,
+            bundle,
+            path,
+            if path == nil {
+                "<nil>".into()
+            } else {
+                ns_string::to_rust_string(env, path)
+            }
+        );
+    }
+    path
+}
+
+fn diagnostic_resource_miss(
+    env: &mut Environment,
+    bundle: id,
+    name: id,
+    extension: id,
+    directory: id,
+) {
+    let (bundle_path, should_log) = {
+        let host = env.objc.borrow_mut::<NSBundleHostObject>(bundle);
+        let should_log = host.diagnostic_resource_misses < 24;
+        if should_log {
+            host.diagnostic_resource_misses += 1;
+        }
+        (host.bundle_path, should_log)
+    };
+    if !should_log {
+        return;
+    }
+    let describe = |env: &mut Environment, value: id| -> String {
+        if value == nil {
+            "<nil>".to_string()
+        } else {
+            ns_string::to_rust_string(env, value).into_owned()
+        }
+    };
+    let name = describe(env, name);
+    let extension = describe(env, extension);
+    let directory = describe(env, directory);
+    let bundle_path = describe(env, bundle_path);
+    log!(
+        "NSBundle bounded resource miss: bundle={:?} base={:?} name={:?} extension={:?} directory={:?}",
+        bundle,
+        bundle_path,
+        name,
+        extension,
+        directory
+    );
+}
 
 fn paths_in_directory(env: &mut Environment, extension: id, directory: id) -> id {
     if directory == nil {
@@ -118,6 +199,8 @@ pub const CLASSES: ClassExports = objc_classes! {
         bundle_identifier: nil,
         bundle_url: None,
         info_dictionary: None,
+        diagnostic_path_returns: 0,
+        diagnostic_resource_misses: 0,
     };
     env.objc.alloc_object(this, Box::new(host_object), &mut env.mem)
 }
@@ -240,6 +323,8 @@ pub const CLASSES: ClassExports = objc_classes! {
         bundle_identifier,
         bundle_url,
         info_dictionary,
+        diagnostic_path_returns: _,
+        diagnostic_resource_misses: _,
     } = env.objc.borrow(this);
     release(env, bundle_path);
     release(env, bundle_identifier);
@@ -253,7 +338,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)bundlePath {
-    env.objc.borrow::<NSBundleHostObject>(this).bundle_path
+    let path = env.objc.borrow::<NSBundleHostObject>(this).bundle_path;
+    record_bundle_path_return(env, this, "bundlePath", path)
 }
 - (id)bundleIdentifier {
     env.objc.borrow::<NSBundleHostObject>(this).bundle_identifier
@@ -301,7 +387,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (id)resourcePath {
     // This seems to be the same as the bundle path. The iPhone OS bundle
     // structure is a lot flatter than the macOS one.
-    msg![env; this bundlePath]
+    let path: id = msg![env; this bundlePath];
+    record_bundle_path_return(env, this, "resourcePath", path)
 }
 - (id)resourceURL {
     // This seems to be the same as the bundle path. The iPhone OS bundle
@@ -405,6 +492,7 @@ pub const CLASSES: ClassExports = objc_classes! {
             return path;
         }
     }
+    diagnostic_resource_miss(env, this, name, extension, directory);
     nil
 }
 - (id)pathForResource:(id)name // NSString*
@@ -607,6 +695,8 @@ pub const CLASSES: ClassExports = objc_classes! {
         bundle_identifier,
         bundle_url: None,
         info_dictionary: None,
+        diagnostic_path_returns: 0,
+        diagnostic_resource_misses: 0,
     };
     env.objc.alloc_object(
         this,

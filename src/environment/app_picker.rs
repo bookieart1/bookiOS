@@ -818,9 +818,10 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
     // Exact bundle identifiers avoid prefix collisions such as Glyder/Glyder 2
     // and keep the focused device-test batch deterministic even when filenames
     // or localized display names differ.
-    const DEV_240_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
+    const DEV_241_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
         "COMGLUTHOUSAND",
         "COMAGHARTASTUDIOPROJECT1112E01",
+        "COMMAJESTICSOFTWAREBLOT",
         "COMDIGITALPRUNESBUNGEEBALL2PRO",
         "COMINMOTIONSOFTWARECATACOMBS",
         "COMT04APP",
@@ -839,7 +840,7 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
                 .collect()
         };
         let bundle_identifier = normalized(&app.bundle_identifier);
-        let rank = DEV_240_TEST_BUNDLE_IDENTIFIERS
+        let rank = DEV_241_TEST_BUNDLE_IDENTIFIERS
             .iter()
             .position(|&identifier| bundle_identifier == identifier)
             .unwrap_or(usize::MAX);
@@ -1683,7 +1684,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.40",
+            "iDared 32bit {}{}{} · Dev 2.41",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""
@@ -2947,7 +2948,7 @@ mod tests {
     }
 
     #[test]
-    fn dev_240_test_batch_is_first_in_exact_alphabetical_order() {
+    fn dev_241_test_batch_and_controls_are_first_in_exact_alphabetical_order() {
         let mut apps = vec![
             test_app("unrelated.bundle", "AAA unrelated"),
             test_app("com.yoyogames.pollushot", "Pollushot"),
@@ -2958,13 +2959,14 @@ mod tests {
             test_app("com.inmotionsoftware.Catacombs", "Catacombs"),
             test_app("com.glu.clockwork", "JumpO'Clock"),
             test_app("com.aghartastudio.project1112e01", "1112 ep.01"),
+            test_app("com.majesticsoftware.blot", "BLOT"),
             test_app("com.glu.glyder", "Glyder"),
             test_app("com.t04.app", "Demolish"),
         ];
         sort_picker_apps(&mut apps, &mut LibraryTiming::default());
         let names: Vec<&str> = apps
             .iter()
-            .take(10)
+            .take(11)
             .map(|app| app.display_name.as_str())
             .collect();
         assert_eq!(
@@ -2972,6 +2974,7 @@ mod tests {
             [
                 "1000:Find'Em",
                 "1112 ep.01",
+                "BLOT",
                 "Bungee Ball",
                 "Catacombs",
                 "Demolish",

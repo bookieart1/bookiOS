@@ -5,7 +5,7 @@
  */
 //! EAGL.
 
-use crate::dyld::{ConstantExports, HostConstant};
+use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
 use crate::frameworks::core_animation::ca_eagl_layer::{
     find_fullscreen_eagl_layer, get_pixels_vec_for_presenting, present_pixels,
 };
@@ -52,6 +52,20 @@ pub const CONSTANTS: ConstantExports = &[
         HostConstant::NSString(kEAGLColorFormatRGB565),
     ),
 ];
+
+/// Reports the EAGL implementation version. This predates the class-level API
+/// query and is used by several early OpenGL ES 1 applications during launch.
+/// Both output pointers are optional in the historical C contract.
+fn EAGLGetVersion(env: &mut Environment, major: MutPtr<u32>, minor: MutPtr<u32>) {
+    if !major.is_null() {
+        env.mem.write(major, 1);
+    }
+    if !minor.is_null() {
+        env.mem.write(minor, 0);
+    }
+}
+
+pub const FUNCTIONS: FunctionExports = &[export_c_func!(EAGLGetVersion(_, _))];
 
 type EAGLRenderingAPI = u32;
 const kEAGLRenderingAPIOpenGLES1: EAGLRenderingAPI = 1;
@@ -1011,4 +1025,25 @@ unsafe fn present_renderbuffer(env: &mut Environment, _context: id) {
     // every frame, so if it isn't rebound, every later present finds SDL's
     // renderbuffer bound, is rejected, and the screen stays black.
     gles.BindRenderbufferOES(gles11::RENDERBUFFER_OES, renderbuffer);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eagl_get_version_reports_opengles_one_and_accepts_null_outputs() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let major = env.mem.alloc_and_write(u32::MAX);
+        let minor = env.mem.alloc_and_write(u32::MAX);
+
+        EAGLGetVersion(&mut env, major, minor);
+        assert_eq!(env.mem.read(major), 1);
+        assert_eq!(env.mem.read(minor), 0);
+
+        EAGLGetVersion(&mut env, MutPtr::null(), minor);
+        EAGLGetVersion(&mut env, major, MutPtr::null());
+        assert_eq!(env.mem.read(major), 1);
+        assert_eq!(env.mem.read(minor), 0);
+    }
 }

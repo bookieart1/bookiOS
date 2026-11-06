@@ -51,6 +51,8 @@ pub struct UITableViewHostObject {
     visible_cells: Vec<id>,
     /// Cells retained by the table after leaving the visible hierarchy.
     reusable_cells: Vec<id>,
+    diagnostic_reload_logs: u8,
+    diagnostic_selection_logs: u8,
 }
 impl_HostObject_with_superclass!(UITableViewHostObject);
 impl Default for UITableViewHostObject {
@@ -64,6 +66,8 @@ impl Default for UITableViewHostObject {
             allows_selection: true,
             visible_cells: Vec::new(),
             reusable_cells: Vec::new(),
+            diagnostic_reload_logs: 0,
+            diagnostic_selection_logs: 0,
         }
     }
 }
@@ -216,10 +220,42 @@ pub const CLASSES: ClassExports = objc_classes! {
             flat_row += 1;
         }
     }
-    {
+    let (visible_count, reusable_count, should_log) = {
         let host = env.objc.borrow_mut::<UITableViewHostObject>(this);
         host.section_row_counts = section_row_counts;
         host.visible_cells = cells;
+        let should_log = host.diagnostic_reload_logs < 8;
+        if should_log {
+            host.diagnostic_reload_logs += 1;
+        }
+        (
+            host.visible_cells.len(),
+            host.reusable_cells.len(),
+            should_log,
+        )
+    };
+    if should_log {
+        let counts = env
+            .objc
+            .borrow::<UITableViewHostObject>(this)
+            .section_row_counts
+            .clone();
+        log!(
+            "UITableView bounded reload: table={:?} data-source={:?} sections={:?} total-rows={} row-height={} bounds=({}, {}, {}, {}) content-size=({}, {}) visible-cells={} reusable-cells={}",
+            this,
+            data_source,
+            counts,
+            total_rows,
+            row_height,
+            bounds.origin.x,
+            bounds.origin.y,
+            bounds.size.width,
+            bounds.size.height,
+            size.width,
+            size.height,
+            visible_count,
+            reusable_count
+        );
     }
     env.diagnostic_selector_event(
         "table-reload-end", this, data_source, "reloadData", nil, Some(total_rows as f64)
@@ -384,6 +420,29 @@ pub const CLASSES: ClassExports = objc_classes! {
     let point: CGPoint = msg![env; touch locationInView:this];
     let flat = ((point.y + offset.y) / row_height).floor() as NSInteger;
     let selected = index_path_for_flat_row(&counts, flat);
+    let should_log = {
+        let host = env.objc.borrow_mut::<UITableViewHostObject>(this);
+        let should_log = host.diagnostic_selection_logs < 24;
+        if should_log {
+            host.diagnostic_selection_logs += 1;
+        }
+        should_log
+    };
+    if should_log {
+        log!(
+            "UITableView bounded selection: table={:?} touch={:?} point=({}, {}) content-offset=({}, {}) row-height={} flat-row={} sections={:?} selected={:?}",
+            this,
+            touch,
+            point.x,
+            point.y,
+            offset.x,
+            offset.y,
+            row_height,
+            flat,
+            counts,
+            selected
+        );
+    }
     let Some((section, row)) = selected else {
         env.diagnostic_selector_event("table-selection-miss", this, nil, "touchesEnded:", touch, None);
         return;

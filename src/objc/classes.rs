@@ -1438,9 +1438,12 @@ pub(super) fn class_getInstanceMethod(
     cls: Class,
     name: SEL,
 ) -> MutPtr<method_t> {
+    let requested_class = cls;
     let mut class = cls;
     let (imp, types, host_types) = loop {
         if class == nil {
+            let selector = name.as_str(&env.mem).to_owned();
+            env.diagnostic_runtime_method_miss(requested_class, &selector);
             return Ptr::null();
         }
         let host_object: &ClassHostObject = env.objc.borrow(class);

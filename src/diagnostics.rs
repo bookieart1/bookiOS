@@ -11,7 +11,7 @@
 use crate::frameworks::foundation::ns_string;
 use crate::fs::GuestPath;
 use crate::mem::{ConstVoidPtr, Mem};
-use crate::objc::{id, ObjC};
+use crate::objc::{id, Class, ObjC};
 use crate::Environment;
 use std::time::{Duration, Instant};
 
@@ -584,6 +584,9 @@ pub struct Recorder {
     kvo_events: Ring<KvoEvent, KVO_EVENTS>,
     media_events: Ring<MediaEvent, MEDIA_EVENTS>,
     motion_events: Ring<MotionEvent, MOTION_EVENTS>,
+    /// Bounded direct logs for Objective-C runtime lookups which exhausted a
+    /// complete superclass chain without finding the requested method.
+    runtime_method_misses: u8,
     sequence: u64,
     api: u64,
     objc: u64,
@@ -642,6 +645,7 @@ impl Recorder {
             kvo_events: Ring::default(),
             media_events: Ring::default(),
             motion_events: Ring::default(),
+            runtime_method_misses: 0,
             sequence: 0,
             api: 0,
             objc: 0,
@@ -1412,6 +1416,46 @@ fn describe_object(objc: &ObjC, mem: &Mem, address: u32, include_string: bool) -
 }
 
 impl Environment {
+    /// Records enough class-hierarchy state to distinguish a genuinely absent
+    /// inherited method from a malformed guest superclass chain. This is
+    /// intentionally capped because runtime introspection can be frequent.
+    pub fn diagnostic_runtime_method_miss(&mut self, requested: Class, selector: &str) {
+        let Some(recorder) = &mut self.diagnostics else {
+            return;
+        };
+        const LIMIT: u8 = 24;
+        if recorder.runtime_method_misses >= LIMIT {
+            return;
+        }
+        recorder.runtime_method_misses += 1;
+        let ordinal = recorder.runtime_method_misses;
+
+        let mut chain = String::new();
+        let mut class = requested;
+        let mut depth = 0;
+        while class != crate::objc::nil && depth < 16 {
+            if !chain.is_empty() {
+                chain.push_str(" -> ");
+            }
+            chain.push_str(
+                self.objc
+                    .try_get_class_name(class)
+                    .unwrap_or("<invalid-class>"),
+            );
+            class = self.objc.get_superclass(class);
+            depth += 1;
+        }
+        if class != crate::objc::nil {
+            chain.push_str(" -> <truncated>");
+        }
+        echo_no_panic!(
+            "Objective-C runtime method miss {ordinal}/{LIMIT}: class={:#010x} selector={selector:?} chain={chain:?} pc={:#010x} lr={:#010x}",
+            requested.to_bits(),
+            self.cpu.regs()[15],
+            self.cpu.regs()[14]
+        );
+    }
+
     pub fn diagnostic_string_search(&mut self, haystack: u32, needle: u32, result: u32) {
         let Some(recorder) = &mut self.diagnostics else {
             return;
