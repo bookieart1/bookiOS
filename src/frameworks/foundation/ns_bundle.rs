@@ -5,7 +5,7 @@
  */
 //! `NSBundle`.
 
-use super::{ns_data, ns_string, NSUInteger};
+use super::{ns_array, ns_data, ns_string, NSUInteger};
 use crate::bundle::Bundle;
 use crate::frameworks::core_foundation::cf_bundle::{
     CFBundleCopyBundleLocalizations, CFBundleCopyPreferredLocalizationsFromArray,
@@ -130,6 +130,15 @@ pub const CLASSES: ClassExports = objc_classes! {
         env.framework_state.foundation.ns_bundle.main_bundle = Some(new);
         new
    }
+}
+
++ (id)allBundles {
+    // Framework bundles are not modeled separately. The main application is
+    // therefore the complete set of non-framework bundles currently loaded.
+    let main_bundle: id = msg![env; this mainBundle];
+    retain(env, main_bundle);
+    let bundles = ns_array::from_vec(env, vec![main_bundle]);
+    autorelease(env, bundles)
 }
 
 + (id)bundleForClass:(Class)class {
@@ -613,6 +622,23 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_bundles_contains_the_single_modeled_main_bundle() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let main: id = msg_class![env; NSBundle mainBundle];
+        let bundles: id = msg_class![env; NSBundle allBundles];
+        let count: NSUInteger = msg![env; bundles count];
+        let first: id = msg![env; bundles objectAtIndex:0u32];
+        assert_eq!(count, 1);
+        assert_eq!(first, main);
+    }
+}
 
 fn path_for_device_resource_helper(
     env: &mut Environment,

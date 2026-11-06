@@ -1250,46 +1250,42 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (CGPoint)convertPoint:(CGPoint)point
                fromView:(id)other { // UIView*
-    if other == nil {
-        let window: id = msg![env; this window];
-        assert!(window != nil);
-        return msg![env; this convertPoint:point fromView:window]
-    }
     let this_layer = env.objc.borrow::<UIViewHostObject>(this).layer;
-    let other_layer = env.objc.borrow::<UIViewHostObject>(other).layer;
+    let other_layer = if other == nil {
+        nil
+    } else {
+        env.objc.borrow::<UIViewHostObject>(other).layer
+    };
     msg![env; this_layer convertPoint:point fromLayer:other_layer]
 }
 - (CGPoint)convertPoint:(CGPoint)point
                  toView:(id)other { // UIView*
-    if other == nil {
-        let window: id = msg![env; this window];
-        assert!(window != nil);
-        return msg![env; this convertPoint:point toView:window]
-    }
     let this_layer = env.objc.borrow::<UIViewHostObject>(this).layer;
-    let other_layer = env.objc.borrow::<UIViewHostObject>(other).layer;
+    let other_layer = if other == nil {
+        nil
+    } else {
+        env.objc.borrow::<UIViewHostObject>(other).layer
+    };
     msg![env; this_layer convertPoint:point toLayer:other_layer]
 }
 - (CGRect)convertRect:(CGRect)rect
              fromView:(id)other { // UIView*
-    if other == nil {
-        let window: id = msg![env; this window];
-        assert!(window != nil);
-        return msg![env; this convertRect:rect fromView:window]
-    }
     let this_layer = env.objc.borrow::<UIViewHostObject>(this).layer;
-    let other_layer = env.objc.borrow::<UIViewHostObject>(other).layer;
+    let other_layer = if other == nil {
+        nil
+    } else {
+        env.objc.borrow::<UIViewHostObject>(other).layer
+    };
     msg![env; this_layer convertRect:rect fromLayer:other_layer]
 }
 - (CGRect)convertRect:(CGRect)rect
                toView:(id)other { // UIView*
-    if other == nil {
-        let window: id = msg![env; this window];
-        assert!(window != nil);
-        return msg![env; this convertRect:rect toView:window]
-    }
     let this_layer = env.objc.borrow::<UIViewHostObject>(this).layer;
-    let other_layer = env.objc.borrow::<UIViewHostObject>(other).layer;
+    let other_layer = if other == nil {
+        nil
+    } else {
+        env.objc.borrow::<UIViewHostObject>(other).layer
+    };
     msg![env; this_layer convertRect:rect toLayer:other_layer]
 }
 
@@ -1418,3 +1414,56 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detached_view_converts_points_and_rects_to_and_from_window_coordinates() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let parent_frame = CGRect {
+            origin: CGPoint { x: 10.0, y: 20.0 },
+            size: CGSize {
+                width: 100.0,
+                height: 100.0,
+            },
+        };
+        let child_frame = CGRect {
+            origin: CGPoint { x: 3.0, y: 4.0 },
+            size: CGSize {
+                width: 40.0,
+                height: 40.0,
+            },
+        };
+        let parent: id = msg_class![env; UIView alloc];
+        let parent: id = msg![env; parent initWithFrame:parent_frame];
+        let child: id = msg_class![env; UIView alloc];
+        let child: id = msg![env; child initWithFrame:child_frame];
+        () = msg![env; parent addSubview:child];
+
+        assert_eq!(msg![env; child window], nil);
+        let local_point = CGPoint { x: 1.0, y: 2.0 };
+        let window_point: CGPoint = msg![env; child convertPoint:local_point toView:nil];
+        assert_eq!(window_point, CGPoint { x: 14.0, y: 26.0 });
+        let point_round_trip: CGPoint = msg![env; child convertPoint:window_point fromView:nil];
+        assert_eq!(point_round_trip, local_point);
+
+        let local_rect = CGRect {
+            origin: local_point,
+            size: CGSize {
+                width: 5.0,
+                height: 6.0,
+            },
+        };
+        let window_rect: CGRect = msg![env; child convertRect:local_rect toView:nil];
+        assert_eq!(window_rect.origin, window_point);
+        assert_eq!(window_rect.size, local_rect.size);
+        let rect_round_trip: CGRect = msg![env; child convertRect:window_rect fromView:nil];
+        assert_eq!(rect_round_trip, local_rect);
+
+        release(env, child);
+        release(env, parent);
+    }
+}

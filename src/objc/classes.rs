@@ -1220,6 +1220,17 @@ pub(super) fn objc_getClass(env: &mut Environment, name: ConstPtr<u8>) -> id {
         .unwrap_or_else(|| panic!("objc_getClass() for unimplemented class {name_str}"))
 }
 
+pub(super) fn objc_getMetaClass(env: &mut Environment, name: ConstPtr<u8>) -> Class {
+    if name.is_null() {
+        return nil;
+    }
+    let name = env.mem.cstr_at_utf8(name).unwrap().to_owned();
+    let Some(class) = env.objc.lookup_class(&name, &mut env.mem) else {
+        return nil;
+    };
+    ObjC::read_isa(class, &env.mem)
+}
+
 pub(super) fn class_getSuperclass(env: &mut Environment, cls: Class) -> Class {
     if cls == nil {
         nil

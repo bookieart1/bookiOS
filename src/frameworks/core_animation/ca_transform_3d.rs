@@ -154,6 +154,14 @@ fn CATransform3DMakeRotation(
     CATransform3D::make_rotation(angle, x, y, z)
 }
 
+fn CATransform3DConcat(
+    _env: &mut Environment,
+    a: CATransform3D,
+    b: CATransform3D,
+) -> CATransform3D {
+    CATransform3D::concat(a, b)
+}
+
 fn CATransform3DScale(
     _env: &mut Environment,
     t: CATransform3D,
@@ -199,6 +207,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CATransform3DGetAffineTransform(_)),
     export_c_func!(CATransform3DMakeScale(_, _, _)),
     export_c_func!(CATransform3DMakeRotation(_, _, _, _)),
+    export_c_func!(CATransform3DConcat(_, _)),
     export_c_func!(CATransform3DScale(_, _, _, _)),
     export_c_func!(CATransform3DTranslate(_, _, _, _)),
     export_c_func!(CATransform3DRotate(_, _, _, _, _)),
@@ -253,6 +262,17 @@ mod tests {
             CATransform3D::from(CGAffineTransformIdentity),
         );
         assert_eq!(made, rotated);
+    }
+
+    #[test]
+    fn dev_240_concat_export_matches_existing_matrix_composition() {
+        let a = CATransform3D::make_translation(10.0, 20.0, 30.0);
+        let b = CATransform3D::make_scale(2.0, 3.0, 4.0);
+        let mut env = Environment::new_fake_for_test();
+        assert_eq!(
+            CATransform3DConcat(&mut env, a, b),
+            CATransform3D::concat(a, b)
+        );
     }
 
     #[test]

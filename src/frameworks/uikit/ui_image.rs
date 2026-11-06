@@ -75,6 +75,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 + (id)imageNamed:(id)name { // NSString*
+    if name == nil {
+        return nil;
+    }
     // TODO: figure out whether this is actually correct in all cases
     let bundle: id = msg_class![env; NSBundle mainBundle];
     let path: id = msg![env; bundle pathForResource:name ofType:nil];
@@ -460,3 +463,16 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(UIImagePNGRepresentation(_)),
     export_c_func!(UIImageWriteToSavedPhotosAlbum(_, _, _, _)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_named_nil_returns_nil_without_touching_the_bundle() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let image: id = msg_class![&mut env; UIImage imageNamed:nil];
+        assert_eq!(image, nil);
+        assert!(State::get(&env).cached_images.is_empty());
+    }
+}

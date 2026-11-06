@@ -169,6 +169,13 @@ pub fn lookup_imp_for_class(
     receiver: id,
     is_super: bool,
 ) -> Option<IMP> {
+    let unimplemented_introspection_fallback =
+        if selector.as_str(&env.mem) == "instancesRespondToSelector:" {
+            let ns_object = env.objc.get_known_class("NSObject", &mut env.mem);
+            Some(ObjC::read_isa(ns_object, &env.mem))
+        } else {
+            None
+        };
     let mut class = orig_class;
     loop {
         if class == nil {
@@ -235,6 +242,14 @@ pub fn lookup_imp_for_class(
             is_metaclass,
         }) = host_object.as_any().downcast_ref()
         {
+            // Class-introspection queries are valid even when the represented
+            // framework class itself is not implemented. Let NSObject answer
+            // this one inherited query; all other use of the placeholder keeps
+            // the existing fail-fast behavior.
+            if let Some(fallback) = unimplemented_introspection_fallback.filter(|_| is_metaclass) {
+                class = fallback;
+                continue;
+            }
             panic!(
                 "Class \"{}\" ({:?}) is unimplemented. Lookup to {} method \"{}\".",
                 name,
@@ -806,5 +821,19 @@ mod tests {
         release(env, label);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);
+    }
+
+    #[test]
+    fn unimplemented_class_allows_safe_instance_method_introspection() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let placeholder = env
+            .objc
+            .link_class("UIPopoverController", false, &mut env.mem);
+        let absent = env
+            .objc
+            .register_host_selector("initWithContentViewController".to_owned(), &mut env.mem);
+        let responds: bool = msg![env; placeholder instancesRespondToSelector:absent];
+        assert!(!responds);
     }
 }

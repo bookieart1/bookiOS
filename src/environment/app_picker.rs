@@ -815,27 +815,20 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
     // Put the current focused device-test batch first, in alphabetical order,
     // so a full round can be exercised without repeatedly paging through the
     // library. Everything else remains alphabetical.
-    // Normalized display names, bundle identifiers and archive filenames cover
-    // the mixed naming in this batch and keep every requested test reachable
-    // even when an archive's display-name metadata differs from its filename.
-    const DEV_233_TEST_NAMES: &[&str] = &[
-        "1112EP01",
-        "BOUNCYMOUSE",
-        "BUNGEEBALL",
-        "CRAZYGOLF",
-        "DOODLEGRUB",
-        "FLIPSESCAPE",
-        "HIGHWAYRIDER",
-        "ISTUNTRELOADEDPRO",
-        "COMWALABERJELLYCAR",
-        "JUNKJACKRETRO",
-        "KICKTHEBUDDY",
-        "MXMAYHEM",
-        "RRACINGGTI",
-        "REALRACING",
-        "SUPERFALL",
-        "TIKITOTEMSPREMIUM",
-        "TOWERBLOXX",
+    // Exact bundle identifiers avoid prefix collisions such as Glyder/Glyder 2
+    // and keep the focused device-test batch deterministic even when filenames
+    // or localized display names differ.
+    const DEV_240_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
+        "COMGLUTHOUSAND",
+        "COMAGHARTASTUDIOPROJECT1112E01",
+        "COMDIGITALPRUNESBUNGEEBALL2PRO",
+        "COMINMOTIONSOFTWARECATACOMBS",
+        "COMT04APP",
+        "COMGLUGLYDER",
+        "COMGLUGLYDER2",
+        "COMGLUCLOCKWORK",
+        "COMYOYOGAMESKAROSHI",
+        "COMYOYOGAMESPOLLUSHOT",
     ];
     let started = Instant::now();
     apps.sort_by_key(|app| {
@@ -845,21 +838,10 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
                 .filter(|character| character.is_ascii_alphanumeric())
                 .collect()
         };
-        let display_name = normalized(&app.display_name);
         let bundle_identifier = normalized(&app.bundle_identifier);
-        let filename = normalized(
-            app.path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or_default(),
-        );
-        let rank = DEV_233_TEST_NAMES
+        let rank = DEV_240_TEST_BUNDLE_IDENTIFIERS
             .iter()
-            .position(|&name| {
-                [&display_name, &bundle_identifier, &filename]
-                    .into_iter()
-                    .any(|identity| identity == name || identity.starts_with(name))
-            })
+            .position(|&identifier| bundle_identifier == identifier)
             .unwrap_or(usize::MAX);
         (rank, app.display_name.to_uppercase())
     });
@@ -1701,7 +1683,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.39",
+            "iDared 32bit {}{}{} · Dev 2.40",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""
@@ -2961,6 +2943,44 @@ mod tests {
         assert_eq!(
             picker_compatibility(&test_app("unknown.bundle", "New Game")),
             "needsWork"
+        );
+    }
+
+    #[test]
+    fn dev_240_test_batch_is_first_in_exact_alphabetical_order() {
+        let mut apps = vec![
+            test_app("unrelated.bundle", "AAA unrelated"),
+            test_app("com.yoyogames.pollushot", "Pollushot"),
+            test_app("com.glu.glyder2", "Glyder2"),
+            test_app("com.digitalprunes.BungeeBall2Pro", "Bungee Ball"),
+            test_app("com.glu.thousand", "1000:Find'Em"),
+            test_app("com.yoyogames.karoshi", "Karoshi"),
+            test_app("com.inmotionsoftware.Catacombs", "Catacombs"),
+            test_app("com.glu.clockwork", "JumpO'Clock"),
+            test_app("com.aghartastudio.project1112e01", "1112 ep.01"),
+            test_app("com.glu.glyder", "Glyder"),
+            test_app("com.t04.app", "Demolish"),
+        ];
+        sort_picker_apps(&mut apps, &mut LibraryTiming::default());
+        let names: Vec<&str> = apps
+            .iter()
+            .take(10)
+            .map(|app| app.display_name.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "1000:Find'Em",
+                "1112 ep.01",
+                "Bungee Ball",
+                "Catacombs",
+                "Demolish",
+                "Glyder",
+                "Glyder2",
+                "JumpO'Clock",
+                "Karoshi",
+                "Pollushot",
+            ]
         );
     }
 

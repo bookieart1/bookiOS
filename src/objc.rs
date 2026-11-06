@@ -51,8 +51,8 @@ use classes::{
     class_getInstanceMethod, class_getInstanceSize, class_getMethodImplementation,
     class_getProperty, class_getSuperclass, class_isMetaClass, class_replaceMethod,
     method_exchangeImplementations, method_getImplementation, method_getTypeEncoding,
-    method_setImplementation, objc_getClass, property_getAttributes, property_getName,
-    protocol_conformsToProtocol, ClassHostObject, FakeClass, UnimplementedClass,
+    method_setImplementation, objc_getClass, objc_getMetaClass, property_getAttributes,
+    property_getName, protocol_conformsToProtocol, ClassHostObject, FakeClass, UnimplementedClass,
 };
 pub(crate) use messages::objc_msgSend;
 use messages::{
@@ -309,6 +309,7 @@ const FUNCTIONS: FunctionExports = &[
     export_c_func!(objc_msgSendSuper2(_, _)),
     export_c_func!(objc_msgSendSuper2_stret(_, _, _)),
     export_c_func!(objc_getClass(_)),
+    export_c_func!(objc_getMetaClass(_)),
     export_c_func!(objc_getProperty(_, _, _, _)),
     export_c_func!(objc_setProperty(_, _, _, _, _, _)),
     export_c_func!(objc_copyStruct(_, _, _, _, _)),
@@ -339,5 +340,20 @@ mod dev_239_tests {
         assert!(!class_isMetaClass(&mut env, nil));
         assert!(!class_isMetaClass(&mut env, class));
         assert!(class_isMetaClass(&mut env, metaclass));
+    }
+
+    #[test]
+    fn dev_240_objc_get_meta_class_returns_registered_metaclass_or_nil() {
+        let mut env = Environment::new_fake_for_test();
+        let known = env.mem.alloc_and_write_cstr(b"NSObject").cast_const();
+        let unknown = env
+            .mem
+            .alloc_and_write_cstr(b"DefinitelyUnknownClass")
+            .cast_const();
+
+        let metaclass = objc_getMetaClass(&mut env, known);
+        assert!(class_isMetaClass(&mut env, metaclass));
+        assert_eq!(objc_getMetaClass(&mut env, unknown), nil);
+        assert_eq!(objc_getMetaClass(&mut env, Ptr::null()), nil);
     }
 }

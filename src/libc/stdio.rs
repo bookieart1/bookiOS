@@ -11,7 +11,7 @@ use super::posix_io::{
 };
 use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
 use crate::fs::GuestPath;
-use crate::libc::errno::{get_errno, set_errno, EBUSY, EEXIST};
+use crate::libc::errno::{get_errno, set_errno, EBUSY, EEXIST, EINVAL};
 use crate::libc::string::strlen;
 use crate::mem::{ConstPtr, ConstVoidPtr, GuestUSize, Mem, MutPtr, MutVoidPtr, Ptr, SafeRead};
 use crate::Environment;
@@ -621,6 +621,36 @@ fn setbuf(env: &mut Environment, file_ptr: MutPtr<FILE>, buf: ConstPtr<u8>) {
     );
 }
 
+const _IOFBF: i32 = 0;
+const _IOLBF: i32 = 1;
+const _IONBF: i32 = 2;
+
+fn setvbuf(
+    env: &mut Environment,
+    file_ptr: MutPtr<FILE>,
+    _buf: MutPtr<u8>,
+    mode: i32,
+    size: GuestUSize,
+) -> i32 {
+    _touchHLE_check_file_object_lock(env, file_ptr);
+    if !matches!(mode, _IOFBF | _IOLBF | _IONBF) {
+        set_errno(env, EINVAL);
+        return -1;
+    }
+
+    // touchHLE's FILE implementation performs I/O directly and has no hidden
+    // stdio buffer to configure. Accept the standard policy request so callers
+    // observe the historical API contract without changing stream contents.
+    set_errno(env, 0);
+    log_dbg!(
+        "setvbuf({:?}, mode {}, size {}) accepted by direct-I/O FILE model",
+        file_ptr,
+        mode,
+        size
+    );
+    0
+}
+
 fn tmpfile(env: &mut Environment) -> MutPtr<FILE> {
     // TODO: use `/tmp` instead of app specific tmp location
     let tmp_dir = env.fs.home_directory().join("tmp");
@@ -774,6 +804,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(putchar(_)),
     export_c_func!(remove(_)),
     export_c_func!(setbuf(_, _)),
+    export_c_func!(setvbuf(_, _, _, _)),
     export_c_func!(tmpfile()),
     // POSIX-specific functions
     export_c_func!(fileno(_)),
@@ -781,3 +812,21 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(ftrylockfile(_)),
     export_c_func!(funlockfile(_)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setvbuf_accepts_standard_modes_and_rejects_invalid_mode() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let stream = env.mem.alloc_and_write(FILE { fd: STDOUT_FILENO });
+        let buffer: MutPtr<u8> = env.mem.alloc(32).cast();
+
+        assert_eq!(setvbuf(&mut env, stream, buffer, _IOFBF, 32), 0);
+        assert_eq!(setvbuf(&mut env, stream, Ptr::null(), _IOLBF, 0), 0);
+        assert_eq!(setvbuf(&mut env, stream, Ptr::null(), _IONBF, 0), 0);
+        assert_eq!(setvbuf(&mut env, stream, Ptr::null(), 99, 0), -1);
+        assert_eq!(get_errno(&mut env), EINVAL);
+    }
+}

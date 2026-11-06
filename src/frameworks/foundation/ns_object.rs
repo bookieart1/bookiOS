@@ -227,7 +227,11 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 + (bool)instancesRespondToSelector:(SEL)selector {
-    env.objc.class_has_method(this, selector)
+    if env.objc.is_unimplemented_class(this) || env.objc.is_fake_class(this) {
+        false
+    } else {
+        env.objc.class_has_method(this, selector)
+    }
 }
 
 + (())cancelPreviousPerformRequestsWithTarget:(id)target selector:(SEL)selector object:(id)arg {
