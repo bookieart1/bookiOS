@@ -602,7 +602,10 @@ pub struct Recorder {
     kvo_events: Ring<KvoEvent, KVO_EVENTS>,
     media_events: Ring<MediaEvent, MEDIA_EVENTS>,
     motion_events: Ring<MotionEvent, MOTION_EVENTS>,
-    campaign_events: Ring<CampaignEvent, CAMPAIGN_EVENTS>,
+    // Keep the campaign's full bounded history without making every Recorder
+    // carry the ring inline. Existing diagnostics enforce a strict 512 KiB
+    // Recorder ceiling because this object is present for every guest run.
+    campaign_events: Box<Ring<CampaignEvent, CAMPAIGN_EVENTS>>,
     /// Bounded direct logs for Objective-C runtime lookups which exhausted a
     /// complete superclass chain without finding the requested method.
     runtime_method_misses: u8,
@@ -664,7 +667,7 @@ impl Recorder {
             kvo_events: Ring::default(),
             media_events: Ring::default(),
             motion_events: Ring::default(),
-            campaign_events: Ring::default(),
+            campaign_events: Box::default(),
             runtime_method_misses: 0,
             sequence: 0,
             api: 0,
