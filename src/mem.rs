@@ -38,6 +38,19 @@ pub const fn guest_size_of<T: Sized>() -> GuestUSize {
 /// Internal type for representing an untyped virtual address.
 type VAddr = GuestUSize;
 
+const DIAGNOSTIC_GUEST_WRITES: usize = 128;
+
+#[derive(Clone, Copy, Default)]
+struct DiagnosticGuestWrite {
+    elapsed_ms: u128,
+    thread: usize,
+    address: u32,
+    size: u8,
+    value: u64,
+    raw_core_pc: u32,
+    lr: u32,
+}
+
 /// Pointer type for guest memory, or the "guest pointer" type.
 ///
 /// The `MUT` type parameter determines whether this is mutable or not.
@@ -264,6 +277,12 @@ pub struct Mem {
     /// Diagnostic copies only; never consulted to allow or reject memory
     /// access.
     pub(crate) object_history: Option<Box<object_history::ObjectHistory>>,
+    diagnostic_watch_addresses: [u32; 8],
+    diagnostic_watch_count: usize,
+    diagnostic_guest_writes: [DiagnosticGuestWrite; DIAGNOSTIC_GUEST_WRITES],
+    diagnostic_guest_writes_written: usize,
+    diagnostic_current_thread: usize,
+    diagnostic_started: std::time::Instant,
 }
 
 impl Drop for Mem {
@@ -317,6 +336,82 @@ impl Mem {
             heap_allocator: None,
             zero_memory_on_free: true,
             object_history: None,
+            diagnostic_watch_addresses: [0; 8],
+            diagnostic_watch_count: 0,
+            diagnostic_guest_writes: [DiagnosticGuestWrite::default(); DIAGNOSTIC_GUEST_WRITES],
+            diagnostic_guest_writes_written: 0,
+            diagnostic_current_thread: 0,
+            diagnostic_started: std::time::Instant::now(),
+        }
+    }
+
+    pub fn configure_guest_write_watches(&mut self, addresses: &[u32]) {
+        self.diagnostic_watch_count = addresses.len().min(self.diagnostic_watch_addresses.len());
+        self.diagnostic_watch_addresses[..self.diagnostic_watch_count]
+            .copy_from_slice(&addresses[..self.diagnostic_watch_count]);
+    }
+
+    pub fn set_diagnostic_current_thread(&mut self, thread: usize) {
+        self.diagnostic_current_thread = thread;
+    }
+
+    pub fn note_diagnostic_guest_write(
+        &mut self,
+        address: u32,
+        size: u8,
+        value: u64,
+        raw_core_pc: u32,
+        lr: u32,
+    ) {
+        let end = u64::from(address) + u64::from(size);
+        if !self.diagnostic_watch_addresses[..self.diagnostic_watch_count]
+            .iter()
+            .any(|&watched| u64::from(watched) >= u64::from(address) && u64::from(watched) < end)
+        {
+            return;
+        }
+        let event = DiagnosticGuestWrite {
+            elapsed_ms: self.diagnostic_started.elapsed().as_millis(),
+            thread: self.diagnostic_current_thread,
+            address,
+            size,
+            value,
+            raw_core_pc,
+            lr,
+        };
+        self.diagnostic_guest_writes
+            [self.diagnostic_guest_writes_written % DIAGNOSTIC_GUEST_WRITES] = event;
+        self.diagnostic_guest_writes_written =
+            self.diagnostic_guest_writes_written.saturating_add(1);
+    }
+
+    pub fn dump_diagnostic_guest_writes(&self) {
+        if self.diagnostic_watch_count == 0 {
+            return;
+        }
+        echo_no_panic!(
+            "level3 watched guest writes: addresses={:08x?} newest={} total={} (raw-core-pc is the CPU core's store-time PC; direct guest data access is disabled for this diagnostic)",
+            &self.diagnostic_watch_addresses[..self.diagnostic_watch_count],
+            DIAGNOSTIC_GUEST_WRITES,
+            self.diagnostic_guest_writes_written
+        );
+        let count = self
+            .diagnostic_guest_writes_written
+            .min(DIAGNOSTIC_GUEST_WRITES);
+        let start = self.diagnostic_guest_writes_written.saturating_sub(count);
+        for index in start..self.diagnostic_guest_writes_written {
+            let event = self.diagnostic_guest_writes[index % DIAGNOSTIC_GUEST_WRITES];
+            echo_no_panic!(
+                "level3 guest-write #{} ms={} tid={} address={:#010x} size={} value={:#018x} raw-core-pc={:#010x} lr={:#010x}",
+                index + 1,
+                event.elapsed_ms,
+                event.thread,
+                event.address,
+                event.size,
+                event.value,
+                event.raw_core_pc,
+                event.lr
+            );
         }
     }
 
@@ -774,5 +869,39 @@ impl Mem {
         });
 
         (vm, heap)
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_write_tests {
+    use super::*;
+
+    #[test]
+    fn configured_guest_write_watch_is_overlap_aware_and_bounded() {
+        let mut mem = Mem::new();
+        mem.configure_guest_write_watches(&[0x334f8c]);
+        mem.set_diagnostic_current_thread(7);
+        mem.note_diagnostic_guest_write(0x334f88, 4, 1, 0x1000, 0x2001);
+        assert_eq!(mem.diagnostic_guest_writes_written, 0);
+        mem.note_diagnostic_guest_write(0x334f8a, 4, 0x1122, 0x1004, 0x2001);
+        assert_eq!(mem.diagnostic_guest_writes_written, 1);
+        let event = mem.diagnostic_guest_writes[0];
+        assert_eq!(event.thread, 7);
+        assert_eq!(event.address, 0x334f8a);
+        assert_eq!(event.value, 0x1122);
+
+        for value in 0..(DIAGNOSTIC_GUEST_WRITES + 3) {
+            mem.note_diagnostic_guest_write(
+                0x334f8c,
+                4,
+                value as u64,
+                0x3000 + value as u32 * 4,
+                0x4001,
+            );
+        }
+        assert_eq!(
+            mem.diagnostic_guest_writes_written,
+            DIAGNOSTIC_GUEST_WRITES + 4
+        );
     }
 }

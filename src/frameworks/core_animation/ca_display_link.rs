@@ -53,6 +53,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     host_object.target = target;
     host_object.selector = Some(sel);
     host_object.ns_timer = ns_timer;
+    let diagnostic_detail = format!("create target,selector={},timer,display-link", sel.as_str(&env.mem));
+    env.diagnostic_campaign_event(
+        "display-link",
+        &diagnostic_detail,
+        [target.to_bits(), 0, ns_timer.to_bits(), display_link.to_bits(), 0, 0, 0, 0],
+    );
     log_dbg!("[CADisplayLink displayLinkWithTarget:{:?} selector:{}] => {:?}", target, sel.as_str(&env.mem), display_link);
     autorelease(env, display_link)
 }
@@ -83,6 +89,11 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())addToRunLoop:(id)run_loop forMode:(NSRunLoopMode)mode {
     log_dbg!("[(CADisplayLink*){:?} addToRunLoop:{:?} forMode:{:?}]", this, run_loop, mode);
     let ns_timer = env.objc.borrow::<CADisplayLinkHostObject>(this).ns_timer;
+    env.diagnostic_campaign_event(
+        "display-link",
+        "schedule display-link,run-loop,mode,timer",
+        [this.to_bits(), run_loop.to_bits(), mode.to_bits(), ns_timer.to_bits(), 0, 0, 0, 0],
+    );
     () = msg![env; run_loop addTimer:ns_timer forMode:mode];
 }
 
@@ -108,11 +119,22 @@ pub const CLASSES: ClassExports = objc_classes! {
     } = env.objc.borrow::<CADisplayLinkHostObject>(this);
     assert_eq!(ns_timer, timer);
     if paused {
+        env.diagnostic_campaign_event(
+            "display-link",
+            "timer-fired-while-paused",
+            [this.to_bits(), target.to_bits(), timer.to_bits(), 0, 0, 0, 0, 0],
+        );
         // This could be improved, as we're still running the timer,
         // but just not passing the actual call.
         return;
     }
     let timestamp = CACurrentMediaTime(env);
+    let diagnostic_detail = format!("timer-fire target,selector={},timer,display-link", selector.unwrap().as_str(&env.mem));
+    env.diagnostic_campaign_event(
+        "display-link",
+        &diagnostic_detail,
+        [target.to_bits(), 0, timer.to_bits(), this.to_bits(), timestamp.to_bits() as u32, (timestamp.to_bits() >> 32) as u32, 0, 0],
+    );
     env.objc.borrow_mut::<CADisplayLinkHostObject>(this).timestamp = timestamp;
     // Signature is `- (void) selector:(CADisplayLink *)sender;`
     () = msg_send(env, (target, selector.unwrap(), this));

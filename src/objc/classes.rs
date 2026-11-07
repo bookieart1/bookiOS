@@ -237,6 +237,13 @@ pub struct ClassTemplate {
 /// See also [crate::dyld::ConstantExports] and [crate::dyld::FunctionExports].
 pub type ClassExports = &'static [(&'static str, ClassTemplate)];
 
+const DIAGNOSTIC_UIDOCUMENT_TEMPLATE: ClassTemplate = ClassTemplate {
+    name: "UIDocument",
+    superclass: Some("NSObject"),
+    class_methods: &[],
+    instance_methods: &[],
+};
+
 #[doc(hidden)]
 #[macro_export]
 macro_rules! _objc_superclass {
@@ -644,6 +651,35 @@ impl ObjC {
         }
         Self::find_template(name)
             .map(|_| self.link_class_inner(name, /* is_metaclass: */ false, mem, false))
+    }
+
+    /// Isolated Swordigo availability experiment. This intentionally exposes
+    /// only an empty NSObject-derived class and is never part of normal UIKit
+    /// class lookup. It must not be interpreted as UIDocument functionality.
+    pub fn register_diagnostic_uidocument(&mut self, mem: &mut Mem) -> Class {
+        if let Some(class) = self.get_class("UIDocument", false, mem) {
+            return class;
+        }
+
+        let superclass = self.get_known_class("NSObject", mem);
+        let superclass_meta = self.link_class("NSObject", true, mem);
+        let class_host_object = Box::new(ClassHostObject::from_template(
+            &DIAGNOSTIC_UIDOCUMENT_TEMPLATE,
+            false,
+            superclass,
+            self,
+        ));
+        let metaclass_host_object = Box::new(ClassHostObject::from_template(
+            &DIAGNOSTIC_UIDOCUMENT_TEMPLATE,
+            true,
+            superclass_meta,
+            self,
+        ));
+        let isa = self.link_class("NSObject", true, mem);
+        let metaclass = self.alloc_static_object(isa, metaclass_host_object, mem);
+        let class = self.alloc_static_object(metaclass, class_host_object, mem);
+        self.classes.insert("UIDocument".to_string(), class);
+        class
     }
 
     fn link_class_inner(
@@ -1286,6 +1322,22 @@ mod dev_244_tests {
         env.mem.free(missing.cast());
         env.mem.free(name.cast());
         env.mem.free(raw_handle.cast());
+    }
+
+    #[test]
+    fn swordigo_uidocument_intervention_registers_only_an_empty_nsobject_subclass() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        assert!(env.objc.lookup_class("UIDocument", &mut env.mem).is_none());
+        let class = env.objc.register_diagnostic_uidocument(&mut env.mem);
+        assert_eq!(
+            env.objc.lookup_class("UIDocument", &mut env.mem),
+            Some(class)
+        );
+        let expected_superclass = env.objc.get_known_class("NSObject", &mut env.mem);
+        let host = env.objc.borrow::<ClassHostObject>(class);
+        assert_eq!(host.name, "UIDocument");
+        assert_eq!(host.superclass, expected_superclass);
+        assert!(host.methods.is_empty());
     }
 }
 

@@ -466,6 +466,11 @@ pub(super) fn UIApplicationMain(
     {
         let pool: id = msg_class![env; NSAutoreleasePool new];
         let delegate: id = msg![env; ui_application delegate];
+        env.diagnostic_campaign_event(
+            "application-lifecycle",
+            "launch-delegate-entry application,delegate",
+            [ui_application.to_bits(), delegate.to_bits(), 0, 0, 0, 0, 0, 0],
+        );
         // iOS 3+ apps usually use application:didFinishLaunchingWithOptions:,
         // and it seems to be prioritized over applicationDidFinishLaunching:.
         if env.objc.object_has_method_named(
@@ -482,6 +487,11 @@ pub(super) fn UIApplicationMain(
         ) {
             () = msg![env; delegate applicationDidFinishLaunching:ui_application];
         }
+        env.diagnostic_campaign_event(
+            "application-lifecycle",
+            "launch-delegate-return application,delegate",
+            [ui_application.to_bits(), delegate.to_bits(), 0, 0, 0, 0, 0, 0],
+        );
 
         let center: id = msg_class![env; NSNotificationCenter defaultCenter];
         let notif_name = get_static_str(env, UIApplicationDidFinishLaunchingNotification);

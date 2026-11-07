@@ -53,6 +53,20 @@ pub fn CGBitmapContextCreate(
     color_space: CGColorSpaceRef,
     bitmap_info: u32,
 ) -> CGContextRef {
+    env.diagnostic_campaign_event(
+        "bitmap-context",
+        "CGBitmapContextCreate arguments: data,width,height,bpc,row-bytes,color-space,bitmap-info",
+        [
+            data.to_bits(),
+            width,
+            height,
+            bits_per_component,
+            bytes_per_row,
+            color_space.to_bits(),
+            bitmap_info,
+            0,
+        ],
+    );
     // Core Graphics rejects degenerate bitmap storage. In particular, it must
     // not derive a stride or touch a caller-owned buffer for zero geometry.
     if width == 0 || height == 0 {

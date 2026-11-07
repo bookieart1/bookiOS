@@ -51,12 +51,36 @@ fn NSStringFromProtocol(env: &mut Environment, protocol: ConstPtr<GuestProtocol>
 
 fn NSClassFromString(env: &mut Environment, string: id) -> Class {
     if string == nil {
+        env.diagnostic_campaign_event("class-lookup", "NSClassFromString:nil", [0; 8]);
         return nil;
     }
     // TODO: avoid copy?
-    let string = ns_string::to_rust_string(env, string);
+    let requested = ns_string::to_rust_string(env, string);
+    let previously_registered = env
+        .objc
+        .all_classes()
+        .any(|(name, _)| name == &requested);
+    let result = env.objc.lookup_class(&requested, &mut env.mem).unwrap_or(nil);
+    let detail = format!(
+        "NSClassFromString request={requested:?} registered-before={previously_registered} result={:#010x}",
+        result.to_bits()
+    );
+    env.diagnostic_campaign_event(
+        "class-lookup",
+        &detail,
+        [
+            string.to_bits(),
+            result.to_bits(),
+            u32::from(previously_registered),
+            0,
+            0,
+            0,
+            0,
+            0,
+        ],
+    );
 
-    env.objc.lookup_class(&string, &mut env.mem).unwrap_or(nil)
+    result
 }
 
 #[cfg(test)]

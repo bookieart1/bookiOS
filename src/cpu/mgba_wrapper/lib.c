@@ -123,7 +123,8 @@ static void store32(struct ARMCore *cpu, uint32_t address, int32_t value,
     memcpy(direct, &v, sizeof(v));
     return;
   }
-  if (touchHLE_cpu_write_u32(wrapper_of(cpu)->mem, address, (uint32_t)value)) {
+  if (touchHLE_cpu_write_u32(wrapper_of(cpu)->mem, address, (uint32_t)value,
+                             cpu->gprs[ARM_PC], cpu->gprs[ARM_LR])) {
     halt(cpu, RESULT_MEMORY_ERROR);
   }
 }
@@ -137,7 +138,8 @@ static void store16(struct ARMCore *cpu, uint32_t address, int16_t value,
     memcpy(direct, &v, sizeof(v));
     return;
   }
-  if (touchHLE_cpu_write_u16(wrapper_of(cpu)->mem, address, (uint16_t)value)) {
+  if (touchHLE_cpu_write_u16(wrapper_of(cpu)->mem, address, (uint16_t)value,
+                             cpu->gprs[ARM_PC], cpu->gprs[ARM_LR])) {
     halt(cpu, RESULT_MEMORY_ERROR);
   }
 }
@@ -151,7 +153,8 @@ static void store8(struct ARMCore *cpu, uint32_t address, int8_t value,
     memcpy(direct, &v, sizeof(v));
     return;
   }
-  if (touchHLE_cpu_write_u8(wrapper_of(cpu)->mem, address, (uint8_t)value)) {
+  if (touchHLE_cpu_write_u8(wrapper_of(cpu)->mem, address, (uint8_t)value,
+                            cpu->gprs[ARM_PC], cpu->gprs[ARM_LR])) {
     halt(cpu, RESULT_MEMORY_ERROR);
   }
 }

@@ -31,10 +31,41 @@ pub enum Button {
     LeftShoulder,
 }
 
+/// Selects the bounded, package-focused Level 3 provenance probes. These are
+/// deliberately separate from the general flight recorder: ordinary apps do
+/// not pay for the focused campaign, and the Swordigo class-availability
+/// experiment cannot be confused with passive observation.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub enum DiagnosticCampaign {
+    #[default]
+    Off,
+    Level3Provenance,
+    SwordigoUIDocument,
+}
+
+impl DiagnosticCampaign {
+    pub fn is_enabled(self) -> bool {
+        self != Self::Off
+    }
+
+    pub fn is_intervention(self) -> bool {
+        self == Self::SwordigoUIDocument
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Level3Provenance => "level3-provenance",
+            Self::SwordigoUIDocument => "swordigo-uidocument",
+        }
+    }
+}
+
 /// Struct containing all user-configurable options.
 #[derive(Clone)]
 pub struct Options {
     pub diagnostics: bool,
+    pub diagnostic_campaign: DiagnosticCampaign,
     pub diagnostic_watch_addresses: Vec<u32>,
     pub fullscreen: bool,
     pub device_family: Option<DeviceFamily>,
@@ -100,6 +131,7 @@ impl Default for Options {
             // Keep the bounded survey recorder for every app. An explicit
             // --diagnostics=off remains available for controlled comparisons.
             diagnostics: true,
+            diagnostic_campaign: DiagnosticCampaign::Off,
             diagnostic_watch_addresses: Vec::new(),
         }
     }
@@ -227,14 +259,27 @@ impl Options {
                 "flight" => true,
                 _ => return Err("Expected --diagnostics=off or --diagnostics=flight".into()),
             };
+        } else if let Some(value) = arg.strip_prefix("--diagnostic-campaign=") {
+            self.diagnostic_campaign = match value {
+                "off" => DiagnosticCampaign::Off,
+                "level3-provenance" => DiagnosticCampaign::Level3Provenance,
+                "swordigo-uidocument" => DiagnosticCampaign::SwordigoUIDocument,
+                _ => return Err(
+                    "Expected --diagnostic-campaign=off, level3-provenance, or swordigo-uidocument"
+                        .into(),
+                ),
+            };
+            if self.diagnostic_campaign.is_enabled() {
+                self.diagnostics = true;
+            }
         } else if let Some(value) = arg.strip_prefix("--diagnostic-watch-addresses=") {
             let addresses = value
                 .split(',')
                 .take(9)
                 .map(|value| {
-                    u32::from_str_radix(value.strip_prefix("0x").unwrap_or(value), 16).map_err(|_| {
-                        "Expected comma-separated hexadecimal guest addresses".to_string()
-                    })
+                    u32::from_str_radix(value.strip_prefix("0x").unwrap_or(value), 16).map_err(
+                        |_| "Expected comma-separated hexadecimal guest addresses".to_string(),
+                    )
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             if addresses.is_empty() || addresses.len() > 8 || addresses.contains(&0) {
@@ -384,5 +429,23 @@ mod tests {
                 .is_err());
         }
         assert_eq!(options.diagnostic_watch_addresses, [0x1230, 0x4560]);
+        assert_eq!(options.diagnostic_campaign, DiagnosticCampaign::Off);
+        assert_eq!(
+            options.parse_argument("--diagnostic-campaign=level3-provenance"),
+            Ok(true)
+        );
+        assert_eq!(
+            options.diagnostic_campaign,
+            DiagnosticCampaign::Level3Provenance
+        );
+        assert!(options.diagnostics);
+        assert_eq!(
+            options.parse_argument("--diagnostic-campaign=swordigo-uidocument"),
+            Ok(true)
+        );
+        assert!(options.diagnostic_campaign.is_intervention());
+        assert!(options
+            .parse_argument("--diagnostic-campaign=not-a-campaign")
+            .is_err());
     }
 }

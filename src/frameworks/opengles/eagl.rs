@@ -749,6 +749,10 @@ unsafe fn read_renderbuffer(gles: &mut dyn GLES, mut pixel_buffer: Vec<u8>) -> (
 /// [present_frame], trying to avoid noticeably modifying OpenGL ES state while
 /// doing so. The front and back buffers are then swapped.
 unsafe fn present_renderbuffer(env: &mut Environment, _context: id) {
+    let capture_frame_signature = env.options.diagnostic_campaign.is_enabled()
+        && env.bundle.bundle_identifier_optional() == Some("com.universomo.TrenchBuild")
+        && env.diagnostics.as_ref().is_some_and(|recorder| recorder.presents < 160);
+    let mut frame_signature = None;
     // Save these for when we need to draw the frame
     let viewport = env.window.as_mut().unwrap().gl_viewport();
     let rotation_matrix = env.window.as_mut().unwrap().rotation_matrix();
@@ -771,6 +775,20 @@ unsafe fn present_renderbuffer(env: &mut Environment, _context: id) {
         .objc
         .borrow::<EAGLContextHostObject>(current_context)
         .drawable_framebuffer;
+    env.diagnostic_campaign_event(
+        "eagl-presentation",
+        "present entry context,drawable-fbo,viewport,current-rotation",
+        [
+            current_context.to_bits(),
+            drawable_framebuffer,
+            viewport.0 as u32,
+            viewport.1 as u32,
+            viewport.2 as u32,
+            viewport.3 as u32,
+            current_rotation as u32,
+            0,
+        ],
+    );
 
     let gles_ctx = super::get_thread_context(
         &mut env.framework_state.opengles,
@@ -873,6 +891,23 @@ unsafe fn present_renderbuffer(env: &mut Environment, _context: id) {
     // to memory in time for CopyTexSubImage2D to see it, causing it to read
     // stale/blank data despite the app having genuinely rendered a frame.
     gles.Finish();
+    if capture_frame_signature && render_width >= 4 && render_height >= 4 {
+        let mut sample = [0u8; 4 * 4 * 4];
+        gles.ReadPixels(
+            (render_width / 2 - 2) as _,
+            (render_height / 2 - 2) as _,
+            4,
+            4,
+            gles11::RGBA,
+            gles11::UNSIGNED_BYTE,
+            sample.as_mut_ptr().cast(),
+        );
+        let signature = sample.iter().fold(0x811c9dc5u32, |hash, byte| {
+            (hash ^ u32::from(*byte)).wrapping_mul(0x01000193)
+        });
+        let nonzero = sample.iter().filter(|&&byte| byte != 0).count() as u32;
+        frame_signature = Some((signature, nonzero));
+    }
     gles.CopyTexSubImage2D(
         gles11::TEXTURE_2D,
         0,
@@ -1107,6 +1142,14 @@ unsafe fn present_renderbuffer(env: &mut Environment, _context: id) {
     // every frame, so if it isn't rebound, every later present finds SDL's
     // renderbuffer bound, is rejected, and the screen stays black.
     gles.BindRenderbufferOES(gles11::RENDERBUFFER_OES, renderbuffer);
+    std::mem::drop(gles_boxed);
+    if let Some((signature, nonzero)) = frame_signature {
+        env.diagnostic_campaign_event(
+            "unity-frame-signature",
+            "Trench Run center 4x4 RGBA readback hash/nonzero/render-size",
+            [signature, nonzero, render_width as u32, render_height as u32, renderbuffer, drawable_framebuffer, current_context.to_bits(), 0],
+        );
+    }
 }
 
 #[cfg(test)]

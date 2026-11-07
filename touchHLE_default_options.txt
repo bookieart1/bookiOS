@@ -46,6 +46,35 @@ com.craneballs.stuntman: --diagnostic-watch-addresses=0x3646ddf0,0x3646de20,0x36
 com.getsetgames.addicus: --diagnostics=flight
 com.chillingo.spoing: --diagnostics=flight
 
+# Dev 2.47 combined Development and Level 3 diagnostic campaign. These
+# package-specific entries enable bounded passive provenance only; retest-only
+# apps and ordinary apps remain on the normal recorder.
+# Swordigo's UIDocument intervention must be selected explicitly in Quick
+# Options so its baseline is never confused with altered class availability.
+com.tobiapps.hundred-rooms: --diagnostic-campaign=level3-provenance
+com.geekbeach.amonsteratemyhomework: --diagnostic-campaign=level3-provenance
+UBI-063-WW: --diagnostic-campaign=level3-provenance
+com.gamevil.airpenguin: --diagnostic-campaign=level3-provenance
+com.xmgstudio.cannoncadets: --diagnostic-campaign=level3-provenance
+com.galcon.idynamitejack: --diagnostic-campaign=level3-provenance
+com.joystickgenerals.STActionPig: --diagnostic-campaign=level3-provenance
+com.sega.zaxxonescape: --diagnostic-campaign=level3-provenance
+com.universomo.TrenchBuild: --diagnostic-campaign=level3-provenance
+com.robtop.magegame: --diagnostic-campaign=level3-provenance
+com.glu.gunbros: --diagnostic-campaign=level3-provenance
+com.iugo.Implode: --diagnostic-campaign=level3-provenance
+com.naughtybits.iShoot2: --diagnostic-campaign=level3-provenance
+pl.idreams.jellyinvaders: --diagnostic-campaign=level3-provenance
+com.liv-games.legendarywars: --diagnostic-campaign=level3-provenance
+jp.co.capcom.monhunipus: --diagnostic-campaign=level3-provenance --diagnostic-watch-addresses=0x00334f8c
+com.playerx.pang: --diagnostic-campaign=level3-provenance
+com.madfingergames.shadowgun: --diagnostic-campaign=level3-provenance
+com.oniricgames.silentswordszero: --diagnostic-campaign=level3-provenance
+com.rocketcat.QuickHook: --diagnostic-campaign=level3-provenance
+com.touchfoo.swordigo: --diagnostic-campaign=level3-provenance
+9X8UEF6RBG.com.GrumpyFace.Wispin: --diagnostic-campaign=level3-provenance
+com.popcap.ios.ZumaHD: --diagnostic-campaign=level3-provenance
+
 # Super Monkey Ball and Super Monkey Ball Lite
 # B = speed up level intro, Start = pause
 com.ooi.supermonkeyball: --landscape-left --y-tilt-offset=24 --button-to-touch=B,470,160 --button-to-touch=Start,240,10

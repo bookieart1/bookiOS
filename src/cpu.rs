@@ -51,10 +51,23 @@ fn touchHLE_cpu_read_impl<T: SafeRead + Default>(
     res.unwrap_or_default()
 }
 
-fn touchHLE_cpu_write_impl<T: SafeWrite>(mem: *mut touchHLE_Mem, addr: VAddr, value: T) -> bool {
+fn touchHLE_cpu_write_impl<T: SafeWrite + Into<u64> + Copy>(
+    mem: *mut touchHLE_Mem,
+    addr: VAddr,
+    value: T,
+    raw_core_pc: u32,
+    lr: u32,
+) -> bool {
     // See comments above about catch_unwind
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mem = unsafe { &mut *mem.cast::<Mem>() };
+        mem.note_diagnostic_guest_write(
+            addr,
+            std::mem::size_of::<T>() as u8,
+            value.into(),
+            raw_core_pc,
+            lr,
+        );
         let ptr: MutPtr<T> = Ptr::from_bits(addr);
         mem.write(ptr, value)
     }));
@@ -79,20 +92,44 @@ extern "C" fn touchHLE_cpu_read_u64(mem: *mut touchHLE_Mem, addr: VAddr, error: 
     touchHLE_cpu_read_impl(mem, addr, error)
 }
 #[no_mangle]
-extern "C" fn touchHLE_cpu_write_u8(mem: *mut touchHLE_Mem, addr: VAddr, value: u8) -> bool {
-    touchHLE_cpu_write_impl(mem, addr, value)
+extern "C" fn touchHLE_cpu_write_u8(
+    mem: *mut touchHLE_Mem,
+    addr: VAddr,
+    value: u8,
+    pc: u32,
+    lr: u32,
+) -> bool {
+    touchHLE_cpu_write_impl(mem, addr, value, pc, lr)
 }
 #[no_mangle]
-extern "C" fn touchHLE_cpu_write_u16(mem: *mut touchHLE_Mem, addr: VAddr, value: u16) -> bool {
-    touchHLE_cpu_write_impl(mem, addr, value)
+extern "C" fn touchHLE_cpu_write_u16(
+    mem: *mut touchHLE_Mem,
+    addr: VAddr,
+    value: u16,
+    pc: u32,
+    lr: u32,
+) -> bool {
+    touchHLE_cpu_write_impl(mem, addr, value, pc, lr)
 }
 #[no_mangle]
-extern "C" fn touchHLE_cpu_write_u32(mem: *mut touchHLE_Mem, addr: VAddr, value: u32) -> bool {
-    touchHLE_cpu_write_impl(mem, addr, value)
+extern "C" fn touchHLE_cpu_write_u32(
+    mem: *mut touchHLE_Mem,
+    addr: VAddr,
+    value: u32,
+    pc: u32,
+    lr: u32,
+) -> bool {
+    touchHLE_cpu_write_impl(mem, addr, value, pc, lr)
 }
 #[no_mangle]
-extern "C" fn touchHLE_cpu_write_u64(mem: *mut touchHLE_Mem, addr: VAddr, value: u64) -> bool {
-    touchHLE_cpu_write_impl(mem, addr, value)
+extern "C" fn touchHLE_cpu_write_u64(
+    mem: *mut touchHLE_Mem,
+    addr: VAddr,
+    value: u64,
+    pc: u32,
+    lr: u32,
+) -> bool {
+    touchHLE_cpu_write_impl(mem, addr, value, pc, lr)
 }
 
 pub struct Cpu {

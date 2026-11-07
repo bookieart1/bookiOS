@@ -36,6 +36,24 @@ pub(super) struct ThreadInitializer {
 }
 
 pub fn maybe_initialize_class(env: &mut Environment, receiver: id) {
+    if env.objc.get_host_object(receiver).is_none() {
+        let isa = ObjC::try_read_isa(receiver, &env.mem).unwrap_or(nil);
+        let class_name = env
+            .objc
+            .try_get_class_name(receiver)
+            .or_else(|| env.objc.try_get_class_name(isa))
+            .unwrap_or("<unregistered>");
+        let detail = format!(
+            "maybe_initialize_class missing-host-object receiver={:#010x} isa={:#010x} class={class_name:?}",
+            receiver.to_bits(),
+            isa.to_bits()
+        );
+        env.diagnostic_campaign_event(
+            "class-host-map",
+            &detail,
+            [receiver.to_bits(), isa.to_bits(), 0, 0, 0, 0, 0, 0],
+        );
+    }
     let class_host_object = env.objc.get_host_object(receiver).unwrap();
     let Some(&super::ClassHostObject {
         superclass,

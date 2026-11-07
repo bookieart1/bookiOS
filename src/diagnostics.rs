@@ -43,6 +43,7 @@ const FOCUSED_CATEGORY_EVENTS: usize = 64;
 const MOTION_EVENTS: usize = 64;
 const KVO_EVENTS: usize = 16;
 const MEDIA_EVENTS: usize = 16;
+const CAMPAIGN_EVENTS: usize = 192;
 const DEFAULTS_EVENTS: usize = 32;
 const HEALTHY_PRESENT_INTERVAL: Duration = Duration::from_millis(25);
 const SLOW_PRESENT_INTERVAL: Duration = Duration::from_millis(34);
@@ -539,6 +540,22 @@ struct MotionEvent {
     lr: u32,
 }
 
+/// Shared bounded record for the diagnostic-only Level 3 campaign. Values are
+/// deliberately raw and named by the event detail so a probe can retain the
+/// failure-local ABI/state without allocating an app-specific trace system.
+#[derive(Clone, Copy, Debug, Default)]
+struct CampaignEvent {
+    sequence: u64,
+    elapsed_ms: u128,
+    thread: usize,
+    family: &'static str,
+    detail: Text,
+    values: [u32; 8],
+    pc: u32,
+    lr: u32,
+    presentation: u64,
+}
+
 pub struct Recorder {
     recent: Ring<Event, RECENT>,
     signals: Ring<Event, SIGNALS>,
@@ -585,6 +602,7 @@ pub struct Recorder {
     kvo_events: Ring<KvoEvent, KVO_EVENTS>,
     media_events: Ring<MediaEvent, MEDIA_EVENTS>,
     motion_events: Ring<MotionEvent, MOTION_EVENTS>,
+    campaign_events: Ring<CampaignEvent, CAMPAIGN_EVENTS>,
     /// Bounded direct logs for Objective-C runtime lookups which exhausted a
     /// complete superclass chain without finding the requested method.
     runtime_method_misses: u8,
@@ -646,6 +664,7 @@ impl Recorder {
             kvo_events: Ring::default(),
             media_events: Ring::default(),
             motion_events: Ring::default(),
+            campaign_events: Ring::default(),
             runtime_method_misses: 0,
             sequence: 0,
             api: 0,
@@ -1141,6 +1160,24 @@ impl Recorder {
             self.print_event(e);
         }
         echo_no_panic!(
+            "level3 campaign events: newest {CAMPAIGN_EVENTS}; total={} (bounded passive provenance unless event explicitly says intervention)",
+            self.campaign_events.written
+        );
+        for event in self.campaign_events.iter() {
+            echo_no_panic!(
+                "level3 campaign #{} ms={} tid={} family={} detail=\"{}\" values={:08x?} pc={:#010x} lr={:#010x} presentation={}",
+                event.sequence,
+                event.elapsed_ms,
+                event.thread,
+                event.family,
+                event.detail,
+                event.values,
+                event.pc,
+                event.lr,
+                event.presentation
+            );
+        }
+        echo_no_panic!(
             "flight nil-return origins: newest {NIL_ORIGINS}; total={} (bounded producer candidates; nil may be valid)",
             self.nil_origins.written
         );
@@ -1417,6 +1454,59 @@ fn describe_object(objc: &ObjC, mem: &Mem, address: u32, include_string: bool) -
 }
 
 impl Environment {
+    /// Record one package-focused Level 3 event. The campaign option is off by
+    /// default and the fixed ring prevents per-frame or callback spam from
+    /// growing the log without bound.
+    pub fn diagnostic_campaign_event(
+        &mut self,
+        family: &'static str,
+        detail: &str,
+        values: [u32; 8],
+    ) {
+        if !self.options.diagnostic_campaign.is_enabled() {
+            return;
+        }
+        let Some(recorder) = &mut self.diagnostics else {
+            return;
+        };
+        let regs = self.cpu.regs();
+        recorder.campaign_events.push(CampaignEvent {
+            sequence: recorder.campaign_events.written.saturating_add(1),
+            elapsed_ms: recorder.started.elapsed().as_millis(),
+            thread: self.current_thread,
+            family,
+            detail: Text::from_bytes(detail.as_bytes()),
+            values,
+            pc: regs[15],
+            lr: regs[14],
+            presentation: recorder.presents,
+        });
+    }
+
+    pub fn diagnostic_campaign_banner(&mut self) {
+        if !self.options.diagnostic_campaign.is_enabled() {
+            return;
+        }
+        echo!(
+            "Level 3 diagnostic campaign: mode={} build={} package={} version={} (passive={} intervention={})",
+            self.options.diagnostic_campaign.as_str(),
+            crate::VERSION.trim(),
+            self.bundle.bundle_identifier(),
+            self.bundle.bundle_version(),
+            !self.options.diagnostic_campaign.is_intervention(),
+            self.options.diagnostic_campaign.is_intervention()
+        );
+        self.diagnostic_campaign_event(
+            if self.options.diagnostic_campaign.is_intervention() {
+                "campaign-intervention"
+            } else {
+                "campaign-passive"
+            },
+            crate::VERSION.trim(),
+            [0; 8],
+        );
+    }
+
     /// Records enough class-hierarchy state to distinguish a genuinely absent
     /// inherited method from a malformed guest superclass chain. This is
     /// intentionally capped because runtime introspection can be frequent.
@@ -1736,6 +1826,16 @@ impl Environment {
             });
         }
         let name = Text::guest(&self.mem, selector);
+        if self.options.diagnostic_campaign.is_enabled()
+            && self.bundle.bundle_identifier_optional() == Some("com.oniricgames.silentswordszero")
+            && name.bytes() == b"play:loop:"
+        {
+            let filename = self.cpu.regs()[2];
+            recorder.watch_object(filename);
+            if let Some(history) = &mut self.mem.object_history {
+                history.watch_resource(filename);
+            }
+        }
         if matches!(
             name.bytes(),
             b"retain" | b"release" | b"autorelease" | b"retainCount"
@@ -2415,6 +2515,7 @@ impl Environment {
         }
     }
     pub fn diagnostic_dump(&mut self, reason: &str) {
+        self.mem.dump_diagnostic_guest_writes();
         if self.diagnostics.is_some() {
             self.framework_state.log_opengles_visual_history(reason);
         }

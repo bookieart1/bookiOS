@@ -634,15 +634,16 @@ impl Environment {
                 history.watch_address(address);
             }
         }
+        mem.configure_guest_write_watches(&options.diagnostic_watch_addresses);
         let mut dyld = dyld::Dyld::new();
-        dyld.do_initial_linking(
-            &bins,
-            &mut mem,
-            &mut objc,
-            diagnostics.as_deref_mut(),
-        )?;
+        dyld.do_initial_linking(&bins, &mut mem, &mut objc, diagnostics.as_deref_mut())?;
 
-        let cpu = cpu::Cpu::new(match options.direct_memory_access {
+        let use_direct_memory_access =
+            options.direct_memory_access && options.diagnostic_watch_addresses.is_empty();
+        if options.direct_memory_access && !use_direct_memory_access {
+            echo!("Level 3 diagnostic: disabling direct guest data access so configured write watches observe every store");
+        }
+        let cpu = cpu::Cpu::new(match use_direct_memory_access {
             true => Some(&mut mem),
             false => None,
         });
@@ -839,6 +840,15 @@ impl Environment {
 
         env.set_up_initial_env_vars();
         dyld::Dyld::do_late_linking(&mut env);
+
+        if env.options.diagnostic_campaign.is_intervention() {
+            let class = env.objc.register_diagnostic_uidocument(&mut env.mem);
+            echo!(
+                "Level 3 diagnostic intervention: registered empty NSObject-derived UIDocument at {:?}; cloud/document services remain unavailable",
+                class
+            );
+        }
+        env.diagnostic_campaign_banner();
 
         env.cpu.set_cpsr(cpu::Cpu::CPSR_USER_MODE);
 
@@ -2353,6 +2363,7 @@ impl Environment {
                 .remaining_ticks
                 .is_none_or(|remaining_ticks| remaining_ticks > 0)
             {
+                self.mem.set_diagnostic_current_thread(self.current_thread);
                 let state = self
                     .cpu
                     .run_or_step(&mut self.mem, self.remaining_ticks.as_mut());

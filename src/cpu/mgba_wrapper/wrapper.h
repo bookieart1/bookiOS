@@ -21,9 +21,12 @@ typedef void touchHLE_Mem;
 uint8_t touchHLE_cpu_read_u8(touchHLE_Mem *mem, uint32_t addr, bool *error);
 uint16_t touchHLE_cpu_read_u16(touchHLE_Mem *mem, uint32_t addr, bool *error);
 uint32_t touchHLE_cpu_read_u32(touchHLE_Mem *mem, uint32_t addr, bool *error);
-bool touchHLE_cpu_write_u8(touchHLE_Mem *mem, uint32_t addr, uint8_t value);
-bool touchHLE_cpu_write_u16(touchHLE_Mem *mem, uint32_t addr, uint16_t value);
-bool touchHLE_cpu_write_u32(touchHLE_Mem *mem, uint32_t addr, uint32_t value);
+bool touchHLE_cpu_write_u8(touchHLE_Mem *mem, uint32_t addr, uint8_t value,
+                           uint32_t pc, uint32_t lr);
+bool touchHLE_cpu_write_u16(touchHLE_Mem *mem, uint32_t addr, uint16_t value,
+                            uint32_t pc, uint32_t lr);
+bool touchHLE_cpu_write_u32(touchHLE_Mem *mem, uint32_t addr, uint32_t value,
+                            uint32_t pc, uint32_t lr);
 
 /* Mirrors the values src/cpu.rs decodes from run_or_step. */
 #define RESULT_NORMAL (-1)

@@ -117,8 +117,18 @@ unsafe fn assert_compositor_gl_clean(
         // failure, not for every guest GL call. It tells the ActionPig/Forlorn/
         // Wispin investigation which compositor boundary first became invalid
         // without misattributing the error to a guessed guest call site.
+        let mut framebuffer = 0;
+        let mut renderbuffer = 0;
+        let mut texture = 0;
+        let mut active_texture = 0;
+        let mut viewport = [0; 4];
+        gles.GetIntegerv(gles11::FRAMEBUFFER_BINDING_OES, &mut framebuffer);
+        gles.GetIntegerv(gles11::RENDERBUFFER_BINDING_OES, &mut renderbuffer);
+        gles.GetIntegerv(gles11::TEXTURE_BINDING_2D, &mut texture);
+        gles.GetIntegerv(gles11::ACTIVE_TEXTURE, &mut active_texture);
+        gles.GetIntegerv(gles11::VIEWPORT, viewport.as_mut_ptr());
         log!(
-            "Bounded internal-compositor GL diagnostic: stage={stage:?} layer={layer:?} error={error:#x} framebuffer_status={framebuffer_status:#x} status_query_error={status_error:#x}"
+            "Bounded internal-compositor GL diagnostic: owner=internal-compositor stage={stage:?} layer={layer:?} operation-boundary={stage:?} first_error={error:#x} framebuffer={framebuffer:#x} framebuffer_status={framebuffer_status:#x} renderbuffer={renderbuffer:#x} texture={texture:#x} active_texture={active_texture:#x} viewport={viewport:?} status_query_error={status_error:#x}"
         );
     }
     assert!(

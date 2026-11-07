@@ -87,6 +87,13 @@ Game controller options:
         This is a floating-point (decimal) number of degrees, without a degree
         symbol. It may be negative.
 
+    --diagnostic-campaign=off|level3-provenance|swordigo-uidocument
+        Enables the bounded Level 3 provenance probes used by iDared diagnostic
+        builds. level3-provenance is passive. swordigo-uidocument additionally
+        registers an empty NSObject-derived UIDocument class solely to test the
+        game's documented availability/fallback branch; it does not implement
+        document or ubiquity services. The default is off.
+
     --x-tilt-offset=...
     --y-tilt-offset=...
         Offset the simulated angle of the device axis mapped to the analog stick
