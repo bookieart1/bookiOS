@@ -13,8 +13,8 @@ use crate::environment::MutexType::PTHREAD_MUTEX_RECURSIVE;
 use crate::environment::{MutexId, PTHREAD_MUTEX_DEFAULT};
 use crate::frameworks::foundation::NSInteger;
 use crate::libc::pthread::cond::{
-    pthread_cond_broadcast, pthread_cond_destroy, pthread_cond_init, pthread_cond_t,
-    pthread_cond_wait,
+    pthread_cond_broadcast, pthread_cond_destroy, pthread_cond_init, pthread_cond_signal,
+    pthread_cond_t, pthread_cond_wait,
 };
 use crate::libc::pthread::mutex::{
     pthread_mutex_destroy, pthread_mutex_init, pthread_mutex_lock, pthread_mutex_t,
@@ -37,6 +37,13 @@ struct NSConditionLockHostObject {
     name: id,
 }
 impl HostObject for NSConditionLockHostObject {}
+
+struct NSConditionHostObject {
+    mutex: MutPtr<pthread_mutex_t>,
+    cond: MutPtr<pthread_cond_t>,
+    name: id,
+}
+impl HostObject for NSConditionHostObject {}
 
 pub const CLASSES: ClassExports = objc_classes! {
 
@@ -240,4 +247,90 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 @end
 
+@implementation NSCondition: NSObject
+
++ (id)alloc {
+    let mutex = env.mem.alloc(guest_size_of::<pthread_mutex_t>()).cast();
+    let cond = env.mem.alloc(guest_size_of::<pthread_cond_t>()).cast();
+    pthread_mutex_init(env, mutex, ConstPtr::null());
+    pthread_cond_init(env, cond, ConstPtr::null());
+    env.objc.alloc_object(
+        this,
+        Box::new(NSConditionHostObject { mutex, cond, name: nil }),
+        &mut env.mem,
+    )
+}
+
+- (())lock {
+    let mutex = env.objc.borrow::<NSConditionHostObject>(this).mutex;
+    pthread_mutex_lock(env, mutex);
+}
+- (())unlock {
+    let mutex = env.objc.borrow::<NSConditionHostObject>(this).mutex;
+    pthread_mutex_unlock(env, mutex);
+}
+- (bool)tryLock {
+    let mutex = env.objc.borrow::<NSConditionHostObject>(this).mutex;
+    pthread_mutex_trylock(env, mutex) == 0
+}
+- (())wait {
+    let &NSConditionHostObject { mutex, cond, .. } = env.objc.borrow(this);
+    pthread_cond_wait(env, cond, mutex);
+}
+- (())signal {
+    let cond = env.objc.borrow::<NSConditionHostObject>(this).cond;
+    pthread_cond_signal(env, cond);
+}
+- (())broadcast {
+    let cond = env.objc.borrow::<NSConditionHostObject>(this).cond;
+    pthread_cond_broadcast(env, cond);
+}
+- (())setName:(id)name {
+    let old_name = env.objc.borrow::<NSConditionHostObject>(this).name;
+    env.objc.borrow_mut::<NSConditionHostObject>(this).name = msg![env; name copy];
+    release(env, old_name);
+}
+- (id)name {
+    env.objc.borrow::<NSConditionHostObject>(this).name
+}
+- (())dealloc {
+    let &NSConditionHostObject { mutex, cond, name } = env.objc.borrow(this);
+    release(env, name);
+    pthread_cond_destroy(env, cond);
+    pthread_mutex_destroy(env, mutex);
+    env.mem.free(mutex.cast());
+    env.mem.free(cond.cast());
+    env.objc.dealloc_object(this, &mut env.mem)
+}
+
+@end
+
 };
+
+#[cfg(test)]
+mod tests {
+    use crate::frameworks::foundation::ns_string;
+    use crate::objc::{id, release};
+    use crate::{msg, msg_class, Environment};
+
+    #[test]
+    fn dev_245_nscondition_uses_real_lock_condition_and_copied_name_state() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let condition: id = msg_class![env; NSCondition new];
+        let name = ns_string::get_static_str(env, "worker-ready");
+        () = msg![env; condition setName:name];
+        let actual: id = msg![env; condition name];
+        assert_eq!(ns_string::to_rust_string(env, actual), "worker-ready");
+        () = msg![env; condition lock];
+        let relocked: bool = msg![env; condition tryLock];
+        assert!(!relocked);
+        () = msg![env; condition signal];
+        () = msg![env; condition broadcast];
+        () = msg![env; condition unlock];
+        let locked: bool = msg![env; condition tryLock];
+        assert!(locked);
+        () = msg![env; condition unlock];
+        release(env, condition);
+    }
+}

@@ -792,9 +792,53 @@ unsafe fn present_renderbuffer(env: &mut Environment, _context: id) {
     let (texture_width, texture_height) = to_pot_texture_dim(render_width as _, render_height as _);
 
     // To avoid confusing the guest app, we need to be able to undo any
-    // state changes we make.
+    // state changes we make. Texture bindings, matrices, environments and
+    // texture-coordinate arrays are per texture unit in GLES1, so snapshot
+    // every supported unit before selecting a private canonical unit.
     let old_framebuffer: GLuint = get_int(gles, gles11::FRAMEBUFFER_BINDING_OES) as _;
-    let old_texture_2d: GLuint = get_int(gles, gles11::TEXTURE_BINDING_2D) as _;
+    let old_active_texture = get_int(gles, gles11::ACTIVE_TEXTURE) as GLenum;
+    let old_client_active_texture = get_int(gles, gles11::CLIENT_ACTIVE_TEXTURE) as GLenum;
+    struct TextureUnitState {
+        binding: GLuint,
+        texture_2d_enabled: bool,
+        matrix: [GLfloat; 16],
+        env_mode: GLint,
+        env_color: [GLfloat; 4],
+        texcoord_enabled: bool,
+        texcoord_binding: GLuint,
+        texcoord_size: GLint,
+        texcoord_type: GLenum,
+        texcoord_stride: GLsizei,
+        texcoord_pointer: *const GLvoid,
+    }
+    let texture_unit_count = get_int(gles, gles11::MAX_TEXTURE_UNITS).max(1) as usize;
+    let mut texture_units = Vec::with_capacity(texture_unit_count);
+    for index in 0..texture_unit_count {
+        let unit = gles11::TEXTURE0 + index as GLenum;
+        gles.ActiveTexture(unit);
+        gles.ClientActiveTexture(unit);
+        let mut env_color = [0.0; 4];
+        gles.GetTexEnvfv(
+            gles11::TEXTURE_ENV,
+            gles11::TEXTURE_ENV_COLOR,
+            env_color.as_mut_ptr(),
+        );
+        texture_units.push(TextureUnitState {
+            binding: get_int(gles, gles11::TEXTURE_BINDING_2D) as _,
+            texture_2d_enabled: gles.IsEnabled(gles11::TEXTURE_2D) != gles11::FALSE,
+            matrix: get_floats(gles, gles11::TEXTURE_MATRIX),
+            env_mode: get_tex_env_int(gles, gles11::TEXTURE_ENV, gles11::TEXTURE_ENV_MODE),
+            env_color,
+            texcoord_enabled: get_bool(gles, gles11::TEXTURE_COORD_ARRAY),
+            texcoord_binding: get_int(gles, gles11::TEXTURE_COORD_ARRAY_BUFFER_BINDING) as _,
+            texcoord_size: get_int(gles, gles11::TEXTURE_COORD_ARRAY_SIZE),
+            texcoord_type: get_int(gles, gles11::TEXTURE_COORD_ARRAY_TYPE) as _,
+            texcoord_stride: get_int(gles, gles11::TEXTURE_COORD_ARRAY_STRIDE) as _,
+            texcoord_pointer: get_ptr(gles, gles11::TEXTURE_COORD_ARRAY_POINTER),
+        });
+    }
+    gles.ActiveTexture(gles11::TEXTURE0);
+    gles.ClientActiveTexture(gles11::TEXTURE0);
 
     // Create a framebuffer we can use to read from the renderbuffer
     let mut src_framebuffer = 0;
@@ -1016,8 +1060,46 @@ unsafe fn present_renderbuffer(env: &mut Environment, _context: id) {
     let mut gles_boxed = gles_ctx.make_current(env.window.as_mut().unwrap());
     let gles = gles_boxed.as_mut();
 
-    // Restore the other bindings
-    gles.BindTexture(gles11::TEXTURE_2D, old_texture_2d);
+    // Restore the other bindings and every per-unit GLES1 state value. The
+    // presenter must be state-neutral even when the guest leaves split active
+    // server/client selectors or uses nonzero units.
+    for (index, state) in texture_units.iter().enumerate() {
+        let unit = gles11::TEXTURE0 + index as GLenum;
+        gles.ActiveTexture(unit);
+        if state.texture_2d_enabled {
+            gles.Enable(gles11::TEXTURE_2D);
+        } else {
+            gles.Disable(gles11::TEXTURE_2D);
+        }
+        gles.BindTexture(gles11::TEXTURE_2D, state.binding);
+        gles.MatrixMode(gles11::TEXTURE);
+        gles.LoadMatrixf(state.matrix.as_ptr());
+        let mode = [state.env_mode];
+        gles.TexEnviv(gles11::TEXTURE_ENV, gles11::TEXTURE_ENV_MODE, mode.as_ptr());
+        gles.TexEnvfv(
+            gles11::TEXTURE_ENV,
+            gles11::TEXTURE_ENV_COLOR,
+            state.env_color.as_ptr(),
+        );
+
+        gles.ClientActiveTexture(unit);
+        if state.texcoord_enabled {
+            gles.EnableClientState(gles11::TEXTURE_COORD_ARRAY);
+        } else {
+            gles.DisableClientState(gles11::TEXTURE_COORD_ARRAY);
+        }
+        gles.BindBuffer(gles11::ARRAY_BUFFER, state.texcoord_binding);
+        gles.TexCoordPointer(
+            state.texcoord_size,
+            state.texcoord_type,
+            state.texcoord_stride,
+            state.texcoord_pointer,
+        );
+    }
+    gles.ActiveTexture(old_active_texture);
+    gles.ClientActiveTexture(old_client_active_texture);
+    gles.MatrixMode(old_matrix_mode);
+    gles.BindBuffer(gles11::ARRAY_BUFFER, old_array_buffer);
     gles.BindFramebufferOES(gles11::FRAMEBUFFER_OES, old_framebuffer);
     // On iOS, SDL's swap binds its view's own renderbuffer in the current
     // context, which is the app's here, before presenting it. Apps often bind

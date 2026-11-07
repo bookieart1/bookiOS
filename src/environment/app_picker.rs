@@ -818,31 +818,41 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
     // Exact bundle identifiers avoid prefix collisions such as Glyder/Glyder 2
     // and keep the focused device-test batch deterministic even when filenames
     // or localized display names differ.
-    const DEV_244_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
+    const DEV_245_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
         "COMTOBIAPPSHUNDREDROOMS",
         "UBI063WW",
         "COMGAMEVILAIRPENGUIN",
+        "COMCRESCENTMOONGAMESARALON",
+        "NETSKYVUBATTLEBEARS1",
         "COMMAJESTICSOFTWAREBLOT",
-        "COMBACKFLIPSTUDIOSBOUNCETHEBUNNY",
         "COMTURNERBRINGMESANDWICHES",
-        "COMTAGGAMESCARJACKST",
         "COMCONTINUITYGAMECONTINUITY2",
-        "COMDTPENTERTAINMENTCRAZYGOLF",
+        "COMEABURNOUTCRASHBV",
+        "COMMIKEMASSEIDAREDEVILDAVE",
         "COMEZONEDIVERSION",
         "COMGALCONIDYNAMITEJACK",
+        "COMNOTDOPPLEREARNTODIE",
         "COMBIGDUCKGAMESFLOW",
+        "COMROBTOPMAGEGAME",
+        "COMEZONEGALACTIC",
         "COMNAMCONETWORKSGALARG",
         "COMCRITICALTHOUGHTGAMESGEODEFENSE",
         "COMIUGOIMPLODE",
-        "COMMUMBOJUMBOLUXOR",
-        "COMSUNTOWNSHIPGARBAGESPRITEHD",
+        "COMTHEINFINITYPROJECTAPPSTORETHEINFINITYPROJECT",
+        "COMNAUGHTYBITSISHOOT2",
+        "COMRACETOTHEMOONISR",
         "COMPLAYERXPANG",
-        "COMLIQUIDAIRLABRICKPRO",
+        "COMCHILLINGORAVENSWORD",
+        "COMCAZUALGAMEZREDBALLPRO",
         "COMTAPULOUSRRF",
-        "COMDEFIANTDEVSKISAFARI",
+        "COMJOYSTICKGENERALSSTACTIONPIG",
+        "COMSEGASPINBALL",
+        "COMMTVNSPONGEBOBDINERDASH",
         "COMCHILLINGOSPOING",
-        "COMCLICKGAMERSTICKY",
-        "COMIUGOZOMBIES2",
+        "COMEASIMPSONSARCADEBV",
+        "COMNEKKIVECTORIPHONE",
+        "COMSEGAVIRTUAFIGHTER2",
+        "9X8UEF6RBGCOMGRUMPYFACEWISPIN",
         "COMKONGZHONGZOMBIEC",
         "COMGAMEDRSZS",
     ];
@@ -855,7 +865,7 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
                 .collect()
         };
         let bundle_identifier = normalized(&app.bundle_identifier);
-        let rank = DEV_244_TEST_BUNDLE_IDENTIFIERS
+        let rank = DEV_245_TEST_BUNDLE_IDENTIFIERS
             .iter()
             .position(|&identifier| bundle_identifier == identifier)
             .unwrap_or(usize::MAX);
@@ -1699,7 +1709,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.44",
+            "iDared 32bit {}{}{} · Dev 2.45",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""
@@ -2963,40 +2973,53 @@ mod tests {
     }
 
     #[test]
-    fn dev_244_test_batch_is_first_in_exact_alphabetical_order() {
+    fn dev_245_test_batch_is_first_in_exact_alphabetical_order() {
         let mut apps = vec![
             test_app("unrelated.bundle", "AAA unrelated"),
             test_app("com.tobiapps.hundred-rooms", "100 Floors"),
             test_app("UBI-063-WW", "AC Rearmed"),
             test_app("com.gamevil.airpenguin", "Air Penguin"),
+            test_app("com.crescentmoongames.aralon", "Aralon HD"),
+            test_app("net.skyvu.battlebears1", "Battle Bears"),
             test_app("com.majesticsoftware.blot", "Blot"),
-            test_app("com.backflipstudios.bouncethebunny", "Bounce"),
             test_app("com.turner.bringmesandwiches", "Sandwiches!!"),
-            test_app("com.TagGames.CarJackSt", "Car Jack"),
             test_app("com.continuitygame.continuity2", "Continuity 2"),
-            test_app("com.dtp-entertainment.crazygolf", "CrazyGolf"),
+            test_app("com.ea.burnoutcrash.bv", "Crash!"),
+            test_app("com.mikemassei.daredevildave", "Daredevil Dav"),
             test_app("com.ezone.Diversion", "Diversion"),
             test_app("com.galcon.idynamitejack", "DynamiteJack"),
+            test_app("com.notdoppler.EarntoDie", "Earn to Die"),
             test_app("com.bigduckgames.flow", "Flow"),
+            test_app("com.robtop.magegame", "Forlorn"),
+            test_app("com.ezone.Galactic", "Galactic"),
             test_app("com.namconetworks.galarg", "GalagaRemix"),
             test_app("com.criticalthoughtgames.geodefense", "geoDefense"),
             test_app("com.iugo.Implode", "Implode!"),
-            test_app("com.mumbojumbo.Luxor", "Luxor"),
-            test_app("com.suntownship.GarbageSpriteHD", "Mech Guardian"),
+            test_app(
+                "com.TheInfinityProjectAppStore.TheInfinityProject",
+                "Infinity Project",
+            ),
+            test_app("com.naughtybits.iShoot2", "iShoot 2"),
+            test_app("com.RaceToTheMoon.iSR", "iSR"),
             test_app("com.playerx.pang", "Pang"),
-            test_app("com.liquidairlab.rickpro", "Rick Pro"),
+            test_app("com.chillingo.ravensword", "Ravensword"),
+            test_app("com.cazualgamez.RedBallPro", "RedBallPro"),
             test_app("com.tapulous.rrf", "Riddim"),
-            test_app("com.DefiantDev.SkiSafari", "Ski Safari"),
+            test_app("com.joystickgenerals.STActionPig", "S.T.ActionPig"),
+            test_app("com.sega.spinball", "Spinball"),
+            test_app("com.mtvn.SpongeBobDinerDash", "SpongeBob Diner Dash"),
             test_app("com.chillingo.spoing", "Spoing"),
-            test_app("com.clickgamer.sticky", "Sticky"),
-            test_app("com.iugo.zombies2", "ZA! 2ndWave"),
+            test_app("com.ea.simpsonsarcade.bv", "TheSimpsons"),
+            test_app("com.nekki.vector.iphone", "Vector"),
+            test_app("com.sega.virtuafighter2", "Virtua Fighter"),
+            test_app("9X8UEF6RBG.com.GrumpyFace.Wispin", "Wispin"),
             test_app("com.kongzhong.zombiec", "Zombie Crisis 3D"),
             test_app("com.gamedrs.ZS", "ZS"),
         ];
         sort_picker_apps(&mut apps, &mut LibraryTiming::default());
         let names: Vec<&str> = apps
             .iter()
-            .take(26)
+            .take(36)
             .map(|app| app.display_name.as_str())
             .collect();
         assert_eq!(
@@ -3005,27 +3028,37 @@ mod tests {
                 "100 Floors",
                 "AC Rearmed",
                 "Air Penguin",
+                "Aralon HD",
+                "Battle Bears",
                 "Blot",
-                "Bounce",
                 "Sandwiches!!",
-                "Car Jack",
                 "Continuity 2",
-                "CrazyGolf",
+                "Crash!",
+                "Daredevil Dav",
                 "Diversion",
                 "DynamiteJack",
+                "Earn to Die",
                 "Flow",
+                "Forlorn",
+                "Galactic",
                 "GalagaRemix",
                 "geoDefense",
                 "Implode!",
-                "Luxor",
-                "Mech Guardian",
+                "Infinity Project",
+                "iShoot 2",
+                "iSR",
                 "Pang",
-                "Rick Pro",
+                "Ravensword",
+                "RedBallPro",
                 "Riddim",
-                "Ski Safari",
+                "S.T.ActionPig",
+                "Spinball",
+                "SpongeBob Diner Dash",
                 "Spoing",
-                "Sticky",
-                "ZA! 2ndWave",
+                "TheSimpsons",
+                "Vector",
+                "Virtua Fighter",
+                "Wispin",
                 "Zombie Crisis 3D",
                 "ZS",
             ]

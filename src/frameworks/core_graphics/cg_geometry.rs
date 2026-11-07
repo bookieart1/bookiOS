@@ -270,6 +270,22 @@ fn CGRectContainsPoint(_env: &mut Environment, rect: CGRect, point: CGPoint) -> 
         && rect.origin.y + rect.size.height > point.y
 }
 
+fn CGRectContainsRect(_env: &mut Environment, outer: CGRect, inner: CGRect) -> bool {
+    if outer == CGRectNull
+        || inner == CGRectNull
+        || outer.size.width <= 0.0
+        || outer.size.height <= 0.0
+        || inner.size.width <= 0.0
+        || inner.size.height <= 0.0
+    {
+        return false;
+    }
+    outer.origin.x <= inner.origin.x
+        && outer.origin.y <= inner.origin.y
+        && outer.origin.x + outer.size.width >= inner.origin.x + inner.size.width
+        && outer.origin.y + outer.size.height >= inner.origin.y + inner.size.height
+}
+
 fn CGRectIntersectsRect(_env: &mut Environment, rect1: CGRect, rect2: CGRect) -> bool {
     rect1.origin.x.max(rect2.origin.x)
         <= (rect1.origin.x + rect1.size.width).min(rect2.origin.x + rect2.size.width)
@@ -412,6 +428,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGSizeEqualToSize(_, _)),
     export_c_func!(CGRectEqualToRect(_, _)),
     export_c_func!(CGRectContainsPoint(_, _)),
+    export_c_func!(CGRectContainsRect(_, _)),
     export_c_func!(CGRectIntersectsRect(_, _)),
     export_c_func!(CGRectIntersection(_, _)),
     export_c_func!(CGRectGetMinX(_)),
@@ -447,3 +464,22 @@ pub const CONSTANTS: ConstantExports = &[
         HostConstant::Custom(|env| env.mem.alloc_and_write(CGRectNull).cast().cast_const()),
     ),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dev_245_contains_rect_is_inclusive_but_rejects_empty_and_null_rectangles() {
+        let mut env = Environment::new_fake_for_test();
+        let outer = CGRectMake(&mut env, 0.0, 0.0, 10.0, 10.0);
+        assert!(CGRectContainsRect(&mut env, outer, outer));
+        assert!(CGRectContainsRect(
+            &mut env,
+            outer,
+            CGRectMake(&mut Environment::new_fake_for_test(), 2.0, 2.0, 3.0, 4.0)
+        ));
+        assert!(!CGRectContainsRect(&mut env, outer, CGRectZero));
+        assert!(!CGRectContainsRect(&mut env, outer, CGRectNull));
+    }
+}

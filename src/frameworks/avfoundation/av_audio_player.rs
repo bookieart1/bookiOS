@@ -50,6 +50,34 @@ struct AVAudioPlayerHostObject {
 }
 impl HostObject for AVAudioPlayerHostObject {}
 
+fn log_pang_lifetime(env: &mut Environment, this: id, event: &str) {
+    if env.bundle.bundle_identifier() != "com.playerx.pang" {
+        return;
+    }
+    let sequence = {
+        let state = &mut env.framework_state.avfoundation;
+        if state.pang_lifetime_diagnostic_events >= 96 {
+            return;
+        }
+        state.pang_lifetime_diagnostic_events += 1;
+        state.pang_lifetime_diagnostic_events
+    };
+    let (url, file, queue, buffers, playing) = {
+        let object = env.objc.borrow::<AVAudioPlayerHostObject>(this);
+        (
+            object.audio_file_url,
+            object.audio_file_id,
+            object.audio_queue,
+            object.audio_queue_buffers,
+            object.is_playing,
+        )
+    };
+    let refcount = env.objc.refcount_for_diagnostics(this);
+    log!(
+        "Pang bounded AVAudioPlayer lifetime diagnostic: sequence={sequence} event={event} object={this:?} refcount={refcount:?} url={url:?} file={file:?} queue={queue:?} buffers={buffers:?} playing={playing}"
+    );
+}
+
 pub const CLASSES: ClassExports = objc_classes! {
 
 (env, this, _cmd);
@@ -77,7 +105,9 @@ pub const CLASSES: ClassExports = objc_classes! {
         is_playing: false,
         num_of_loops: 0
     });
-    env.objc.alloc_object(this, host_object, &mut env.mem)
+    let object = env.objc.alloc_object(this, host_object, &mut env.mem);
+    log_pang_lifetime(env, object, "alloc");
+    object
 }
 
 - (id)initWithContentsOfURL:(id)url // NSURL*
@@ -103,10 +133,12 @@ pub const CLASSES: ClassExports = objc_classes! {
             autorelease(env, error);
             env.mem.write(out_error, error);
         }
+        log_pang_lifetime(env, this, "init-url-error");
         release(env, this);
         return nil;
     }
 
+    log_pang_lifetime(env, this, "init-url-success");
     this
 }
 
@@ -125,6 +157,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         Ok(audio_file_id) => {
             assert!(env.objc.borrow::<AVAudioPlayerHostObject>(this).audio_file_id.is_none());
             env.objc.borrow_mut::<AVAudioPlayerHostObject>(this).audio_file_id = Some(audio_file_id);
+            log_pang_lifetime(env, this, "init-data-success");
             this
         }
         Err(_) => {
@@ -135,6 +168,7 @@ pub const CLASSES: ClassExports = objc_classes! {
             autorelease(env, error);
             env.mem.write(out_error, error);
 
+            log_pang_lifetime(env, this, "init-data-error");
             release(env, this);
             nil
         }
@@ -177,6 +211,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())prepareToPlay {
+    log_pang_lifetime(env, this, "prepare-enter");
     let audio_queue = env.objc.borrow_mut::<AVAudioPlayerHostObject>(this).audio_queue;
     if audio_queue.is_some() {
         return;
@@ -243,6 +278,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.mem.free(tmp_size_ptr.cast());
     env.mem.free(aq_ref_ptr.cast());
     env.mem.free(tmp_data_ptr.cast());
+    log_pang_lifetime(env, this, "prepare-complete");
 }
 
 - (bool)isPlaying {
@@ -259,6 +295,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     let status = AudioQueueStart(env, aq_ref, Ptr::null());
     assert_eq!(status, 0);
 
+    log_pang_lifetime(env, this, "play");
     true
 }
 
@@ -267,9 +304,11 @@ pub const CLASSES: ClassExports = objc_classes! {
     if let Some(aq_ref) = env.objc.borrow::<AVAudioPlayerHostObject>(this).audio_queue {
         AudioQueuePause(env, aq_ref);
     }
+    log_pang_lifetime(env, this, "pause");
 }
 
 - (())stop {
+    log_pang_lifetime(env, this, "stop-enter");
     let &mut AVAudioPlayerHostObject {
         audio_queue,
         audio_queue_buffers,
@@ -277,6 +316,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     } = env.objc.borrow_mut::<AVAudioPlayerHostObject>(this);
     if audio_queue.is_none() {
         // already being stopped
+        log_pang_lifetime(env, this, "stop-no-queue");
         return;
     }
     AudioQueueDispose(env, audio_queue.unwrap(), true);
@@ -297,6 +337,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         volume: 1.0,
         is_playing: false
     };
+    log_pang_lifetime(env, this, "stop-complete");
 }
 
 - (())setNumberOfLoops:(NSInteger)numberOfLoops {
@@ -305,12 +346,14 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())dealloc {
+    log_pang_lifetime(env, this, "dealloc-enter");
     () = msg![env; this stop];
     let &AVAudioPlayerHostObject {audio_file_url, audio_file_id, ..} = env.objc.borrow(this);
     release(env, audio_file_url);
     if let Some(audio_file_id) = audio_file_id {
         AudioFileClose(env, audio_file_id);
     }
+    log_pang_lifetime(env, this, "dealloc-before-object-release");
     env.objc.dealloc_object(this, &mut env.mem)
 }
 

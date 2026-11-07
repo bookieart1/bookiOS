@@ -46,6 +46,29 @@ pub struct State {
     warned_mixer_get_rate: bool,
     warned_mixer_output_rate_proc: bool,
     warned_invalid_host_devices: HashSet<*mut ALCdevice>,
+    zombie_crisis_lifetime_diagnostic_events: u8,
+}
+
+fn log_zombie_crisis_lifetime(env: &mut Environment, event: &str, primary: u32, secondary: i32) {
+    if env.bundle.bundle_identifier() != "com.kongzhong.zombiec" {
+        return;
+    }
+    let (sequence, current_context, context_count, device_count) = {
+        let state = State::get(env);
+        if state.zombie_crisis_lifetime_diagnostic_events >= 96 {
+            return;
+        }
+        state.zombie_crisis_lifetime_diagnostic_events += 1;
+        (
+            state.zombie_crisis_lifetime_diagnostic_events,
+            state.current_ctx,
+            state.contexts.len(),
+            state.devices.len(),
+        )
+    };
+    log!(
+        "Zombie Crisis 3D bounded OpenAL lifetime diagnostic: sequence={sequence} event={event} primary={primary:#x} secondary={secondary} current_context={current_context:?} contexts={context_count} devices={device_count}"
+    );
 }
 impl State {
     fn get(env: &mut Environment) -> &mut Self {
@@ -279,6 +302,7 @@ fn alcCreateContext(
     let state = State::get(env);
     state.contexts.insert(guest_res, ctx);
     state.warned_invalid_contexts.remove(&guest_res);
+    log_zombie_crisis_lifetime(env, "create-context", guest_res.to_bits(), 0);
     guest_res
 }
 
@@ -307,6 +331,7 @@ fn alcDestroyContext(env: &mut Environment, context: MutPtr<GuestALCcontext>) {
     };
 
     env.mem.free(context.cast());
+    log_zombie_crisis_lifetime(env, "destroy-context", context.to_bits(), 0);
     log!("alcDestroyContext({:?})", context);
 }
 
@@ -352,6 +377,12 @@ fn alcMakeContextCurrent(env: &mut Environment, context: MutPtr<GuestALCcontext>
     } else {
         false
     };
+    log_zombie_crisis_lifetime(
+        env,
+        "make-context-current",
+        context.to_bits(),
+        i32::from(res),
+    );
     log_dbg!("alcMakeContextCurrent({:?}) => {}", context, res);
     res
 }
@@ -609,15 +640,24 @@ fn alGetListeneriv(env: &mut Environment, param: ALenum, values: MutPtr<ALint>) 
 
 fn alGenSources(env: &mut Environment, n: ALsizei, sources: MutPtr<ALuint>) {
     let n_usize: GuestUSize = n.try_into().unwrap();
-    let sources = env.mem.ptr_at_mut(sources, n_usize);
-    try_get_context!(env, context);
-    unsafe { context.GenSources(n, sources) };
+    let sources_ptr = sources;
+    {
+        let sources = env.mem.ptr_at_mut(sources_ptr, n_usize);
+        try_get_context!(env, context);
+        unsafe { context.GenSources(n, sources) };
+    }
+    let first = if n > 0 { env.mem.read(sources_ptr) } else { 0 };
+    log_zombie_crisis_lifetime(env, "generate-sources", first, n);
 }
 fn alDeleteSources(env: &mut Environment, n: ALsizei, sources: ConstPtr<ALuint>) {
     let n_usize: GuestUSize = n.try_into().unwrap();
-    let sources = env.mem.ptr_at(sources, n_usize);
-    try_get_context!(env, context);
-    unsafe { context.DeleteSources(n, sources) };
+    let first = if n > 0 { env.mem.read(sources) } else { 0 };
+    {
+        let sources = env.mem.ptr_at(sources, n_usize);
+        try_get_context!(env, context);
+        unsafe { context.DeleteSources(n, sources) };
+    }
+    log_zombie_crisis_lifetime(env, "delete-sources", first, n);
 }
 
 fn alSourcef(env: &mut Environment, source: ALuint, param: ALenum, value: ALfloat) {
@@ -732,6 +772,7 @@ fn alGetSourceiv(env: &mut Environment, source: ALuint, param: ALenum, values: M
 fn alSourcePlay(env: &mut Environment, source: ALuint) {
     try_get_context!(env, context);
     unsafe { context.SourcePlay(source) };
+    log_zombie_crisis_lifetime(env, "source-play", source, 0);
 }
 fn alSourcePause(env: &mut Environment, source: ALuint) {
     try_get_context!(env, context);
@@ -740,6 +781,7 @@ fn alSourcePause(env: &mut Environment, source: ALuint) {
 fn alSourceStop(env: &mut Environment, source: ALuint) {
     try_get_context!(env, context);
     unsafe { context.SourceStop(source) };
+    log_zombie_crisis_lifetime(env, "source-stop", source, 0);
 }
 fn alSourceRewind(env: &mut Environment, source: ALuint) {
     try_get_context!(env, context);
@@ -778,9 +820,12 @@ fn alSourceQueueBuffers(
     buffers: ConstPtr<ALuint>,
 ) {
     let nb_usize: GuestUSize = nb.try_into().unwrap();
-    let buffers = env.mem.ptr_at(buffers, nb_usize);
-    try_get_context!(env, context);
-    unsafe { context.SourceQueueBuffers(source, nb, buffers) }
+    {
+        let buffers = env.mem.ptr_at(buffers, nb_usize);
+        try_get_context!(env, context);
+        unsafe { context.SourceQueueBuffers(source, nb, buffers) }
+    }
+    log_zombie_crisis_lifetime(env, "source-queue-buffers", source, nb);
 }
 fn alSourceUnqueueBuffers(
     env: &mut Environment,
@@ -823,12 +868,18 @@ fn alSourceUnqueueBuffers(
 
 fn alGenBuffers(env: &mut Environment, n: ALsizei, buffers: MutPtr<ALuint>) {
     let n_usize: GuestUSize = n.try_into().unwrap();
-    let buffers = env.mem.ptr_at_mut(buffers, n_usize);
-    try_get_context!(env, context);
-    unsafe { context.GenBuffers(n, buffers) };
+    let buffers_ptr = buffers;
+    {
+        let buffers = env.mem.ptr_at_mut(buffers_ptr, n_usize);
+        try_get_context!(env, context);
+        unsafe { context.GenBuffers(n, buffers) };
+    }
+    let first = if n > 0 { env.mem.read(buffers_ptr) } else { 0 };
+    log_zombie_crisis_lifetime(env, "generate-buffers", first, n);
 }
 fn alDeleteBuffers(env: &mut Environment, n: ALsizei, buffers: ConstPtr<ALuint>) {
     let n_usize: GuestUSize = n.try_into().unwrap();
+    let first = if n > 0 { env.mem.read(buffers) } else { 0 };
     let buffers = env.mem.ptr_at(buffers, n_usize);
     let ctx_ptr = State::get(env).current_ctx;
     let Some(context) = State::try_make_current(env) else {
@@ -844,6 +895,7 @@ fn alDeleteBuffers(env: &mut Environment, n: ALsizei, buffers: ConstPtr<ALuint>)
         return;
     };
     unsafe { context.DeleteBuffers(n, buffers) };
+    log_zombie_crisis_lifetime(env, "delete-buffers", first, n);
 }
 
 fn alBufferData(

@@ -6,9 +6,9 @@
 
 //! The AVFoundation framework.
 
+mod av_asset;
 mod av_audio_player;
 mod av_audio_session;
-mod av_asset;
 
 pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
     path: "/System/Library/Frameworks/AVFoundation.framework/AVFoundation",
@@ -25,4 +25,5 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
 #[derive(Default)]
 pub struct State {
     av_audio_session: av_audio_session::State,
+    pang_lifetime_diagnostic_events: u8,
 }

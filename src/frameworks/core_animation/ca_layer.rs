@@ -63,6 +63,7 @@ pub(super) struct CALayerHostObject {
     pub(super) contents: id,
     /// The part of `contents` to show, in unit co-ordinates.
     pub(super) contents_rect: CGRect,
+    pub(super) contents_gravity: ContentsGravity,
     /// For CAEAGLLayer only
     pub(super) drawable_properties: id,
     /// For CAEAGLLayer only (internal state for compositor)
@@ -80,6 +81,41 @@ pub(super) struct CALayerHostObject {
     pub(super) anonymous_animations: HashSet<id>, // CAAnimation*
 }
 impl HostObject for CALayerHostObject {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ContentsGravity {
+    Center,
+    Top,
+    Bottom,
+    Left,
+    Right,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+    Resize,
+    ResizeAspect,
+    ResizeAspectFill,
+}
+
+impl ContentsGravity {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Center => "center",
+            Self::Top => "top",
+            Self::Bottom => "bottom",
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::TopLeft => "topLeft",
+            Self::TopRight => "topRight",
+            Self::BottomLeft => "bottomLeft",
+            Self::BottomRight => "bottomRight",
+            Self::Resize => "resize",
+            Self::ResizeAspect => "resizeAspect",
+            Self::ResizeAspectFill => "resizeAspectFill",
+        }
+    }
+}
 
 impl CALayerHostObject {
     /// Internal helper method: generate a transformation matrix to transform
@@ -114,6 +150,30 @@ pub const CONSTANTS: ConstantExports = &[
     (
         "_kCAFilterTrilinear",
         HostConstant::NSString(kCAFilterTrilinear),
+    ),
+    ("_kCAGravityCenter", HostConstant::NSString("center")),
+    ("_kCAGravityTop", HostConstant::NSString("top")),
+    ("_kCAGravityBottom", HostConstant::NSString("bottom")),
+    ("_kCAGravityLeft", HostConstant::NSString("left")),
+    ("_kCAGravityRight", HostConstant::NSString("right")),
+    ("_kCAGravityTopLeft", HostConstant::NSString("topLeft")),
+    ("_kCAGravityTopRight", HostConstant::NSString("topRight")),
+    (
+        "_kCAGravityBottomLeft",
+        HostConstant::NSString("bottomLeft"),
+    ),
+    (
+        "_kCAGravityBottomRight",
+        HostConstant::NSString("bottomRight"),
+    ),
+    ("_kCAGravityResize", HostConstant::NSString("resize")),
+    (
+        "_kCAGravityResizeAspect",
+        HostConstant::NSString("resizeAspect"),
+    ),
+    (
+        "_kCAGravityResizeAspectFill",
+        HostConstant::NSString("resizeAspectFill"),
     ),
 ];
 
@@ -151,6 +211,7 @@ pub const CLASSES: ClassExports = objc_classes! {
             origin: CGPoint { x: 0.0, y: 0.0 },
             size: CGSize { width: 1.0, height: 1.0 }
         },
+        contents_gravity: ContentsGravity::Resize,
         drawable_properties: nil,
         presented_pixels: None,
         cg_context: None,
@@ -600,6 +661,29 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.borrow_mut::<CALayerHostObject>(this).contents_rect = rect;
 }
 
+- (id)contentsGravity {
+    get_static_str(env, env.objc.borrow::<CALayerHostObject>(this).contents_gravity.as_str())
+}
+- (())setContentsGravity:(id)gravity {
+    let value = to_rust_string(env, gravity);
+    let gravity = match value.as_ref() {
+        "center" => ContentsGravity::Center,
+        "top" => ContentsGravity::Top,
+        "bottom" => ContentsGravity::Bottom,
+        "left" => ContentsGravity::Left,
+        "right" => ContentsGravity::Right,
+        "topLeft" => ContentsGravity::TopLeft,
+        "topRight" => ContentsGravity::TopRight,
+        "bottomLeft" => ContentsGravity::BottomLeft,
+        "bottomRight" => ContentsGravity::BottomRight,
+        "resize" => ContentsGravity::Resize,
+        "resizeAspect" => ContentsGravity::ResizeAspect,
+        "resizeAspectFill" => ContentsGravity::ResizeAspectFill,
+        _ => panic!("unsupported CALayer contentsGravity {value:?}"),
+    };
+    env.objc.borrow_mut::<CALayerHostObject>(this).contents_gravity = gravity;
+}
+
 - (())setEdgeAntialiasingMask:(u32)mask {
     todo_objc_setter!(this, mask);
 }
@@ -924,6 +1008,21 @@ mod tests {
         assert_eq!(width, 2.5);
         let cleared: id = msg![env; layer borderColor];
         assert_eq!(cleared, nil);
+        release(env, layer);
+    }
+
+    #[test]
+    fn dev_245_contents_gravity_defaults_and_round_trips() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let layer: id = msg_class![env; CALayer new];
+        let resize = ns_string::get_static_str(env, "resize");
+        let bottom_right = ns_string::get_static_str(env, "bottomRight");
+        let initial: id = msg![env; layer contentsGravity];
+        assert_eq!(initial, resize);
+        () = msg![env; layer setContentsGravity:bottom_right];
+        let updated: id = msg![env; layer contentsGravity];
+        assert_eq!(updated, bottom_right);
         release(env, layer);
     }
 }

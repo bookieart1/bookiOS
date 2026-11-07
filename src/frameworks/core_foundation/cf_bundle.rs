@@ -8,8 +8,8 @@
 //! This is not even toll-free bridged to `NSBundle` in Apple's implementation,
 //! but here it is the same type.
 
-use super::cf_array::CFArrayRef;
 use super::cf_allocator::{kCFAllocatorDefault, CFAllocatorRef};
+use super::cf_array::CFArrayRef;
 use super::cf_dictionary::CFDictionaryRef;
 use super::cf_string::CFStringRef;
 use super::cf_url::CFURLRef;
@@ -22,6 +22,7 @@ use crate::Environment;
 
 const kCFBundleVersionKey: &str = "CFBundleVersion";
 const kCFBundleExecutableKey: &str = "CFBundleExecutable";
+const kCFBundleNameKey: &str = "CFBundleName";
 
 pub const CONSTANTS: ConstantExports = &[
     (
@@ -31,6 +32,10 @@ pub const CONSTANTS: ConstantExports = &[
     (
         "_kCFBundleExecutableKey",
         HostConstant::NSString(kCFBundleExecutableKey),
+    ),
+    (
+        "_kCFBundleNameKey",
+        HostConstant::NSString(kCFBundleNameKey),
     ),
 ];
 

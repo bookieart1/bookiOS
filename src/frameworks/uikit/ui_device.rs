@@ -11,14 +11,14 @@ use crate::environment::Environment;
 use crate::frameworks::foundation::ns_string::get_static_str;
 use crate::frameworks::foundation::{ns_string, NSInteger};
 use crate::msg_class;
-use crate::objc::{
-    id, msg, objc_classes, todo_objc_setter, ClassExports, NSZonePtr, TrivialHostObject,
-};
+use crate::objc::{id, msg, nil, objc_classes, ClassExports, NSZonePtr, TrivialHostObject};
 use crate::window::{get_battery_status, BatteryState, DeviceFamily, DeviceOrientation};
 use std::time::{Duration, Instant};
 
 pub const UIDeviceOrientationDidChangeNotification: &str =
     "UIDeviceOrientationDidChangeNotification";
+pub const UIDeviceBatteryStateDidChangeNotification: &str =
+    "UIDeviceBatteryStateDidChangeNotification";
 
 pub type UIDeviceOrientation = NSInteger;
 #[allow(dead_code)]
@@ -52,6 +52,9 @@ pub struct State {
     orientation_candidate: Option<UIDeviceOrientation>,
     orientation_candidate_since: Option<Instant>,
     orientation_due_by: Option<Instant>,
+    battery_monitoring_enabled: bool,
+    last_battery_state: Option<UIDeviceBatteryState>,
+    battery_due_by: Option<Instant>,
 }
 impl State {
     pub fn is_generating_device_orientation_notifications(&self) -> bool {
@@ -62,6 +65,7 @@ impl State {
 const ORIENTATION_SAMPLE_INTERVAL: Duration = Duration::from_millis(50);
 const ORIENTATION_STABILITY_INTERVAL: Duration = Duration::from_millis(100);
 const ORIENTATION_MINIMUM_GRAVITY: f32 = 0.5;
+const BATTERY_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 
 fn interface_orientation(orientation: DeviceOrientation) -> UIDeviceOrientation {
     match orientation {
@@ -105,10 +109,53 @@ fn orientation_from_acceleration(x: f32, y: f32, z: f32) -> Option<UIDeviceOrien
     }
 }
 
-pub const CONSTANTS: ConstantExports = &[(
-    "_UIDeviceOrientationDidChangeNotification",
-    HostConstant::NSString(UIDeviceOrientationDidChangeNotification),
-)];
+pub const CONSTANTS: ConstantExports = &[
+    (
+        "_UIDeviceOrientationDidChangeNotification",
+        HostConstant::NSString(UIDeviceOrientationDidChangeNotification),
+    ),
+    (
+        "_UIDeviceBatteryStateDidChangeNotification",
+        HostConstant::NSString(UIDeviceBatteryStateDidChangeNotification),
+    ),
+];
+
+fn host_battery_state() -> UIDeviceBatteryState {
+    match get_battery_status().1 {
+        BatteryState::Unknown => UIDeviceBatteryStateUnknown,
+        BatteryState::OnBattery => UIDeviceBatteryStateUnplugged,
+        BatteryState::NoBattery | BatteryState::Charging => UIDeviceBatteryStateCharging,
+        BatteryState::Full => UIDeviceBatteryStateFull,
+    }
+}
+
+fn record_battery_state(
+    env: &mut Environment,
+    current: UIDeviceBatteryState,
+) -> UIDeviceBatteryState {
+    let (enabled, changed) = {
+        let state = &mut env.framework_state.uikit.ui_device;
+        let changed = state.last_battery_state.is_some_and(|old| old != current);
+        state.last_battery_state = Some(current);
+        (state.battery_monitoring_enabled, changed)
+    };
+    if enabled && changed {
+        let center: id = msg_class![env; NSNotificationCenter defaultCenter];
+        let name = get_static_str(env, UIDeviceBatteryStateDidChangeNotification);
+        let device = env
+            .framework_state
+            .uikit
+            .ui_device
+            .current_device
+            .unwrap_or(nil);
+        () = msg![env; center postNotificationName:name object:device];
+    }
+    current
+}
+
+fn observe_battery_state(env: &mut Environment) -> UIDeviceBatteryState {
+    record_battery_state(env, host_battery_state())
+}
 
 pub const CLASSES: ClassExports = objc_classes! {
 
@@ -217,11 +264,14 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (bool)isBatteryMonitoringEnabled {
-    true
+    env.framework_state.uikit.ui_device.battery_monitoring_enabled
 }
 - (())setBatteryMonitoringEnabled:(bool)enabled {
-    todo_objc_setter!(this, enabled);
-    assert!(enabled);
+    let current = host_battery_state();
+    let state = &mut env.framework_state.uikit.ui_device;
+    state.battery_monitoring_enabled = enabled;
+    state.last_battery_state = enabled.then_some(current);
+    state.battery_due_by = enabled.then_some(Instant::now() + BATTERY_SAMPLE_INTERVAL);
 }
 - (f32)batteryLevel {
     let pct = get_battery_status().0;
@@ -232,12 +282,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     pct as f32 / 100.0 // narrow down to 0.0 - 1.0
 }
 - (UIDeviceBatteryState)batteryState {
-    match get_battery_status().1 {
-        BatteryState::Unknown => UIDeviceBatteryStateUnknown,
-        BatteryState::OnBattery => UIDeviceBatteryStateUnplugged,
-        BatteryState::NoBattery | BatteryState::Charging => UIDeviceBatteryStateCharging,
-        BatteryState::Full => UIDeviceBatteryStateFull,
-    }
+    observe_battery_state(env)
 }
 
 - (UIUserInterfaceIdiom)userInterfaceIdiom {
@@ -273,13 +318,33 @@ pub const CLASSES: ClassExports = objc_classes! {
 /// remains independent; only UIDevice's physical orientation changes here.
 pub(super) fn handle_device_orientation(env: &mut Environment) -> Option<Instant> {
     let now = Instant::now();
+    let battery_due = {
+        let state = &mut env.framework_state.uikit.ui_device;
+        if !state.battery_monitoring_enabled {
+            state.battery_due_by = None;
+            None
+        } else if state.battery_due_by.is_none_or(|due_by| due_by <= now) {
+            state.battery_due_by = Some(now + BATTERY_SAMPLE_INTERVAL);
+            Some(true)
+        } else {
+            Some(false)
+        }
+    };
+    if battery_due == Some(true) {
+        observe_battery_state(env);
+    }
+    let battery_due_by = env.framework_state.uikit.ui_device.battery_due_by;
     {
         let state = &mut env.framework_state.uikit.ui_device;
         if !state.is_generating_device_orientation_notifications() {
-            return None;
+            return battery_due_by;
         }
         if state.orientation_due_by.is_some_and(|due_by| due_by > now) {
-            return state.orientation_due_by;
+            return match (state.orientation_due_by, battery_due_by) {
+                (Some(orientation), Some(battery)) => Some(orientation.min(battery)),
+                (orientation, None) => orientation,
+                (None, battery) => battery,
+            };
         }
         state.orientation_due_by = Some(now + ORIENTATION_SAMPLE_INTERVAL);
     }
@@ -305,11 +370,9 @@ pub(super) fn handle_device_orientation(env: &mut Environment) -> Option<Instant
                 state.orientation_candidate_since = None;
             }
             Some(_) if state.orientation_candidate == Some(observed) => {
-                let stable = state
-                    .orientation_candidate_since
-                    .is_some_and(|since| {
-                        now.duration_since(since) >= ORIENTATION_STABILITY_INTERVAL
-                    });
+                let stable = state.orientation_candidate_since.is_some_and(|since| {
+                    now.duration_since(since) >= ORIENTATION_STABILITY_INTERVAL
+                });
                 if stable {
                     state.physical_orientation = Some(observed);
                     state.orientation_candidate = None;
@@ -328,7 +391,14 @@ pub(super) fn handle_device_orientation(env: &mut Environment) -> Option<Instant
         log!("UIDevice physical orientation changed to {}.", orientation);
         generate_device_orientation_notification(env);
     }
-    env.framework_state.uikit.ui_device.orientation_due_by
+    match (
+        env.framework_state.uikit.ui_device.orientation_due_by,
+        battery_due_by,
+    ) {
+        (Some(orientation), Some(battery)) => Some(orientation.min(battery)),
+        (orientation, None) => orientation,
+        (None, battery) => battery,
+    }
 }
 
 pub fn generate_device_orientation_notification(env: &mut Environment) {
@@ -374,5 +444,41 @@ mod tests {
     fn physical_orientation_rejects_weak_or_invalid_samples() {
         assert_eq!(orientation_from_acceleration(0.1, 0.2, 0.3), None);
         assert_eq!(orientation_from_acceleration(f32::NAN, 1.0, 0.0), None);
+    }
+
+    #[test]
+    fn dev_245_battery_notification_posts_only_on_monitored_state_change() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let device: id = msg_class![env; UIDevice currentDevice];
+        let notifications: id = msg_class![env; NSMutableArray new];
+        let center: id = msg_class![env; NSNotificationCenter defaultCenter];
+        let selector = env.objc.lookup_selector("addObject:").unwrap();
+        let name = get_static_str(env, UIDeviceBatteryStateDidChangeNotification);
+        () = msg![env; center addObserver:notifications selector:selector name:name object:device];
+        {
+            let state = &mut env.framework_state.uikit.ui_device;
+            state.battery_monitoring_enabled = true;
+            state.last_battery_state = Some(UIDeviceBatteryStateUnplugged);
+        }
+        record_battery_state(env, UIDeviceBatteryStateCharging);
+        record_battery_state(env, UIDeviceBatteryStateCharging);
+        let count: u32 = msg![env; notifications count];
+        assert_eq!(count, 1);
+        env.framework_state
+            .uikit
+            .ui_device
+            .battery_monitoring_enabled = false;
+        record_battery_state(env, UIDeviceBatteryStateFull);
+        let count: u32 = msg![env; notifications count];
+        assert_eq!(count, 1);
+        () = msg![env; center removeObserver:notifications];
+        crate::objc::release(env, notifications);
+        crate::objc::release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

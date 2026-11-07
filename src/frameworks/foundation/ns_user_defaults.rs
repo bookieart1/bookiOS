@@ -9,6 +9,7 @@
 //! - Apple's [Preferences and Settings Programming Guide](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/UserDefaults/AboutPreferenceDomains/AboutPreferenceDomains.html).
 
 use super::{ns_string, NSInteger, NSUInteger};
+use crate::dyld::{ConstantExports, HostConstant};
 use crate::frameworks::foundation::ns_string::to_rust_string;
 use crate::objc::{
     autorelease, id, msg, msg_class, nil, objc_classes, release, Class, ClassExports, HostObject,
@@ -44,6 +45,18 @@ struct NSUserDefaultsHostObject {
     registration_domain_dict: id,
 }
 impl HostObject for NSUserDefaultsHostObject {}
+
+const NSUserDefaultsDidChangeNotification: &str = "NSUserDefaultsDidChangeNotification";
+pub const CONSTANTS: ConstantExports = &[(
+    "_NSUserDefaultsDidChangeNotification",
+    HostConstant::NSString(NSUserDefaultsDidChangeNotification),
+)];
+
+fn post_did_change_notification(env: &mut Environment, this: id) {
+    let center: id = msg_class![env; NSNotificationCenter defaultCenter];
+    let name = ns_string::get_static_str(env, NSUserDefaultsDidChangeNotification);
+    () = msg![env; center postNotificationName:name object:this];
+}
 
 pub const CLASSES: ClassExports = objc_classes! {
 
@@ -236,18 +249,28 @@ pub const CLASSES: ClassExports = objc_classes! {
     );
     // Only app domain gets affected!
     let dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict;
+    let previous: id = msg![env; dict objectForKey:key];
+    if previous != nil && msg![env; previous isEqual:object] {
+        return;
+    }
     () = msg![env; this willChangeValueForKey:key];
     () = msg![env; dict setObject:object forKey:key];
-    msg![env; this didChangeValueForKey:key]
+    () = msg![env; this didChangeValueForKey:key];
+    post_did_change_notification(env, this)
 }
 
 - (())removeObjectForKey:(id)key {
     env.diagnostic_user_defaults_write("remove", this.to_bits(), key.to_bits(), 0);
     // Only app domain gets affected!
     let dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict;
+    let previous: id = msg![env; dict objectForKey:key];
+    if previous == nil {
+        return;
+    }
     () = msg![env; this willChangeValueForKey:key];
     () = msg![env; dict removeObjectForKey:key];
-    msg![env; this didChangeValueForKey:key]
+    () = msg![env; this didChangeValueForKey:key];
+    post_did_change_notification(env, this)
 }
 
 - (id)dataForKey:(id)key {
@@ -444,5 +467,51 @@ mod tests {
         let missing: id = msg![env; defaults persistentDomainForName:unknown];
         assert_eq!(missing, nil);
         release(env, defaults);
+    }
+
+    #[test]
+    fn dev_245_change_notification_posts_only_for_effective_mutations() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let defaults: id = msg_class![env; NSUserDefaults alloc];
+        let app: id = msg_class![env; NSMutableDictionary new];
+        let global: id = msg_class![env; NSMutableDictionary new];
+        let registered: id = msg_class![env; NSMutableDictionary new];
+        *env.objc.borrow_mut::<NSUserDefaultsHostObject>(defaults) = NSUserDefaultsHostObject {
+            app_domain_dict: app,
+            global_domain_dict: global,
+            registration_domain_dict: registered,
+        };
+        let notifications: id = msg_class![env; NSMutableArray new];
+        let center: id = msg_class![env; NSNotificationCenter defaultCenter];
+        let selector = env.objc.lookup_selector("addObject:").unwrap();
+        let name = ns_string::get_static_str(env, "NSUserDefaultsDidChangeNotification");
+        () =
+            msg![env; center addObserver:notifications selector:selector name:name object:defaults];
+        let key = ns_string::get_static_str(env, "difficulty");
+        let value = ns_string::get_static_str(env, "hard");
+
+        () = msg![env; defaults setObject:value forKey:key];
+        let count: NSUInteger = msg![env; notifications count];
+        assert_eq!(count, 1);
+        () = msg![env; defaults setObject:value forKey:key];
+        let count: NSUInteger = msg![env; notifications count];
+        assert_eq!(count, 1);
+        () = msg![env; defaults removeObjectForKey:key];
+        let count: NSUInteger = msg![env; notifications count];
+        assert_eq!(count, 2);
+        () = msg![env; defaults removeObjectForKey:key];
+        let count: NSUInteger = msg![env; notifications count];
+        assert_eq!(count, 2);
+
+        () = msg![env; center removeObserver:notifications];
+        release(env, notifications);
+        release(env, defaults);
+        release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

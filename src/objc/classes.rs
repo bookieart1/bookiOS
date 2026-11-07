@@ -1252,6 +1252,41 @@ mod dev_244_tests {
         assert_eq!(ivars["value"].offset.to_bits(), stable_address);
         assert_eq!(mem.read(offset.cast_const()), 32);
     }
+
+    #[test]
+    fn dev_245_class_get_instance_variable_searches_superclasses_and_handles_null() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let root = env.objc.get_known_class("NSObject", &mut env.mem);
+        let child = env.objc.get_known_class("NSString", &mut env.mem);
+        assert_eq!(env.objc.borrow::<ClassHostObject>(child).superclass, root);
+        let raw_handle = env.mem.alloc_and_write(0_u32);
+        let handle = raw_handle.cast_const().cast();
+        env.objc.borrow_mut::<ClassHostObject>(root).ivars.insert(
+            "_dev245Inherited".to_owned(),
+            IVar {
+                type_: "@".to_owned(),
+                offset: Ptr::null(),
+                alignment: 4,
+                handle,
+            },
+        );
+        let name = env.mem.alloc_and_write_cstr(b"_dev245Inherited");
+        let missing = env.mem.alloc_and_write_cstr(b"_dev245Missing");
+        assert_eq!(
+            class_getInstanceVariable(&mut env, child, name.cast_const()),
+            handle.cast()
+        );
+        assert!(class_getInstanceVariable(&mut env, child, missing.cast_const()).is_null());
+        assert!(class_getInstanceVariable(&mut env, nil, name.cast_const()).is_null());
+        assert!(class_getInstanceVariable(&mut env, child, Ptr::null()).is_null());
+        env.objc
+            .borrow_mut::<ClassHostObject>(root)
+            .ivars
+            .remove("_dev245Inherited");
+        env.mem.free(missing.cast());
+        env.mem.free(name.cast());
+        env.mem.free(raw_handle.cast());
+    }
 }
 
 pub(super) fn objc_getClass(env: &mut Environment, name: ConstPtr<u8>) -> id {
@@ -1305,6 +1340,25 @@ pub(super) fn class_getInstanceSize(env: &mut Environment, cls: Class) -> GuestU
     } else {
         env.objc.borrow::<ClassHostObject>(cls).instance_size
     }
+}
+
+pub(super) fn class_getInstanceVariable(
+    env: &mut Environment,
+    mut cls: Class,
+    name: ConstPtr<u8>,
+) -> ConstVoidPtr {
+    if cls == nil || name.is_null() {
+        return ConstVoidPtr::null();
+    }
+    let name = env.mem.cstr_at_utf8(name).unwrap();
+    while cls != nil {
+        let class = env.objc.borrow::<ClassHostObject>(cls);
+        if let Some(ivar) = class.ivars.get(name) {
+            return ivar.handle.cast();
+        }
+        cls = class.superclass;
+    }
+    ConstVoidPtr::null()
 }
 
 pub(crate) fn class_getVersion(env: &mut Environment, cls: Class) -> i32 {

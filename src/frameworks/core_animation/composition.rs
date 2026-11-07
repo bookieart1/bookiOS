@@ -11,7 +11,7 @@
 #![allow(clippy::zero_ptr)] // alas, as you know, opengl
 
 use super::ca_eagl_layer::find_fullscreen_eagl_layer;
-use super::ca_layer::CALayerHostObject;
+use super::ca_layer::{CALayerHostObject, ContentsGravity};
 use crate::frameworks::core_animation::animation;
 use crate::frameworks::core_graphics::cg_color::CGColorHostObject;
 use crate::frameworks::core_graphics::{cg_bitmap_context, cg_image, CGFloat, CGRect};
@@ -36,6 +36,8 @@ pub(super) struct State {
     misc_gl_objects: Option<MiscGlObjects>,
     input_diagnostic_remaining: u8,
     input_diagnostic_emitted: u8,
+    startup_presentation_attempts: u16,
+    startup_frame_presented: bool,
 }
 
 impl State {
@@ -83,15 +85,24 @@ unsafe fn load_matrix(gles: &mut dyn GLES, matrix: Matrix<4>) {
 
 unsafe fn assert_compositor_gl_clean(
     gles: &mut dyn GLES,
-    guest_gl_state: &crate::frameworks::opengles::State,
+    _guest_gl_state: &crate::frameworks::opengles::State,
     stage: &str,
     layer: id,
 ) {
     let error = gles.GetError();
     let framebuffer_status = gles.CheckFramebufferStatusOES(gles11::FRAMEBUFFER_OES);
     let status_error = gles.GetError();
-    if error != gles11::NO_ERROR || status_error != gles11::NO_ERROR {
-        guest_gl_state.log_gl_error_candidates(stage, error.max(status_error));
+    if error != gles11::NO_ERROR
+        || status_error != gles11::NO_ERROR
+        || framebuffer_status != gles11::FRAMEBUFFER_COMPLETE_OES
+    {
+        // This is deliberately emitted only at the terminal internal-compositor
+        // failure, not for every guest GL call. It tells the ActionPig/Forlorn/
+        // Wispin investigation which compositor boundary first became invalid
+        // without misattributing the error to a guessed guest call site.
+        log!(
+            "Bounded internal-compositor GL diagnostic: stage={stage:?} layer={layer:?} error={error:#x} framebuffer_status={framebuffer_status:#x} status_query_error={status_error:#x}"
+        );
     }
     assert!(
         error == gles11::NO_ERROR
@@ -110,7 +121,25 @@ unsafe fn assert_compositor_gl_clean(
 pub fn recomposite_if_necessary(env: &mut Environment, force: bool) -> Option<Instant> {
     let mut animation_state = animation::State::default();
     let windows = env.framework_state.uikit.ui_view.ui_window.windows.clone();
-    if !windows.iter().any(|&window| !msg![env; window isHidden]) {
+    let visible_window_count = windows
+        .iter()
+        .filter(|&&window| !msg![env; window isHidden])
+        .count();
+    if env.bundle.bundle_identifier() == "com.turner.bringmesandwiches" {
+        let state = &mut env.framework_state.core_animation.composition;
+        state.startup_presentation_attempts = state.startup_presentation_attempts.saturating_add(1);
+        if matches!(state.startup_presentation_attempts, 1 | 2 | 4 | 8 | 16 | 32) {
+            log!(
+                "Bring Me Sandwiches bounded presentation diagnostic: attempt={} windows={} visible_windows={} force={} first_frame_presented={}",
+                state.startup_presentation_attempts,
+                windows.len(),
+                visible_window_count,
+                force,
+                state.startup_frame_presented
+            );
+        }
+    }
+    if visible_window_count == 0 {
         log_dbg!("No visible windows, skipping composition");
         return None;
     }
@@ -479,6 +508,26 @@ pub fn recomposite_if_necessary(env: &mut Environment, force: bool) -> Option<In
     std::mem::drop(gles);
     window.swap_window();
 
+    if env.bundle.bundle_identifier() == "com.turner.bringmesandwiches"
+        && !env
+            .framework_state
+            .core_animation
+            .composition
+            .startup_frame_presented
+    {
+        env.framework_state
+            .core_animation
+            .composition
+            .startup_frame_presented = true;
+        log!(
+            "Bring Me Sandwiches bounded presentation diagnostic: first compositor frame presented after {} attempts",
+            env.framework_state
+                .core_animation
+                .composition
+                .startup_presentation_attempts
+        );
+    }
+
     animation_state.update_started_and_finished_animations(env);
 
     new_recomposite_next
@@ -747,7 +796,7 @@ unsafe fn composite_layer_recursive(
             .as_ref()
             .unwrap();
 
-        let (u_max, v_max) = {
+        let (content_width, content_height, u_max, v_max) = {
             let (w, h) = if let Some((_, w, h)) = &host_obj.presented_pixels {
                 (*w, *h)
             } else if host_obj.contents != nil {
@@ -760,7 +809,12 @@ unsafe fn composite_layer_recursive(
                 (1, 1)
             };
             let (pw, ph) = to_pot_texture_dim(w, h);
-            (w as f32 / pw as f32, h as f32 / ph as f32)
+            (
+                w as f32,
+                h as f32,
+                w as f32 / pw as f32,
+                h as f32 / ph as f32,
+            )
         };
 
         gles.Color4f(opacity, opacity, opacity, opacity);
@@ -781,8 +835,98 @@ unsafe fn composite_layer_recursive(
         gles.EnableClientState(gles11::TEXTURE_COORD_ARRAY);
         gles.BindBuffer(gles11::ARRAY_BUFFER, 0);
 
+        // Resolve the historical contents-gravity contract into a destination
+        // rectangle. Aspect-fill is clipped by narrowing the source rectangle;
+        // the other non-resize modes preserve the content's natural point size.
+        let mut source = host_obj.contents_rect;
+        let bounds = host_obj.bounds;
+        let selected_width = content_width * source.size.width;
+        let selected_height = content_height * source.size.height;
+        let contents_scale = if host_obj.contents_scale > 0.0 {
+            host_obj.contents_scale
+        } else {
+            1.0
+        };
+        let natural_width = selected_width / contents_scale;
+        let natural_height = selected_height / contents_scale;
+        let destination = match host_obj.contents_gravity {
+            ContentsGravity::Resize => bounds,
+            ContentsGravity::ResizeAspect if natural_width > 0.0 && natural_height > 0.0 => {
+                let scale =
+                    (bounds.size.width / natural_width).min(bounds.size.height / natural_height);
+                let width = natural_width * scale;
+                let height = natural_height * scale;
+                CGRect {
+                    origin: crate::frameworks::core_graphics::CGPoint {
+                        x: bounds.origin.x + (bounds.size.width - width) / 2.0,
+                        y: bounds.origin.y + (bounds.size.height - height) / 2.0,
+                    },
+                    size: crate::frameworks::core_graphics::CGSize { width, height },
+                }
+            }
+            ContentsGravity::ResizeAspectFill
+                if selected_width > 0.0
+                    && selected_height > 0.0
+                    && bounds.size.width > 0.0
+                    && bounds.size.height > 0.0 =>
+            {
+                let source_aspect = selected_width / selected_height;
+                let bounds_aspect = bounds.size.width / bounds.size.height;
+                if source_aspect > bounds_aspect {
+                    let fraction = bounds_aspect / source_aspect;
+                    source.origin.x += source.size.width * (1.0 - fraction) / 2.0;
+                    source.size.width *= fraction;
+                } else if source_aspect < bounds_aspect {
+                    let fraction = source_aspect / bounds_aspect;
+                    source.origin.y += source.size.height * (1.0 - fraction) / 2.0;
+                    source.size.height *= fraction;
+                }
+                bounds
+            }
+            gravity => {
+                let width = natural_width;
+                let height = natural_height;
+                let x = match gravity {
+                    ContentsGravity::Left
+                    | ContentsGravity::TopLeft
+                    | ContentsGravity::BottomLeft => bounds.origin.x,
+                    ContentsGravity::Right
+                    | ContentsGravity::TopRight
+                    | ContentsGravity::BottomRight => bounds.origin.x + bounds.size.width - width,
+                    _ => bounds.origin.x + (bounds.size.width - width) / 2.0,
+                };
+                let y = match gravity {
+                    ContentsGravity::Top | ContentsGravity::TopLeft | ContentsGravity::TopRight => {
+                        bounds.origin.y
+                    }
+                    ContentsGravity::Bottom
+                    | ContentsGravity::BottomLeft
+                    | ContentsGravity::BottomRight => bounds.origin.y + bounds.size.height - height,
+                    _ => bounds.origin.y + (bounds.size.height - height) / 2.0,
+                };
+                CGRect {
+                    origin: crate::frameworks::core_graphics::CGPoint { x, y },
+                    size: crate::frameworks::core_graphics::CGSize { width, height },
+                }
+            }
+        };
+        gles.MatrixMode(gles11::MODELVIEW);
+        load_matrix(
+            gles.as_mut(),
+            Matrix::<4>::from(&Matrix::scale_2d(
+                destination.size.width,
+                destination.size.height,
+            ))
+            .multiply(&Matrix::translate_3d(
+                destination.origin.x,
+                destination.origin.y,
+                0.0,
+            ))
+            .multiply(&cumulative_transform),
+        );
+
         // The part of the image to show (contentsRect), from its top-left.
-        let CGRect { origin, size } = host_obj.contents_rect;
+        let CGRect { origin, size } = source;
         let (u0, u1) = (origin.x * u_max, (origin.x + size.width) * u_max);
         let (top, bottom) = (origin.y, origin.y + size.height);
 

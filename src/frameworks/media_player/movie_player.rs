@@ -294,11 +294,14 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())stop {
     log!("TODO: [(MPMoviePlayerController*){:?} stop]", this);
-    if env.framework_state.media_player.movie_player.active_player.is_some() {
-        // Some applications (like NOVA2) may send 2 `stop` messages for each
-        // 1 `play` message for the player. In that case, we want to release
-        // the active player only once.
-        assert!(this == env.framework_state.media_player.movie_player.active_player.take().unwrap());
+    // Stopping an older controller must not tear down a newer active player.
+    // Historical clients commonly keep controllers alive across transitions
+    // and send a redundant late stop to the inactive one.
+    State::get(env)
+        .pending_notifications
+        .retain(|&(_, object, _)| object != this);
+    if State::get(env).active_player == Some(this) {
+        State::get(env).active_player = None;
         release(env, this);
     }
 }
@@ -360,5 +363,20 @@ mod tests {
         let repeated: MPMovieRepeatMode = msg![env; player repeatMode];
         assert_eq!(repeated, 1);
         release(env, player);
+    }
+
+    #[test]
+    fn dev_245_stopping_inactive_movie_does_not_stop_newer_player() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let old: id = msg_class![env; MPMoviePlayerController alloc];
+        let new: id = msg_class![env; MPMoviePlayerController alloc];
+        () = msg![env; old play];
+        () = msg![env; new play];
+        () = msg![env; old stop];
+        assert_eq!(State::get(env).active_player, Some(new));
+        () = msg![env; new stop];
+        release(env, old);
+        release(env, new);
     }
 }

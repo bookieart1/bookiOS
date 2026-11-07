@@ -188,11 +188,85 @@ fn CFStringCreateWithBytes(
     is_external: bool,
 ) -> CFStringRef {
     assert!(allocator == kCFAllocatorDefault || env.mem.read(allocator).is_system_default()); // unimplemented
-    assert!(!is_external); // TODO
-    let encoding = CFStringConvertEncodingToNSStringEncoding(env, encoding);
     let length: NSUInteger = num_bytes.try_into().unwrap();
+    let mut owned = env.mem.bytes_at(bytes, length).to_vec();
+    let mut effective_encoding = encoding;
+    if is_external {
+        let strip_prefix = |bytes: &mut Vec<u8>, prefix: &[u8]| {
+            if bytes.starts_with(prefix) {
+                bytes.drain(..prefix.len());
+                true
+            } else {
+                false
+            }
+        };
+        match encoding {
+            kCFStringEncodingUTF8 => {
+                strip_prefix(&mut owned, &[0xef, 0xbb, 0xbf]);
+            }
+            kCFStringEncodingUTF16 => {
+                effective_encoding = if strip_prefix(&mut owned, &[0xfe, 0xff]) {
+                    kCFStringEncodingUTF16BE
+                } else if strip_prefix(&mut owned, &[0xff, 0xfe]) {
+                    kCFStringEncodingUTF16LE
+                } else {
+                    // External Unicode representations without a BOM use
+                    // network (big-endian) byte order.
+                    kCFStringEncodingUTF16BE
+                };
+            }
+            kCFStringEncodingUTF16BE => {
+                strip_prefix(&mut owned, &[0xfe, 0xff]);
+            }
+            kCFStringEncodingUTF16LE => {
+                strip_prefix(&mut owned, &[0xff, 0xfe]);
+            }
+            kCFStringEncodingUTF32 => {
+                effective_encoding = if strip_prefix(&mut owned, &[0x00, 0x00, 0xfe, 0xff]) {
+                    kCFStringEncodingUTF32BE
+                } else if strip_prefix(&mut owned, &[0xff, 0xfe, 0x00, 0x00]) {
+                    kCFStringEncodingUTF32LE
+                } else {
+                    kCFStringEncodingUTF32BE
+                };
+            }
+            kCFStringEncodingUTF32BE => {
+                strip_prefix(&mut owned, &[0x00, 0x00, 0xfe, 0xff]);
+            }
+            kCFStringEncodingUTF32LE => {
+                strip_prefix(&mut owned, &[0xff, 0xfe, 0x00, 0x00]);
+            }
+            _ => {}
+        }
+    }
+    if matches!(
+        effective_encoding,
+        kCFStringEncodingUTF16 | kCFStringEncodingUTF16BE | kCFStringEncodingUTF16LE
+    ) && !owned.len().is_multiple_of(2)
+        || matches!(
+            effective_encoding,
+            kCFStringEncodingUTF32 | kCFStringEncodingUTF32BE | kCFStringEncodingUTF32LE
+        ) && !owned.len().is_multiple_of(4)
+    {
+        return nil;
+    }
+    let encoding = CFStringConvertEncodingToNSStringEncoding(env, effective_encoding);
     let ns_string: id = msg_class![env; NSString alloc];
-    msg![env; ns_string initWithBytes:bytes length:length encoding:encoding]
+    if owned.is_empty() {
+        return msg![env; ns_string initWithBytes:bytes length:0u32 encoding:encoding];
+    }
+    // `CFStringCreateWithBytes` has copying ownership. A temporary guest buffer
+    // lets the existing NSString decoder remain the one source of conversion
+    // semantics while making that ownership explicit.
+    let copied: MutPtr<u8> = env.mem.alloc(owned.len().try_into().unwrap()).cast();
+    env.mem
+        .bytes_at_mut(copied.cast(), owned.len().try_into().unwrap())
+        .copy_from_slice(&owned);
+    let result: id = msg![env; ns_string initWithBytes:(copied.cast_const())
+                                             length:(owned.len() as u32)
+                                           encoding:encoding];
+    env.mem.free(copied.cast());
+    result
 }
 
 fn CFStringCreateWithCString(
@@ -585,8 +659,28 @@ pub const FUNCTIONS: FunctionExports = &[
 mod tests {
     use super::*;
     use crate::frameworks::core_foundation::cf_type::CFGetTypeID;
-    use crate::frameworks::foundation::ns_string::from_rust_string;
-    use crate::objc::id;
+    use crate::frameworks::foundation::ns_string::{from_rust_string, to_rust_string};
+    use crate::mem::Ptr;
+    use crate::objc::{id, release};
+
+    fn create_with_bytes(
+        env: &mut Environment,
+        bytes: &[u8],
+        encoding: CFStringEncoding,
+        is_external: bool,
+    ) -> id {
+        let guest_bytes = env.mem.alloc_and_write_cstr(bytes);
+        let result = CFStringCreateWithBytes(
+            env,
+            Ptr::null(),
+            guest_bytes.cast_const(),
+            bytes.len().try_into().unwrap(),
+            encoding,
+            is_external,
+        );
+        env.mem.free(guest_bytes.cast());
+        result
+    }
 
     #[test]
     fn supported_iana_charset_names_are_canonical() {
@@ -664,6 +758,98 @@ mod tests {
         let found = env.mem.read(result);
         assert_eq!((found.location, found.length), (4, 3));
         env.mem.free(result.cast());
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
+
+    #[test]
+    fn dev_245_external_representations_honor_boms_validation_and_copying() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+
+        let utf8 = create_with_bytes(env, b"\xef\xbb\xbfhello", kCFStringEncodingUTF8, true);
+        assert_eq!(to_rust_string(env, utf8), "hello");
+        release(env, utf8);
+
+        let utf8_without_external =
+            create_with_bytes(env, b"\xef\xbb\xbfhello", kCFStringEncodingUTF8, false);
+        assert_eq!(to_rust_string(env, utf8_without_external), "\u{feff}hello");
+        release(env, utf8_without_external);
+
+        let utf16_be =
+            create_with_bytes(env, &[0xfe, 0xff, 0x00, b'A'], kCFStringEncodingUTF16, true);
+        assert_eq!(to_rust_string(env, utf16_be), "A");
+        release(env, utf16_be);
+
+        let utf16_le =
+            create_with_bytes(env, &[0xff, 0xfe, b'A', 0x00], kCFStringEncodingUTF16, true);
+        assert_eq!(to_rust_string(env, utf16_le), "A");
+        release(env, utf16_le);
+
+        let utf16_be_explicit = create_with_bytes(
+            env,
+            &[0xfe, 0xff, 0x00, b'B'],
+            kCFStringEncodingUTF16BE,
+            true,
+        );
+        assert_eq!(to_rust_string(env, utf16_be_explicit), "B");
+        release(env, utf16_be_explicit);
+
+        let utf16_le_explicit = create_with_bytes(
+            env,
+            &[0xff, 0xfe, b'C', 0x00],
+            kCFStringEncodingUTF16LE,
+            true,
+        );
+        assert_eq!(to_rust_string(env, utf16_le_explicit), "C");
+        release(env, utf16_le_explicit);
+
+        let utf32_be = create_with_bytes(
+            env,
+            &[0x00, 0x00, 0xfe, 0xff, 0x00, 0x00, 0x00, b'D'],
+            kCFStringEncodingUTF32,
+            true,
+        );
+        assert_eq!(to_rust_string(env, utf32_be), "D");
+        release(env, utf32_be);
+
+        let utf32_le = create_with_bytes(
+            env,
+            &[0xff, 0xfe, 0x00, 0x00, b'E', 0x00, 0x00, 0x00],
+            kCFStringEncodingUTF32,
+            true,
+        );
+        assert_eq!(to_rust_string(env, utf32_le), "E");
+        release(env, utf32_le);
+
+        assert_eq!(
+            create_with_bytes(env, &[0x00], kCFStringEncodingUTF16, true),
+            nil
+        );
+        assert_eq!(
+            create_with_bytes(env, &[0xff], kCFStringEncodingUTF8, true),
+            nil
+        );
+        assert_eq!(
+            create_with_bytes(env, &[0x00, 0x00, 0x00], kCFStringEncodingUTF32, true),
+            nil
+        );
+
+        let mutable_input = env.mem.alloc_and_write_cstr(b"copy");
+        let copied = CFStringCreateWithBytes(
+            env,
+            Ptr::null(),
+            mutable_input.cast_const(),
+            4,
+            kCFStringEncodingUTF8,
+            false,
+        );
+        env.mem.write(mutable_input, b'X');
+        assert_eq!(to_rust_string(env, copied), "copy");
+        env.mem.free(mutable_input.cast());
+        release(env, copied);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);
     }

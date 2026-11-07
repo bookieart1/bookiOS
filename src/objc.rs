@@ -32,8 +32,8 @@ mod properties;
 mod selectors;
 mod synchronization;
 
-pub use classes::{objc_classes, Class, ClassExports, ClassTemplate};
 pub(crate) use classes::{class_getVersion, class_setVersion};
+pub use classes::{objc_classes, Class, ClassExports, ClassTemplate};
 pub use messages::{
     autorelease, msg, msg_class, msg_send, msg_send_no_initialize, msg_send_no_type_checking,
     msg_send_super2, msg_super, objc_super, release, retain,
@@ -49,11 +49,12 @@ use crate::mem::{ConstPtr, ConstVoidPtr, MutPtr, Ptr};
 use crate::Environment;
 use classes::{
     class_addMethod, class_conformsToProtocol, class_copyPropertyList, class_getClassMethod,
-    class_getInstanceMethod, class_getInstanceSize, class_getMethodImplementation,
-    class_getProperty, class_getSuperclass, class_isMetaClass, class_replaceMethod,
-    method_exchangeImplementations, method_getImplementation, method_getTypeEncoding,
-    method_setImplementation, objc_getClass, objc_getMetaClass, property_getAttributes,
-    property_getName, protocol_conformsToProtocol, ClassHostObject, FakeClass, UnimplementedClass,
+    class_getInstanceMethod, class_getInstanceSize, class_getInstanceVariable,
+    class_getMethodImplementation, class_getProperty, class_getSuperclass, class_isMetaClass,
+    class_replaceMethod, method_exchangeImplementations, method_getImplementation,
+    method_getTypeEncoding, method_setImplementation, objc_getClass, objc_getMetaClass,
+    property_getAttributes, property_getName, protocol_conformsToProtocol, ClassHostObject,
+    FakeClass, UnimplementedClass,
 };
 pub(crate) use messages::objc_msgSend;
 use messages::{
@@ -288,6 +289,7 @@ fn object_getClassName(env: &mut Environment, object: id) -> ConstPtr<u8> {
 const FUNCTIONS: FunctionExports = &[
     export_c_func!(class_copyPropertyList(_, _)),
     export_c_func!(class_getInstanceSize(_)),
+    export_c_func!(class_getInstanceVariable(_, _)),
     export_c_func!(class_getSuperclass(_)),
     export_c_func!(class_getVersion(_)),
     export_c_func!(class_setVersion(_, _)),

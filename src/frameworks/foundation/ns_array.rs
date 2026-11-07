@@ -45,6 +45,33 @@ pub(super) struct ArrayHostObject {
 }
 impl HostObject for ArrayHostObject {}
 
+fn init_with_array_inner(env: &mut Environment, this: id, array: id, copy_items: bool) -> id {
+    let mut objects = Vec::new();
+    let enumerator: id = msg![env; array objectEnumerator];
+    loop {
+        let next: id = msg![env; enumerator nextObject];
+        if next == nil {
+            break;
+        }
+        let stored = if copy_items {
+            let zone = NSZonePtr::null();
+            msg![env; next copyWithZone:zone]
+        } else {
+            retain(env, next);
+            next
+        };
+        objects.push(stored);
+    }
+    let old = std::mem::replace(
+        &mut env.objc.borrow_mut::<ArrayHostObject>(this).array,
+        objects,
+    );
+    for object in old {
+        release(env, object);
+    }
+    this
+}
+
 /// The fixed header of a 32-bit Apple block literal. Captured variables, if
 /// any, follow this header and are accessed by the block's invoke function.
 #[repr(C)]
@@ -516,18 +543,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)initWithArray:(id)array { // NSArray*
-    let mut objects = Vec::new();
-    let enumerator: id = msg![env; array objectEnumerator];
-    loop {
-        let next: id = msg![env; enumerator nextObject];
-        if next == nil {
-            break;
-        }
-        objects.push(next);
-        retain(env, next);
-    }
-    env.objc.borrow_mut::<ArrayHostObject>(this).array = objects;
-    this
+    init_with_array_inner(env, this, array, false)
+}
+- (id)initWithArray:(id)array copyItems:(bool)copy_items {
+    init_with_array_inner(env, this, array, copy_items)
 }
 
 - (id)initWithObjects:(id)first_obj, ...args {
@@ -693,18 +712,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)initWithArray:(id)array { // NSArray*
-    let mut objects = Vec::new();
-    let enumerator: id = msg![env; array objectEnumerator];
-    loop {
-        let next: id = msg![env; enumerator nextObject];
-        if next == nil {
-            break;
-        }
-        objects.push(next);
-        retain(env, next);
-    }
-    env.objc.borrow_mut::<ArrayHostObject>(this).array = objects;
-    this
+    init_with_array_inner(env, this, array, false)
+}
+- (id)initWithArray:(id)array copyItems:(bool)copy_items {
+    init_with_array_inner(env, this, array, copy_items)
 }
 
 // NSCoding implementation
@@ -1233,6 +1244,7 @@ fn init_with_objects_inner(env: &mut Environment, arr: id, first_obj: id, args: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frameworks::foundation::ns_string::to_rust_string;
 
     #[test]
     fn singleton_factories_preserve_mutability_and_element_ownership() {
@@ -1269,6 +1281,29 @@ mod tests {
         release(env, mutable);
         release(env, first);
         release(env, second);
+    }
+
+    #[test]
+    fn dev_245_init_with_array_copy_items_copies_each_element() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let original: id = msg_class![env; NSMutableString new];
+        let a = ns_string::get_static_str(env, "a");
+        let b = ns_string::get_static_str(env, "b");
+        () = msg![env; original appendString:a];
+        let source: id = msg_class![env; NSArray arrayWithObject:original];
+        let copy: id = msg_class![env; NSMutableArray alloc];
+        let copy: id = msg![env; copy initWithArray:source copyItems:true];
+        let element: id = msg![env; copy objectAtIndex:0u32];
+        assert_ne!(element, original);
+        assert_eq!(to_rust_string(env, element), "a");
+        () = msg![env; original appendString:b];
+        assert_eq!(to_rust_string(env, original), "ab");
+        assert_eq!(to_rust_string(env, element), "a");
+        release(env, copy);
+        release(env, original);
+        release(env, pool);
     }
 
     #[test]

@@ -5,7 +5,7 @@
  */
 //! `CGPath`
 use super::cg_affine_transform::CGAffineTransform;
-use super::CGPoint;
+use super::{CGPoint, CGRect};
 use crate::dyld::{export_c_func, FunctionExports};
 use crate::frameworks::core_foundation::{CFRelease, CFRetain, CFTypeRef};
 use crate::mem::{ConstPtr, GuestUSize};
@@ -112,6 +112,39 @@ pub fn CGPathAddLineToPoint(
 ) {
     let point = transformed(env, m, CGPoint { x, y });
     add_element(env, path, kCGPathElementAddLineToPoint, point);
+}
+
+pub fn CGPathAddEllipseInRect(
+    env: &mut Environment,
+    path: CGMutablePathRef,
+    m: ConstPtr<CGAffineTransform>,
+    rect: CGRect,
+) {
+    if !rect.origin.x.is_finite()
+        || !rect.origin.y.is_finite()
+        || !rect.size.width.is_finite()
+        || !rect.size.height.is_finite()
+        || rect.size.width <= 0.0
+        || rect.size.height <= 0.0
+    {
+        return;
+    }
+    const SEGMENTS: usize = 32;
+    let center_x = rect.origin.x + rect.size.width / 2.0;
+    let center_y = rect.origin.y + rect.size.height / 2.0;
+    let radius_x = rect.size.width / 2.0;
+    let radius_y = rect.size.height / 2.0;
+    for step in 0..SEGMENTS {
+        let angle = std::f32::consts::TAU * step as f32 / SEGMENTS as f32;
+        let x = center_x + radius_x * angle.cos();
+        let y = center_y + radius_y * angle.sin();
+        if step == 0 {
+            CGPathMoveToPoint(env, path, m, x, y);
+        } else {
+            CGPathAddLineToPoint(env, path, m, x, y);
+        }
+    }
+    CGPathCloseSubpath(env, path);
 }
 
 /// Add a cubic Bézier curve. The current renderer consumes flattened moves and
@@ -262,12 +295,7 @@ pub fn CGPathAddArcToPoint(
     }
 }
 
-fn arc_to_points(
-    current: CGPoint,
-    point1: CGPoint,
-    point2: CGPoint,
-    radius: f32,
-) -> Vec<CGPoint> {
+fn arc_to_points(current: CGPoint, point1: CGPoint, point2: CGPoint, radius: f32) -> Vec<CGPoint> {
     const EPSILON: f32 = 1.0e-6;
 
     let from_corner = CGPoint {
@@ -400,6 +428,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGPathRelease(_)),
     export_c_func!(CGPathMoveToPoint(_, _, _, _)),
     export_c_func!(CGPathAddLineToPoint(_, _, _, _)),
+    export_c_func!(CGPathAddEllipseInRect(_, _, _)),
     export_c_func!(CGPathAddCurveToPoint(_, _, _, _, _, _, _, _)),
     export_c_func!(CGPathCloseSubpath(_)),
     export_c_func!(CGPathGetCurrentPoint(_)),
@@ -511,6 +540,29 @@ mod tests {
         assert_eq!(points.last(), Some(&CGPoint { x: 1.0, y: 0.0 }));
         assert!((points[8].x - 0.5).abs() < 1.0e-5);
         assert!((points[8].y - 0.75).abs() < 1.0e-5);
+        CGPathRelease(&mut env, path);
+    }
+
+    #[test]
+    fn dev_245_ellipse_is_a_closed_bounded_polyline() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let path = CGPathCreateMutable(&mut env);
+        CGPathAddEllipseInRect(
+            &mut env,
+            path,
+            ConstPtr::null(),
+            CGRect {
+                origin: CGPoint { x: 2.0, y: 4.0 },
+                size: super::super::CGSize {
+                    width: 6.0,
+                    height: 2.0,
+                },
+            },
+        );
+        let points = path_points(&env, path);
+        assert_eq!(points.len(), 33);
+        assert_eq!(points.first(), points.last());
+        assert_eq!(points[0], CGPoint { x: 8.0, y: 5.0 });
         CGPathRelease(&mut env, path);
     }
 }

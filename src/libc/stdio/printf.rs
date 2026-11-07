@@ -617,7 +617,7 @@ fn e_format(
 
 #[cfg(test)]
 mod tests {
-    use super::{e_format, f_format, format_wide, repad_float};
+    use super::{e_format, f_format, format_wide, repad_float, sscanf_common};
     use crate::abi::VaList;
     use crate::mem::ConstVoidPtr;
     use crate::Environment;
@@ -650,11 +650,30 @@ mod tests {
         let mut env = Environment::new_fake_for_test_with_thread();
         let wide = env.mem.alloc(4 * 9).cast();
         for (index, value) in "score=%d\0".encode_utf16().enumerate() {
-            env.mem.write(wide + index.try_into().unwrap(), i32::from(value));
+            env.mem
+                .write(wide + index.try_into().unwrap(), i32::from(value));
         }
         env.cpu.regs_mut()[0] = 42;
         let args = VaList::for_test(0, ConstVoidPtr::from_bits(0));
         assert_eq!(format_wide(&mut env, wide.cast_const(), args), b"score=42");
+    }
+
+    #[test]
+    fn dev_245_sscanf_ll_writes_guest_64_bit_integer() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let source = env.mem.alloc_and_write_cstr(b"-4294967297");
+        let format = env.mem.alloc_and_write_cstr(b"%lld");
+        let destination = env.mem.alloc_and_write(0_i64);
+        env.cpu.regs_mut()[0] = destination.to_bits();
+        let args = VaList::for_test(0, ConstVoidPtr::from_bits(0));
+        assert_eq!(
+            sscanf_common(&mut env, source.cast_const(), format.cast_const(), args),
+            1
+        );
+        assert_eq!(env.mem.read(destination), -4_294_967_297_i64);
+        env.mem.free(destination.cast());
+        env.mem.free(format.cast());
+        env.mem.free(source.cast());
     }
 }
 
@@ -725,14 +744,24 @@ fn format_wide(env: &mut Environment, format: ConstPtr<wchar_t>, args: VaList) -
     let len: GuestUSize = bytes.len().try_into().unwrap();
     printf_inner::<false, _>(
         env,
-        |_mem, idx| if idx == len { b'\0' } else { bytes[idx as usize] },
+        |_mem, idx| {
+            if idx == len {
+                b'\0'
+            } else {
+                bytes[idx as usize]
+            }
+        },
         args,
     )
 }
 
 fn vwprintf(env: &mut Environment, format: ConstPtr<wchar_t>, args: VaList) -> i32 {
     set_errno(env, 0);
-    log_dbg!("vwprintf({:?} ({:?}), ...)", format, env.mem.wcstr_at(format));
+    log_dbg!(
+        "vwprintf({:?} ({:?}), ...)",
+        format,
+        env.mem.wcstr_at(format)
+    );
     let result = format_wide(env, format, args);
     let _ = std::io::stdout().write_all(&result);
     result.len().try_into().unwrap()
@@ -1142,6 +1171,15 @@ where
                                     let c_int_ptr: ConstPtr<i32> = args.next(env);
                                     env.mem.write(c_int_ptr.cast_mut(), val as i32);
                                 }
+                                Some("l") => {
+                                    // `long` remains 32-bit in the guest ABI.
+                                    let c_long_ptr: ConstPtr<i32> = args.next(env);
+                                    env.mem.write(c_long_ptr.cast_mut(), val as i32);
+                                }
+                                Some("ll") => {
+                                    let c_long_long_ptr: ConstPtr<i64> = args.next(env);
+                                    env.mem.write(c_long_long_ptr.cast_mut(), val);
+                                }
                                 _ => unimplemented!("length_modifier {:?}", length_modifier),
                             }
                             matched_args += 1;
@@ -1218,6 +1256,10 @@ where
                                 None => {
                                     let c_u32_ptr: ConstPtr<u32> = args.next(env);
                                     env.mem.write(c_u32_ptr.cast_mut(), val as u32);
+                                }
+                                Some("l") => {
+                                    let c_ulong_ptr: ConstPtr<u32> = args.next(env);
+                                    env.mem.write(c_ulong_ptr.cast_mut(), val as u32);
                                 }
                                 Some("ll") => {
                                     let c_u64_ptr: ConstPtr<u64> = args.next(env);

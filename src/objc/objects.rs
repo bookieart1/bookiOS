@@ -174,10 +174,7 @@ impl super::ObjC {
     /// This is for terminal diagnostics only; normal Objective-C dispatch must
     /// continue to reject invalid object pointers.
     pub fn try_read_isa(object: id, mem: &Mem) -> Option<Class> {
-        let bytes = mem.get_bytes_fallible(
-            object.cast().cast_const(),
-            guest_size_of::<Class>(),
-        )?;
+        let bytes = mem.get_bytes_fallible(object.cast().cast_const(), guest_size_of::<Class>())?;
         let bits = u32::from_le_bytes(bytes.try_into().ok()?);
         Some(Ptr::from_bits(bits))
     }
@@ -234,6 +231,28 @@ impl super::ObjC {
         self.alloc_object_inner(
             isa,
             instance_size,
+            host_object,
+            mem,
+            Some(NonZeroU32::new(1).unwrap()),
+        )
+    }
+
+    /// Allocate an object with the class's normal instance storage followed by
+    /// the caller-requested indexed bytes used by `NSAllocateObject`.
+    pub fn alloc_object_with_extra_bytes(
+        &mut self,
+        isa: Class,
+        extra_bytes: GuestUSize,
+        host_object: Box<dyn AnyHostObject>,
+        mem: &mut Mem,
+    ) -> id {
+        let &ClassHostObject { instance_size, .. } = self.borrow(isa);
+        let total_size = instance_size
+            .checked_add(extra_bytes)
+            .expect("NSAllocateObject allocation size overflow");
+        self.alloc_object_inner(
+            isa,
+            total_size,
             host_object,
             mem,
             Some(NonZeroU32::new(1).unwrap()),
@@ -395,9 +414,9 @@ impl super::ObjC {
             "Attempt to increment refcount on static-lifetime object {object:?}!"
         );
         let Some(refcount) = entry.refcount.as_mut() else {
-            let origin = entry.zero_refcount_origin.expect(
-                "Dynamic zero-refcount object is missing its deallocation origin",
-            );
+            let origin = entry
+                .zero_refcount_origin
+                .expect("Dynamic zero-refcount object is missing its deallocation origin");
             panic!(
                 "Attempt to increment refcount on zero-refcount object {object:?} (class {class_name:?}, host type {}): first reached zero on thread {} at guest PC {:#x}, LR {:#x}; retain attempted on thread {}!",
                 entry.host_object.type_name(),

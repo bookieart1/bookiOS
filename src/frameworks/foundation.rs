@@ -12,7 +12,7 @@
 //! `NSString` easier to understand.
 
 use crate::dyld::{export_c_func, FunctionExports};
-use crate::objc::id;
+use crate::objc::{id, nil, Class, NSZonePtr, TrivialHostObject};
 use crate::Environment;
 
 pub mod _nib_archive_decoder;
@@ -52,8 +52,8 @@ pub mod ns_objc_runtime;
 pub mod ns_object;
 pub mod ns_operation;
 pub mod ns_port;
-pub mod ns_process_info;
 pub mod ns_predicate;
+pub mod ns_process_info;
 pub mod ns_property_list_serialization;
 pub mod ns_run_loop;
 pub mod ns_scanner;
@@ -64,14 +64,31 @@ pub mod ns_string;
 pub mod ns_thread;
 pub mod ns_time_zone;
 pub mod ns_timer;
+pub mod ns_ubiquitous_key_value_store;
 pub mod ns_url;
 pub mod ns_url_cache;
 pub mod ns_url_connection;
 pub mod ns_url_request;
-pub mod ns_ubiquitous_key_value_store;
 pub mod ns_user_defaults;
 pub mod ns_value;
 pub mod ns_xml_parser;
+
+fn NSAllocateObject(
+    env: &mut Environment,
+    class: Class,
+    extra_bytes: NSUInteger,
+    _zone: NSZonePtr,
+) -> id {
+    if class == nil {
+        return nil;
+    }
+    env.objc.alloc_object_with_extra_bytes(
+        class,
+        extra_bytes,
+        Box::new(TrivialHostObject),
+        &mut env.mem,
+    )
+}
 
 pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
     path: "/System/Library/Frameworks/Foundation.framework/Foundation",
@@ -144,6 +161,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
         ns_run_loop::CONSTANTS,
         ns_url_connection::CONSTANTS,
         ns_ubiquitous_key_value_store::CONSTANTS,
+        ns_user_defaults::CONSTANTS,
     ],
     function_exports: &[
         FUNCTIONS,
@@ -239,7 +257,11 @@ fn NSRangeFromString(env: &mut Environment, string: id) -> NSRange {
     let parsed = fields
         .next()
         .and_then(|location| location.parse::<NSUInteger>().ok())
-        .zip(fields.next().and_then(|length| length.parse::<NSUInteger>().ok()))
+        .zip(
+            fields
+                .next()
+                .and_then(|length| length.parse::<NSUInteger>().ok()),
+        )
         .filter(|_| fields.next().is_none());
     parsed.map_or(
         NSRange {
@@ -276,6 +298,7 @@ fn hash_helper<T: std::hash::Hash>(hashable: &T) -> NSUInteger {
 }
 
 const FUNCTIONS: FunctionExports = &[
+    export_c_func!(NSAllocateObject(_, _, _)),
     export_c_func!(NSStringFromRange(_)),
     export_c_func!(NSRangeFromString(_)),
 ];
@@ -283,6 +306,9 @@ const FUNCTIONS: FunctionExports = &[
 #[cfg(test)]
 mod range_tests {
     use super::*;
+    use crate::mem::Ptr;
+    use crate::msg;
+    use crate::objc::release;
 
     #[test]
     fn range_string_round_trip_and_malformed_input() {
@@ -294,5 +320,18 @@ mod range_tests {
         let malformed = ns_string::from_rust_string(&mut env, "not a range".to_owned());
         let parsed = NSRangeFromString(&mut env, malformed);
         assert_eq!((parsed.location, parsed.length), (0, 0));
+    }
+
+    #[test]
+    fn dev_245_nsallocateobject_allocates_requested_class_and_handles_null() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let class = env.objc.get_known_class("NSObject", &mut env.mem);
+        let object = NSAllocateObject(env, class, 32, Ptr::null());
+        assert_ne!(object, nil);
+        let actual_class: Class = msg![env; object class];
+        assert_eq!(actual_class, class);
+        release(env, object);
+        assert_eq!(NSAllocateObject(env, nil, 0, Ptr::null()), nil);
     }
 }
