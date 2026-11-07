@@ -863,6 +863,33 @@ impl Dyld {
             }
         }
 
+        if symbol == "_regcomp" {
+            // `_regcomp` is deliberately still unimplemented. Preserve a
+            // bounded, argument-level record of Ski Safari's first call so a
+            // later implementation can be based on the actual historical
+            // pattern and flags rather than a success stub.
+            let regs = cpu.regs();
+            let pattern_address = regs[1];
+            let mut pattern = Vec::new();
+            for offset in 0..256u32 {
+                let address = pattern_address.wrapping_add(offset);
+                let Some(byte) = mem.get_bytes_fallible(ConstVoidPtr::from_bits(address), 1) else {
+                    break;
+                };
+                if byte[0] == 0 {
+                    break;
+                }
+                pattern.push(byte[0]);
+            }
+            log!(
+                "bounded regcomp diagnostic: preg={:#x} pattern-ptr={:#x} cflags={:#x} pattern={:?}",
+                regs[0],
+                pattern_address,
+                regs[2],
+                String::from_utf8_lossy(&pattern),
+            );
+        }
+
         panic!("Call to unimplemented function {symbol}");
     }
 

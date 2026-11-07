@@ -44,6 +44,7 @@ pub struct State {
 
 #[derive(Debug)]
 pub(super) enum NSValueHostObject {
+    NonretainedObject(id),
     CGPoint(CGPoint),
     CGSize(CGSize),
     CGRect(CGRect),
@@ -267,6 +268,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     msg_class![env; NSNumber numberWithUnsignedInt:(ptr.to_bits())]
 }
 
++ (id)valueWithNonretainedObject:(id)object {
+    let host_object = Box::new(NSValueHostObject::NonretainedObject(object));
+    let new = env.objc.alloc_object(this, host_object, &mut env.mem);
+    autorelease(env, new)
+}
+
 + (id)valueWithCGPoint:(CGPoint)value {
     let host_object = Box::new(NSValueHostObject::CGPoint(value));
     let new = env.objc.alloc_object(this, host_object, &mut env.mem);
@@ -295,6 +302,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     let host_object = Box::new(NSValueHostObject::NSRange(value));
     let new = env.objc.alloc_object(this, host_object, &mut env.mem);
     autorelease(env, new)
+}
+
+- (id)nonretainedObjectValue {
+    match env.objc.borrow::<NSValueHostObject>(this) {
+        NSValueHostObject::NonretainedObject(object) => *object,
+        _ => unimplemented!("nonretainedObjectValue for a non-object NSValue"),
+    }
 }
 
 - (CGPoint)CGPointValue {
@@ -923,5 +937,21 @@ mod tests {
             let round_trip: bool = msg![env; boolean boolValue];
             assert_eq!(round_trip, value);
         }
+    }
+
+    #[test]
+    fn dev_244_nonretained_object_round_trips_without_ownership() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let object: id = msg_class![env; NSObject new];
+        let before = env.objc.get_refcount(object).get();
+        let value: id = msg_class![env; NSValue valueWithNonretainedObject:object];
+        assert_eq!(env.objc.get_refcount(object).get(), before);
+        let round_trip: id = msg![env; value nonretainedObjectValue];
+        assert_eq!(round_trip, object);
+        release(env, pool);
+        assert_eq!(env.objc.get_refcount(object).get(), before);
+        release(env, object);
     }
 }

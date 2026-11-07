@@ -13,7 +13,7 @@
 //! This is something to reconsider once we integrate
 //! libxml dylib into the project.
 
-use super::ns_string::{from_rust_string, to_rust_string};
+use super::ns_string::{from_rust_string, get_static_str, to_rust_string};
 use super::NSUInteger;
 use crate::environment::Environment;
 use crate::mem::ConstVoidPtr;
@@ -34,6 +34,9 @@ struct NSXMLParserHostObject {
     should_report_namespace_prefixes: bool,
     should_resolve_external_entities: bool,
     aborted: bool,
+    /// NSError retained after the most recent failed parse. Native
+    /// NSXMLParser keeps this available through `parserError`.
+    parser_error: id,
 }
 impl HostObject for NSXMLParserHostObject {}
 
@@ -51,6 +54,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         should_report_namespace_prefixes: false,
         should_resolve_external_entities: false,
         aborted: false,
+        parser_error: nil,
     });
     env.objc.alloc_object(this, host_object, &mut env.mem)
 }
@@ -105,7 +109,12 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (bool)parse {
-    env.objc.borrow_mut::<NSXMLParserHostObject>(this).aborted = false;
+    let previous_error = {
+        let host = env.objc.borrow_mut::<NSXMLParserHostObject>(this);
+        host.aborted = false;
+        std::mem::replace(&mut host.parser_error, nil)
+    };
+    release(env, previous_error);
     let data = env.objc.borrow::<NSXMLParserHostObject>(this).data;
     assert_ne!(data, nil);
     let bytes: ConstVoidPtr = msg![env; data bytes];
@@ -117,14 +126,30 @@ pub const CLASSES: ClassExports = objc_classes! {
     let mut reader = Reader::from_reader(bytes);
     // TODO: parse and send delegate messages in one pass
     let mut events = Vec::new();
+    let mut parse_failure = None;
+    let mut open_elements = 0u32;
     loop {
         match reader.read_event() {
-            Ok(Event::Eof) => break,
-            Ok(e) => events.push(e.into_owned()), // TODO: avoid copying
+            Ok(Event::Eof) => {
+                if open_elements != 0 {
+                    parse_failure = Some((
+                        reader.error_position(),
+                        format!("unexpected end of document with {open_elements} open element(s)"),
+                    ));
+                }
+                break;
+            },
+            Ok(e) => {
+                match &e {
+                    Event::Start(_) => open_elements += 1,
+                    Event::End(_) => open_elements = open_elements.saturating_sub(1),
+                    _ => {},
+                }
+                events.push(e.into_owned()); // TODO: avoid copying
+            },
             Err(e) => {
-                // TODO: send parser:parseErrorOccurred: to delegate instead,
-                // after (!) other parsing delegate messages were sent
-                panic!("Error at position {}: {:?}", reader.error_position(), e)
+                parse_failure = Some((reader.error_position(), e.to_string()));
+                break;
             },
         }
     }
@@ -294,6 +319,30 @@ pub const CLASSES: ClassExports = objc_classes! {
             return false;
         }
     }
+    if let Some((position, description)) = parse_failure {
+        log!(
+            "NSXMLParser failed at byte {}: {}",
+            position,
+            description
+        );
+        let domain = get_static_str(env, "NSXMLParserErrorDomain");
+        // The underlying parser is not libxml, so do not fabricate a precise
+        // libxml error code. Code 1 is the historical generic parser-error
+        // value; the bounded log retains the useful host detail.
+        let error: id = msg_class![env; NSError errorWithDomain:domain code:1i32 userInfo:nil];
+        retain(env, error);
+        env.objc.borrow_mut::<NSXMLParserHostObject>(this).parser_error = error;
+
+        let sel = env.objc.register_host_selector(
+            "parser:parseErrorOccurred:".to_string(),
+            &mut env.mem,
+        );
+        let responds: bool = msg![env; delegate respondsToSelector:sel];
+        if responds {
+            () = msg![env; delegate parser:this parseErrorOccurred:error];
+        }
+        return false;
+    }
     let sel: SEL = env
         .objc
         .register_host_selector("parserDidEndDocument:".to_string(), &mut env.mem);
@@ -304,9 +353,14 @@ pub const CLASSES: ClassExports = objc_classes! {
     true
 }
 
+- (id)parserError {
+    env.objc.borrow::<NSXMLParserHostObject>(this).parser_error
+}
+
 - (())dealloc {
-    let &NSXMLParserHostObject { data, .. } = env.objc.borrow(this);
+    let &NSXMLParserHostObject { data, parser_error, .. } = env.objc.borrow(this);
     release(env, data);
+    release(env, parser_error);
     env.objc.dealloc_object(this, &mut env.mem);
 }
 
@@ -379,5 +433,29 @@ mod tests {
         let parsed: bool = msg![env; parser parse];
         assert!(parsed);
         release(env, parser);
+    }
+
+    #[test]
+    fn dev_244_malformed_xml_returns_false_and_persists_parser_error() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(1024);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 1024;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let xml = b"<root>";
+        let length = xml.len() as u32;
+        let bytes = env.mem.alloc(length);
+        env.mem.bytes_at_mut(bytes.cast(), length).copy_from_slice(xml);
+        let data: id = msg_class![env; NSData dataWithBytes:(bytes.cast_const()) length:length];
+        let parser: id = msg_class![env; NSXMLParser alloc];
+        let parser: id = msg![env; parser initWithData:data];
+
+        let parsed: bool = msg![env; parser parse];
+        assert!(!parsed);
+        let error: id = msg![env; parser parserError];
+        assert_ne!(error, nil);
+
+        release(env, parser);
+        release(env, pool);
     }
 }

@@ -1840,6 +1840,12 @@ impl Environment {
                 b"file",
                 b"File",
                 b"imageNamed",
+                b"text",
+                b"Text",
+                b"font",
+                b"Font",
+                b"localized",
+                b"Localized",
             ],
         ) {
             Some("resource")

@@ -132,10 +132,7 @@ pub fn CFBundleCopyBundleLocalizations(env: &mut Environment, bundle: CFBundleRe
         .bundle
         .as_ref()
         .unwrap_or(&env.bundle)
-        .bundle_localizations()
-        .iter()
-        .map(|value| value.as_string().unwrap().to_string())
-        .collect::<Vec<String>>();
+        .bundle_localizations(&env.fs);
     let guest_bundle_localizations = bundle_localizations
         .iter()
         .map(|loc| ns_string::from_rust_string(env, loc.to_owned()))

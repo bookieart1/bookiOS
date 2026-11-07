@@ -12,7 +12,7 @@
 //! * [Bundle Resources](https://developer.apple.com/documentation/bundleresources?language=objc)
 
 use crate::frameworks::foundation::ns_bundle::LANG_ID_TO_LANG_PROJ;
-use crate::fs::{BundleData, Fs, GuestPath, GuestPathBuf};
+use crate::fs::{BundleData, Fs, FsNodeType, GuestPath, GuestPathBuf};
 use crate::image::Image;
 use crate::window::DeviceFamily;
 use plist::dictionary::Dictionary;
@@ -132,12 +132,33 @@ impl Bundle {
         self.plist.get("CFBundleVersion").and_then(Value::as_string)
     }
 
-    pub fn bundle_localizations(&self) -> &[Value] {
-        static EMPTY_VAL: Vec<Value> = Vec::new();
-        self.plist
+    pub fn bundle_localizations(&self, fs: &Fs) -> Vec<String> {
+        let declared = self
+            .plist
             .get("CFBundleLocalizations")
             .and_then(|v| v.as_array())
-            .unwrap_or(&EMPTY_VAL)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_string)
+            .map(str::to_owned);
+        let mut discovered = fs
+            .enumerate_with_types(&self.path)
+            .into_iter()
+            .flatten()
+            .filter_map(|(name, node_type)| {
+                if matches!(node_type, FsNodeType::Directory) {
+                    name.strip_suffix(".lproj").map(str::to_owned)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        discovered.sort();
+        let development_region = self
+            .plist
+            .get("CFBundleDevelopmentRegion")
+            .and_then(Value::as_string);
+        merge_localizations(declared, discovered, development_region)
     }
 
     /// Canonical name for the bundle according to Info.plist
@@ -552,6 +573,24 @@ impl Bundle {
     }
 }
 
+fn merge_localizations(
+    declared: impl IntoIterator<Item = String>,
+    discovered: impl IntoIterator<Item = String>,
+    development_region: Option<&str>,
+) -> Vec<String> {
+    let mut result = Vec::new();
+    for localization in declared
+        .into_iter()
+        .chain(discovered)
+        .chain(development_region.map(str::to_owned))
+    {
+        if !localization.is_empty() && !result.contains(&localization) {
+            result.push(localization);
+        }
+    }
+    result
+}
+
 /// Parses a `.strings` file: a binary or XML plist, or text in UTF-8 or
 /// UTF-16 (with a BOM).
 fn parse_strings(bytes: &[u8]) -> Option<Dictionary> {
@@ -582,4 +621,19 @@ fn parse_strings(bytes: &[u8]) -> Option<Dictionary> {
     Value::from_reader_ascii(format!("{{{text}}}").as_bytes())
         .ok()?
         .into_dictionary()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dev_244_bundle_localizations_merge_declared_lproj_and_development_region() {
+        let result = merge_localizations(
+            ["fr".to_owned(), "en".to_owned()],
+            ["Base".to_owned(), "en".to_owned()],
+            Some("de"),
+        );
+        assert_eq!(result, ["fr", "en", "Base", "de"]);
+    }
 }

@@ -72,6 +72,7 @@ pub struct CFGregorianUnits {
     pub minutes: i32, // SInt32
     pub seconds: f64, // double
 }
+unsafe impl SafeRead for CFGregorianUnits {}
 impl GuestArg for CFGregorianUnits {
     const REG_COUNT: usize = 7;
 
@@ -94,6 +95,14 @@ impl GuestArg for CFGregorianUnits {
         self.seconds.to_regs(&mut regs[5..7]);
     }
 }
+impl_GuestRet_for_large_struct!(CFGregorianUnits);
+
+const K_CF_GREGORIAN_UNITS_YEARS: u32 = 1 << 0;
+const K_CF_GREGORIAN_UNITS_MONTHS: u32 = 1 << 1;
+const K_CF_GREGORIAN_UNITS_DAYS: u32 = 1 << 2;
+const K_CF_GREGORIAN_UNITS_HOURS: u32 = 1 << 3;
+const K_CF_GREGORIAN_UNITS_MINUTES: u32 = 1 << 4;
+const K_CF_GREGORIAN_UNITS_SECONDS: u32 = 1 << 5;
 
 /// Absolute time is measured in seconds relative to the absolute reference date
 /// of Jan 1 2001 00:00:00 GMT.
@@ -202,6 +211,116 @@ fn CFAbsoluteTimeAddGregorianUnits(
     add_gregorian_units(at, units)
 }
 
+fn CFAbsoluteTimeGetDifferenceAsGregorianUnits(
+    _env: &mut Environment,
+    at1: CFAbsoluteTime,
+    at2: CFAbsoluteTime,
+    tz: CFTimeZoneRef,
+    unit_flags: u32,
+) -> CFGregorianUnits {
+    assert!(tz.is_null());
+    difference_as_gregorian_units(at1, at2, unit_flags)
+}
+
+fn difference_as_gregorian_units(
+    at1: CFAbsoluteTime,
+    at2: CFAbsoluteTime,
+    unit_flags: u32,
+) -> CFGregorianUnits {
+    assert!(at1.is_finite() && at2.is_finite());
+    let direction = if at1 >= at2 { 1 } else { -1 };
+    let mut cursor = at2;
+    let mut result = CFGregorianUnits {
+        years: 0,
+        months: 0,
+        days: 0,
+        hours: 0,
+        minutes: 0,
+        seconds: 0.0,
+    };
+
+    for (flag, field) in [
+        (K_CF_GREGORIAN_UNITS_YEARS, 0usize),
+        (K_CF_GREGORIAN_UNITS_MONTHS, 1),
+        (K_CF_GREGORIAN_UNITS_DAYS, 2),
+        (K_CF_GREGORIAN_UNITS_HOURS, 3),
+        (K_CF_GREGORIAN_UNITS_MINUTES, 4),
+    ] {
+        if unit_flags & flag == 0 {
+            continue;
+        }
+        let amount = largest_whole_component(cursor, at1, direction, field);
+        let signed = amount.saturating_mul(direction);
+        match field {
+            0 => result.years = signed,
+            1 => result.months = signed,
+            2 => result.days = signed,
+            3 => result.hours = signed,
+            4 => result.minutes = signed,
+            _ => unreachable!(),
+        }
+        cursor = add_component(cursor, field, signed);
+    }
+    if unit_flags & K_CF_GREGORIAN_UNITS_SECONDS != 0 {
+        result.seconds = at1 - cursor;
+    }
+    result
+}
+
+fn largest_whole_component(
+    cursor: CFAbsoluteTime,
+    target: CFAbsoluteTime,
+    direction: i32,
+    field: usize,
+) -> i32 {
+    let fits = |amount: i32| {
+        let candidate = add_component(cursor, field, amount.saturating_mul(direction));
+        if direction > 0 {
+            candidate <= target
+        } else {
+            candidate >= target
+        }
+    };
+    let mut low = 0i32;
+    let mut high = 1i32;
+    while high < i32::MAX / 2 && fits(high) {
+        low = high;
+        high *= 2;
+    }
+    if fits(high) {
+        return high;
+    }
+    while low + 1 < high {
+        let mid = low + (high - low) / 2;
+        if fits(mid) {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    low
+}
+
+fn add_component(at: CFAbsoluteTime, field: usize, amount: i32) -> CFAbsoluteTime {
+    let mut units = CFGregorianUnits {
+        years: 0,
+        months: 0,
+        days: 0,
+        hours: 0,
+        minutes: 0,
+        seconds: 0.0,
+    };
+    match field {
+        0 => units.years = amount,
+        1 => units.months = amount,
+        2 => units.days = amount,
+        3 => units.hours = amount,
+        4 => units.minutes = amount,
+        _ => unreachable!(),
+    }
+    add_gregorian_units(at, units)
+}
+
 /// Like Apple's: years and months move the date, keeping the time of day and
 /// clamping the day to the new month's length. The rest are added as seconds.
 pub(crate) fn add_gregorian_units(
@@ -229,6 +348,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFAbsoluteTimeGetGregorianDate(_, _)),
     export_c_func!(CFAbsoluteTimeGetDayOfWeek(_, _)),
     export_c_func!(CFAbsoluteTimeAddGregorianUnits(_, _, _)),
+    export_c_func!(CFAbsoluteTimeGetDifferenceAsGregorianUnits(_, _, _, _)),
 ];
 
 #[cfg(test)]
@@ -310,5 +430,51 @@ mod tests {
             add(at(2001, 1, 1) + 5.5, 0, 1, 0, 1.0),
             at(2001, 2, 1) + 6.5
         );
+    }
+
+    #[test]
+    fn dev_244_gregorian_difference_seconds_and_mixed_components() {
+        let seconds = difference_as_gregorian_units(
+            at(2001, 1, 1) + 42.25,
+            at(2001, 1, 1),
+            K_CF_GREGORIAN_UNITS_SECONDS,
+        );
+        let CFGregorianUnits { years, seconds, .. } = seconds;
+        assert_eq!(seconds, 42.25);
+        assert_eq!(years, 0);
+
+        let mixed = difference_as_gregorian_units(
+            at(2002, 3, 3) + 3661.5,
+            at(2001, 1, 1),
+            K_CF_GREGORIAN_UNITS_YEARS
+                | K_CF_GREGORIAN_UNITS_MONTHS
+                | K_CF_GREGORIAN_UNITS_DAYS
+                | K_CF_GREGORIAN_UNITS_HOURS
+                | K_CF_GREGORIAN_UNITS_MINUTES
+                | K_CF_GREGORIAN_UNITS_SECONDS,
+        );
+        let CFGregorianUnits { years, months, days, hours, minutes, seconds } = mixed;
+        assert_eq!(years, 1);
+        assert_eq!(months, 2);
+        assert_eq!(days, 2);
+        assert_eq!(hours, 1);
+        assert_eq!(minutes, 1);
+        assert_eq!(seconds, 1.5);
+
+        let negative = difference_as_gregorian_units(
+            at(2001, 1, 1),
+            at(2001, 1, 1) + 7.5,
+            K_CF_GREGORIAN_UNITS_SECONDS,
+        );
+        let CFGregorianUnits { seconds, .. } = negative;
+        assert_eq!(seconds, -7.5);
+
+        let zero = difference_as_gregorian_units(
+            at(2001, 1, 1),
+            at(2001, 1, 1),
+            K_CF_GREGORIAN_UNITS_SECONDS,
+        );
+        let CFGregorianUnits { seconds, .. } = zero;
+        assert_eq!(seconds.to_bits(), 0.0f64.to_bits());
     }
 }

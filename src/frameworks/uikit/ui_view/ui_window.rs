@@ -40,6 +40,33 @@ pub struct State {
     pub window_levels: Vec<(id, CGFloat)>,
     /// Strong root-view-controller property for each window.
     pub root_view_controllers: Vec<(id, id)>,
+    /// Bounded launch-time evidence for games which create a window but never
+    /// produce a visible frame. This is diagnostic only.
+    diagnostic_transition_count: u8,
+}
+
+fn log_startup_window_transition(
+    env: &mut crate::Environment,
+    event: &'static str,
+    window: id,
+    related: id,
+) {
+    const LIMIT: u8 = 24;
+    let state = &mut env.framework_state.uikit.ui_view.ui_window;
+    if state.diagnostic_transition_count >= LIMIT {
+        return;
+    }
+    state.diagnostic_transition_count += 1;
+    log!(
+        "bounded UIWindow startup diagnostic #{}/{}: event={} window={:?} related={:?} key-window={:?} known-windows={}",
+        state.diagnostic_transition_count,
+        LIMIT,
+        event,
+        window,
+        related,
+        state.key_window,
+        state.windows.len(),
+    );
 }
 
 pub const CLASSES: ClassExports = objc_classes! {
@@ -68,6 +95,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         this,
         state.windows,
     );
+    log_startup_window_transition(env, "initWithFrame", this, nil);
 
     this
 }
@@ -89,6 +117,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         this,
         state.windows,
     );
+    log_startup_window_transition(env, "initWithCoder", this, coder);
 
     this
 }
@@ -136,6 +165,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     // TODO: post UIWindowDidBecomeVisibleNotification,
     //            UIWindowDidBecomeHiddenNotification
     log_dbg!("[(UIWindow*){:?} setHidden:{:?}]", this, is_hidden);
+    log_startup_window_transition(
+        env,
+        if is_hidden { "setHidden:YES" } else { "setHidden:NO" },
+        this,
+        nil,
+    );
 }
 
 - (())makeKeyWindow {
@@ -145,6 +180,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         }
     }
     env.framework_state.uikit.ui_view.ui_window.key_window = Some(this);
+    log_startup_window_transition(env, "makeKeyWindow", this, nil);
 
     let center: id = msg_class![env; NSNotificationCenter defaultCenter];
     let notif_name = ns_string::get_static_str(env, UIWindowDidBecomeKeyNotification);
@@ -217,6 +253,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         () = msg![env; this addSubview:view];
     }
     release(env, old);
+    log_startup_window_transition(env, "setRootViewController", this, controller);
 }
 
 // We only model the single main screen

@@ -31,6 +31,7 @@ pub struct State {
 struct UIApplicationHostObject {
     delegate: id,
     delegate_is_retained: bool,
+    scheduled_local_notifications: Vec<id>,
 }
 impl HostObject for UIApplicationHostObject {}
 
@@ -62,6 +63,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     let host_object = Box::new(UIApplicationHostObject {
         delegate: nil,
         delegate_is_retained: false,
+        scheduled_local_notifications: Vec::new(),
     });
     env.objc.alloc_static_object(this, host_object, &mut env.mem)
 }
@@ -322,10 +324,47 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())cancelAllLocalNotifications {
-    log!("TODO: [(UIApplication*){:?} cancelAllLocalNotifications", this);
+    let notifications = std::mem::take(
+        &mut env.objc.borrow_mut::<UIApplicationHostObject>(this).scheduled_local_notifications,
+    );
+    for notification in notifications {
+        release(env, notification);
+    }
 }
 - (())scheduleLocalNotification:(id)local_notif { // UILocalNotification *
-    log!("TODO: [(UIApplication*){:?} scheduleLocalNotification:{:?}", this, local_notif);
+    assert_ne!(local_notif, nil);
+    retain(env, local_notif);
+    env.objc
+        .borrow_mut::<UIApplicationHostObject>(this)
+        .scheduled_local_notifications
+        .push(local_notif);
+}
+- (id)scheduledLocalNotifications {
+    let notifications = env
+        .objc
+        .borrow::<UIApplicationHostObject>(this)
+        .scheduled_local_notifications
+        .clone();
+    for notification in &notifications {
+        retain(env, *notification);
+    }
+    let snapshot = ns_array::from_vec(env, notifications);
+    autorelease(env, snapshot)
+}
+- (())cancelLocalNotification:(id)local_notif {
+    let removed = {
+        let scheduled = &mut env
+            .objc
+            .borrow_mut::<UIApplicationHostObject>(this)
+            .scheduled_local_notifications;
+        scheduled
+            .iter()
+            .position(|&candidate| candidate == local_notif)
+            .map(|position| scheduled.remove(position))
+    };
+    if let Some(removed) = removed {
+        release(env, removed);
+    }
 }
 
 @end
@@ -711,5 +750,26 @@ mod tests {
         let enabled: UIRemoteNotificationType =
             msg![env; application enabledRemoteNotificationTypes];
         assert_eq!(enabled, 0);
+    }
+
+    #[test]
+    fn dev_244_local_notification_registry_snapshots_and_cancels_by_identity() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let application: id = msg_class![env; UIApplication alloc];
+        let notification: id = msg_class![env; UILocalNotification new];
+        () = msg![env; application scheduleLocalNotification:notification];
+        let snapshot: id = msg![env; application scheduledLocalNotifications];
+        let count: NSUInteger = msg![env; snapshot count];
+        assert_eq!(count, 1);
+        () = msg![env; application cancelLocalNotification:notification];
+        let snapshot_count_after_cancel: NSUInteger = msg![env; snapshot count];
+        assert_eq!(snapshot_count_after_cancel, 1);
+        let current: id = msg![env; application scheduledLocalNotifications];
+        let current_count: NSUInteger = msg![env; current count];
+        assert_eq!(current_count, 0);
+        release(env, notification);
+        release(env, pool);
     }
 }

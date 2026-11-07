@@ -53,6 +53,11 @@ pub fn CGBitmapContextCreate(
     color_space: CGColorSpaceRef,
     bitmap_info: u32,
 ) -> CGContextRef {
+    // Core Graphics rejects degenerate bitmap storage. In particular, it must
+    // not derive a stride or touch a caller-owned buffer for zero geometry.
+    if width == 0 || height == 0 {
+        return Ptr::null();
+    }
     assert!(bits_per_component == 8); // TODO: support other bit depths
 
     let color_space = if color_space.is_null() {
@@ -79,10 +84,14 @@ pub fn CGBitmapContextCreate(
             .unwrap_or_else(|()| unsupported_format()),
         _ => unimplemented!("support other color spaces"),
     };
+    let minimum_bytes_per_row = width.checked_mul(component_count).unwrap();
+    if !data.is_null() && (bytes_per_row == 0 || bytes_per_row < minimum_bytes_per_row) {
+        return Ptr::null();
+    }
 
     let (data, data_is_owned, bytes_per_row) = if data.is_null() {
         let bytes_per_row = if bytes_per_row == 0 {
-            width.checked_mul(component_count).unwrap()
+            minimum_bytes_per_row
         } else {
             bytes_per_row
         };
@@ -94,7 +103,7 @@ pub fn CGBitmapContextCreate(
         (data, false, bytes_per_row)
     };
 
-    assert!(bytes_per_row >= width.checked_mul(component_count).unwrap());
+    assert!(bytes_per_row >= minimum_bytes_per_row);
     let host_object = CGContextHostObject {
         subclass: CGContextSubclass::CGBitmapContext(CGBitmapContextData {
             data,
@@ -946,5 +955,21 @@ mod blend_mode_tests {
             blend_straight((0.8, 0.4, 0.2, 0.6), (1.0, 1.0, 1.0, 0.5), kCGBlendModeClear),
             (0.8, 0.4, 0.2, 0.3)
         );
+    }
+
+    #[test]
+    fn dev_244_zero_bitmap_geometry_returns_null_before_storage_access() {
+        let mut env = Environment::new_fake_for_test();
+        let context = CGBitmapContextCreate(
+            &mut env,
+            Ptr::from_bits(0x1234),
+            0,
+            32,
+            8,
+            0,
+            Ptr::null(),
+            kCGImageAlphaOnly,
+        );
+        assert!(context.is_null());
     }
 }

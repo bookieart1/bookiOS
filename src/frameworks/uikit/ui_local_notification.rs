@@ -6,8 +6,8 @@
 //! `UILocalNotification`.
 
 use crate::dyld::{ConstantExports, HostConstant};
-use crate::frameworks::foundation::{ns_string::get_static_str, NSInteger};
-use crate::objc::{id, msg, msg_super, objc_classes, release, ClassExports, HostObject, NSZonePtr};
+use crate::frameworks::foundation::{ns_string::get_static_str, NSInteger, NSUInteger};
+use crate::objc::{id, msg, objc_classes, release, ClassExports, HostObject, NSZonePtr};
 
 #[derive(Default)]
 struct UILocalNotificationHostObject {
@@ -17,6 +17,8 @@ struct UILocalNotificationHostObject {
     alert_action: id,
     alert_launch_image: id,
     sound_name: id,
+    user_info: id,
+    repeat_interval: NSUInteger,
     application_icon_badge_number: NSInteger,
 }
 impl HostObject for UILocalNotificationHostObject {}
@@ -48,7 +50,8 @@ pub const CLASSES: ClassExports = objc_classes! {
                   host.alert_launch_image, host.sound_name] {
         release(env, value);
     }
-    msg_super![env; this dealloc]
+    release(env, host.user_info);
+    env.objc.dealloc_object(this, &mut env.mem)
 }
 
 - (())setFireDate:(id)date { // NSDate *
@@ -75,6 +78,16 @@ pub const CLASSES: ClassExports = objc_classes! {
     set_copied(env, this, |host| &mut host.sound_name, name);
 }
 - (id)soundName { env.objc.borrow::<UILocalNotificationHostObject>(this).sound_name }
+- (())setUserInfo:(id)user_info {
+    set_copied(env, this, |host| &mut host.user_info, user_info);
+}
+- (id)userInfo { env.objc.borrow::<UILocalNotificationHostObject>(this).user_info }
+- (())setRepeatInterval:(NSUInteger)repeat_interval {
+    env.objc.borrow_mut::<UILocalNotificationHostObject>(this).repeat_interval = repeat_interval;
+}
+- (NSUInteger)repeatInterval {
+    env.objc.borrow::<UILocalNotificationHostObject>(this).repeat_interval
+}
 - (())setApplicationIconBadgeNumber:(NSInteger)badge_number {
     env.objc.borrow_mut::<UILocalNotificationHostObject>(this).application_icon_badge_number = badge_number;
 }

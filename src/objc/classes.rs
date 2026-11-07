@@ -862,14 +862,7 @@ impl ObjC {
                     let align_mask = max_alignment - 1;
                     diff = (diff + align_mask) & !align_mask;
 
-                    for ivar in ivars.values_mut() {
-                        if ivar.offset.is_null() {
-                            // anonymous bitfield
-                            continue;
-                        }
-
-                        ivar.offset = Ptr::from_bits((ivar.offset).to_bits() + diff);
-                    }
+                    shift_ivar_offset_words(ivars, diff, mem);
                 }
 
                 *instance_start += diff;
@@ -1216,6 +1209,48 @@ impl ObjC {
                 panic!();
             }
         }
+    }
+}
+
+fn shift_ivar_offset_words(ivars: &HashMap<String, IVar>, diff: GuestUSize, mem: &mut Mem) {
+    for ivar in ivars.values() {
+        if ivar.offset.is_null() {
+            // anonymous bitfield
+            continue;
+        }
+        // The non-fragile ABI publishes a stable pointer to a numeric offset
+        // word. Reconciliation changes the word, never the pointer itself.
+        let old_offset = mem.read(ivar.offset);
+        mem.write(ivar.offset.cast_mut(), old_offset + diff);
+    }
+}
+
+#[cfg(test)]
+mod dev_244_tests {
+    use super::*;
+
+    #[test]
+    fn nonfragile_ivar_reconciliation_changes_the_offset_word_not_its_address() {
+        let mut mem = Mem::new();
+        // Address zero is the runtime's anonymous-bitfield sentinel.
+        let _padding = mem.alloc(4);
+        let offset = mem.alloc_and_write(20u32);
+        let stable_address = offset.to_bits();
+        let mut ivars = HashMap::new();
+        ivars.insert(
+            "value".to_owned(),
+            IVar {
+                type_: "i".to_owned(),
+                offset: offset.cast_const(),
+                alignment: 4,
+                handle: Ptr::null(),
+            },
+        );
+
+        shift_ivar_offset_words(&ivars, 12, &mut mem);
+
+        assert_eq!(ivars["value"].offset.to_bits(), stable_address);
+        assert_eq!(mem.read(offset.cast_const()), 32);
     }
 }
 

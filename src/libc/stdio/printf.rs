@@ -617,7 +617,10 @@ fn e_format(
 
 #[cfg(test)]
 mod tests {
-    use super::{e_format, f_format, repad_float};
+    use super::{e_format, f_format, format_wide, repad_float};
+    use crate::abi::VaList;
+    use crate::mem::ConstVoidPtr;
+    use crate::Environment;
 
     #[test]
     fn float_plus_flag_preserves_sign_and_width() {
@@ -640,6 +643,18 @@ mod tests {
         assert_eq!(e_format(12.5, 11, '0', 1, true, false), "+0001.2e+01");
         assert_eq!(e_format(12.5, 0, ' ', 0, false, true), "1.e+01");
         assert_eq!(e_format(12.5, 9, '0', 0, true, true), "+001.e+01");
+    }
+
+    #[test]
+    fn dev_244_wide_printf_uses_guest_arguments() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let wide = env.mem.alloc(4 * 9).cast();
+        for (index, value) in "score=%d\0".encode_utf16().enumerate() {
+            env.mem.write(wide + index.try_into().unwrap(), i32::from(value));
+        }
+        env.cpu.regs_mut()[0] = 42;
+        let args = VaList::for_test(0, ConstVoidPtr::from_bits(0));
+        assert_eq!(format_wide(&mut env, wide.cast_const(), args), b"score=42");
     }
 }
 
@@ -700,6 +715,27 @@ fn vprintf(env: &mut Environment, format: ConstPtr<u8>, arg: VaList) -> i32 {
     // TODO: I/O error handling
     let _ = std::io::stdout().write_all(&res);
     res.len().try_into().unwrap()
+}
+
+fn format_wide(env: &mut Environment, format: ConstPtr<wchar_t>, args: VaList) -> Vec<u8> {
+    let ctype_locale = setlocale(env, LC_CTYPE, Ptr::null());
+    assert_eq!(env.mem.read(ctype_locale), b'C');
+    let format = env.mem.wcstr_at(format);
+    let bytes = format.as_bytes();
+    let len: GuestUSize = bytes.len().try_into().unwrap();
+    printf_inner::<false, _>(
+        env,
+        |_mem, idx| if idx == len { b'\0' } else { bytes[idx as usize] },
+        args,
+    )
+}
+
+fn vwprintf(env: &mut Environment, format: ConstPtr<wchar_t>, args: VaList) -> i32 {
+    set_errno(env, 0);
+    log_dbg!("vwprintf({:?} ({:?}), ...)", format, env.mem.wcstr_at(format));
+    let result = format_wide(env, format, args);
+    let _ = std::io::stdout().write_all(&result);
+    result.len().try_into().unwrap()
 }
 
 fn vsnprintf(
@@ -865,10 +901,6 @@ fn vswprintf(
     // TODO: handle errno properly
     set_errno(env, 0);
 
-    // TODO: support other locales
-    let ctype_locale = setlocale(env, LC_CTYPE, Ptr::null());
-    assert_eq!(env.mem.read(ctype_locale), b'C');
-
     let wcstr_format = env.mem.wcstr_at(format);
     log_dbg!(
         "vswprintf({:?}, {}, {:?} ({:?}), ...)",
@@ -878,19 +910,7 @@ fn vswprintf(
         wcstr_format
     );
 
-    let wcstr_format_bytes = wcstr_format.as_bytes();
-    let len: GuestUSize = wcstr_format_bytes.len() as GuestUSize;
-    let res = printf_inner::<false, _>(
-        env,
-        |_mem, idx| {
-            if idx == len {
-                b'\0'
-            } else {
-                wcstr_format_bytes[idx as usize]
-            }
-        },
-        args,
-    );
+    let res = format_wide(env, format, args);
 
     let to_write = n.min(res.len() as GuestUSize);
     for i in 0..to_write {
@@ -1511,6 +1531,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(__snprintf_chk(_, _, _, _, _, _)),
     export_c_func!(vasprintf(_, _, _)),
     export_c_func!(vprintf(_, _)),
+    export_c_func!(vwprintf(_, _)),
     export_c_func!(vsnprintf(_, _, _, _)),
     export_c_func!(vsnprintf_l(_, _, _, _, _)),
     export_c_func!(vsprintf(_, _, _)),

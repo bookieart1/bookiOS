@@ -137,6 +137,7 @@ fn CGImageCreate(
         kCGImageByteOrderDefault | kCGImageByteOrder32Big => {
             match alpha_info {
                 kCGImageAlphaPremultipliedLast => {}
+                kCGImageAlphaLast => premultiply_straight_rgba(&mut pixels),
                 kCGImageAlphaNone => {
                     // Four-byte opaque RGB data has an unused final byte.
                     // Normalize that byte because Image stores RGBA.
@@ -162,6 +163,15 @@ fn CGImageCreate(
 
     let image = Image::from_pixel_vec(pixels, (width, height));
     from_image(env, image)
+}
+
+fn premultiply_straight_rgba(pixels: &mut [u8]) {
+    for [red, green, blue, alpha] in pixels.as_chunks_mut::<4>().0 {
+        let alpha = u16::from(*alpha);
+        *red = ((u16::from(*red) * alpha + 127) / 255) as u8;
+        *green = ((u16::from(*green) * alpha + 127) / 255) as u8;
+        *blue = ((u16::from(*blue) * alpha + 127) / 255) as u8;
+    }
 }
 
 fn CGImageCreateCopyWithColorSpace(
@@ -335,3 +345,15 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGImageGetBitsPerComponent(_)),
     export_c_func!(CGImageCreateWithImageInRect(_, _)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dev_244_straight_alpha_last_rgba_is_premultiplied() {
+        let mut pixels = [200, 100, 50, 128, 17, 18, 19, 0, 1, 2, 3, 255];
+        premultiply_straight_rgba(&mut pixels);
+        assert_eq!(pixels, [100, 50, 25, 128, 0, 0, 0, 0, 1, 2, 3, 255]);
+    }
+}

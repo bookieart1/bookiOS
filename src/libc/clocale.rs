@@ -10,7 +10,7 @@ use std::collections::hash_map::Entry;
 use crate::dyld::FunctionExports;
 use crate::environment::Environment;
 use crate::export_c_func;
-use crate::mem::{ConstPtr, MutPtr, MutVoidPtr, Ptr};
+use crate::mem::{ConstPtr, MutPtr, MutVoidPtr, Ptr, SafeRead};
 
 pub type LocaleCategory = i32;
 pub const LC_ALL: LocaleCategory = 0;
@@ -27,7 +27,40 @@ pub struct State {
     locale: std::collections::HashMap<LocaleCategory, MutPtr<u8>>,
     thread_locale: std::collections::HashMap<usize, MutVoidPtr>,
     langinfo: std::collections::HashMap<i32, MutPtr<u8>>,
+    lconv: Option<MutPtr<LConv>>,
 }
+
+/// Darwin's 32-bit guest ABI layout. This must not use the host platform's
+/// libc structure because both pointer width and locale state differ.
+#[derive(Copy, Clone)]
+#[repr(C)]
+struct LConv {
+    decimal_point: MutPtr<u8>,
+    thousands_sep: MutPtr<u8>,
+    grouping: MutPtr<u8>,
+    int_curr_symbol: MutPtr<u8>,
+    currency_symbol: MutPtr<u8>,
+    mon_decimal_point: MutPtr<u8>,
+    mon_thousands_sep: MutPtr<u8>,
+    mon_grouping: MutPtr<u8>,
+    positive_sign: MutPtr<u8>,
+    negative_sign: MutPtr<u8>,
+    int_frac_digits: i8,
+    frac_digits: i8,
+    p_cs_precedes: i8,
+    p_sep_by_space: i8,
+    n_cs_precedes: i8,
+    n_sep_by_space: i8,
+    p_sign_posn: i8,
+    n_sign_posn: i8,
+    int_p_cs_precedes: i8,
+    int_n_cs_precedes: i8,
+    int_p_sep_by_space: i8,
+    int_n_sep_by_space: i8,
+    int_p_sign_posn: i8,
+    int_n_sign_posn: i8,
+}
+unsafe impl SafeRead for LConv {}
 
 pub fn setlocale(
     env: &mut Environment,
@@ -141,6 +174,43 @@ fn nl_langinfo(env: &mut Environment, item: i32) -> MutPtr<u8> {
     guest
 }
 
+fn localeconv(env: &mut Environment) -> MutPtr<LConv> {
+    if let Some(lconv) = env.libc_state.clocale.lconv {
+        return lconv;
+    }
+    let decimal_point = env.mem.alloc_and_write_cstr(b".");
+    let empty = env.mem.alloc_and_write_cstr(b"");
+    let unavailable = i8::MAX;
+    let lconv = env.mem.alloc_and_write(LConv {
+        decimal_point,
+        thousands_sep: empty,
+        grouping: empty,
+        int_curr_symbol: empty,
+        currency_symbol: empty,
+        mon_decimal_point: empty,
+        mon_thousands_sep: empty,
+        mon_grouping: empty,
+        positive_sign: empty,
+        negative_sign: empty,
+        int_frac_digits: unavailable,
+        frac_digits: unavailable,
+        p_cs_precedes: unavailable,
+        p_sep_by_space: unavailable,
+        n_cs_precedes: unavailable,
+        n_sep_by_space: unavailable,
+        p_sign_posn: unavailable,
+        n_sign_posn: unavailable,
+        int_p_cs_precedes: unavailable,
+        int_n_cs_precedes: unavailable,
+        int_p_sep_by_space: unavailable,
+        int_n_sep_by_space: unavailable,
+        int_p_sign_posn: unavailable,
+        int_n_sign_posn: unavailable,
+    });
+    env.libc_state.clocale.lconv = Some(lconv);
+    lconv
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(setlocale(_, _)),
     export_c_func!(newlocale(_, _, _)),
@@ -148,6 +218,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(freelocale(_)),
     export_c_func!(uselocale(_)),
     export_c_func!(nl_langinfo(_)),
+    export_c_func!(localeconv()),
 ];
 
 #[cfg(test)]
@@ -164,5 +235,18 @@ mod tests {
         assert_eq!(env.mem.cstr_at(sunday.cast_const()), b"Sunday");
         let invalid = nl_langinfo(&mut env, 999);
         assert_eq!(env.mem.cstr_at(invalid.cast_const()), b"");
+    }
+
+    #[test]
+    fn dev_244_localeconv_returns_stable_guest_c_locale_storage() {
+        let mut env = Environment::new_fake_for_test();
+        let first = localeconv(&mut env);
+        let second = localeconv(&mut env);
+        assert_eq!(first, second);
+        let value = env.mem.read(first.cast_const());
+        assert_eq!(env.mem.cstr_at(value.decimal_point.cast_const()), b".");
+        assert_eq!(env.mem.cstr_at(value.thousands_sep.cast_const()), b"");
+        assert_eq!(value.frac_digits, i8::MAX);
+        assert_eq!(std::mem::size_of::<LConv>(), 56);
     }
 }

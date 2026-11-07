@@ -451,6 +451,14 @@ impl VaList {
         let sp_reg = self.stack_pointer.cast();
         read_next_arg(&mut self.reg_offset, env.cpu.regs_mut(), sp_reg, &env.mem)
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(reg_offset: usize, stack_pointer: ConstVoidPtr) -> Self {
+        Self {
+            reg_offset,
+            stack_pointer,
+        }
+    }
 }
 
 macro_rules! impl_GuestArg_with {

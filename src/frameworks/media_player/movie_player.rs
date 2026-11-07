@@ -40,6 +40,8 @@ const MPMovieSourceTypeUnknown: MPMovieSourceType = 0;
 
 type MPMoviePlaybackState = NSInteger;
 const MPMoviePlaybackStateStopped: MPMoviePlaybackState = 0;
+type MPMovieRepeatMode = NSInteger;
+const MPMovieRepeatModeNone: MPMovieRepeatMode = 0;
 
 // Values might not be correct, but as these are linked symbol constants, it
 // shouldn't matter.
@@ -91,6 +93,7 @@ struct MPMoviePlayerControllerHostObject {
     content_url: id,
     movie_source_type: MPMovieSourceType,
     should_autoplay: bool,
+    repeat_mode: MPMovieRepeatMode,
     // UIView *, made when first asked for
     view: id,
     // UIView *, made when first asked for
@@ -111,6 +114,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         content_url: nil,
         movie_source_type: MPMovieSourceTypeUnknown,
         should_autoplay: true,
+        repeat_mode: MPMovieRepeatModeNone,
         view: nil,
         background_view: nil,
     });
@@ -181,6 +185,13 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (())setInitialPlaybackTime:(NSTimeInterval)initial_time {
     todo_objc_setter!(this, initial_time);
+}
+
+- (MPMovieRepeatMode)repeatMode {
+    env.objc.borrow::<MPMoviePlayerControllerHostObject>(this).repeat_mode
+}
+- (())setRepeatMode:(MPMovieRepeatMode)repeat_mode {
+    env.objc.borrow_mut::<MPMoviePlayerControllerHostObject>(this).repeat_mode = repeat_mode;
 }
 
 // Whether the content is a file or a stream: only a hint for loading it.
@@ -331,5 +342,23 @@ pub(super) fn handle_players(env: &mut Environment) {
         let center: id = msg_class![env; NSNotificationCenter defaultCenter];
         // TODO: should there be some user info attached?
         let _: () = msg![env; center postNotificationName:name object:object];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dev_244_movie_repeat_mode_is_paired_state() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let player: id = msg_class![env; MPMoviePlayerController alloc];
+        let initial: MPMovieRepeatMode = msg![env; player repeatMode];
+        assert_eq!(initial, MPMovieRepeatModeNone);
+        () = msg![env; player setRepeatMode:1i32];
+        let repeated: MPMovieRepeatMode = msg![env; player repeatMode];
+        assert_eq!(repeated, 1);
+        release(env, player);
     }
 }

@@ -924,6 +924,20 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 }
 
+- (())removeObjectIdenticalTo:(id)object {
+    let mut to_remove = Vec::new();
+    let count: NSUInteger = msg![env; this count];
+    for i in 0..count {
+        let current: id = msg![env; this objectAtIndex:i];
+        if current == object {
+            to_remove.push(i);
+        }
+    }
+    for i in to_remove.into_iter().rev() {
+        () = msg![env; this removeObjectAtIndex:i];
+    }
+}
+
 - (())removeObjectAtIndex:(NSUInteger)index {
     let before: NSUInteger = env.objc.borrow::<ArrayHostObject>(this).array.len().try_into().unwrap();
     let object = env.objc.borrow_mut::<ArrayHostObject>(this).array.remove(index as usize);
@@ -1363,6 +1377,29 @@ mod tests {
         assert_eq!(env.objc.get_refcount(object).get(), 1);
         release(env, array);
         release(env, object);
+    }
+
+    #[test]
+    fn dev_244_remove_object_identical_uses_identity_not_equality() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let first: id = msg_class![env; NSNumber numberWithInt:1000i32];
+        let second: id = msg_class![env; NSNumber numberWithInt:1000i32];
+        assert_ne!(first, second);
+        let equal: bool = msg![env; first isEqual:second];
+        assert!(equal);
+        let owned = vec![retain(env, first), retain(env, second), retain(env, first)];
+        let array = mutable_from_vec(env, owned);
+
+        () = msg![env; array removeObjectIdenticalTo:first];
+
+        let count: NSUInteger = msg![env; array count];
+        let remaining: id = msg![env; array objectAtIndex:0u32];
+        assert_eq!(count, 1);
+        assert_eq!(remaining, second);
+        release(env, array);
+        release(env, pool);
     }
 
     #[test]

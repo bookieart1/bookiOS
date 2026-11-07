@@ -17,9 +17,11 @@ use super::audio_file::{
 use super::audio_queue::is_supported_audio_format;
 use super::audio_unit::AudioBufferList;
 use crate::dyld::{export_c_func, FunctionExports};
-use crate::frameworks::carbon_core::{eofErr, OSStatus};
+use crate::frameworks::carbon_core::{eofErr, paramErr, OSStatus};
 use crate::frameworks::core_audio_types::{
-    debug_fourcc, fourcc, kAudioFormatLinearPCM, AudioStreamBasicDescription,
+    debug_fourcc, fourcc, kAudioFormatFlagIsBigEndian, kAudioFormatFlagIsFloat,
+    kAudioFormatFlagIsPacked, kAudioFormatFlagIsSignedInteger, kAudioFormatLinearPCM,
+    AudioStreamBasicDescription,
 };
 use crate::frameworks::core_foundation::cf_url::CFURLRef;
 use crate::frameworks::foundation::ns_url::to_rust_path;
@@ -41,6 +43,15 @@ pub struct ExtAudioFileHostObject {
     guest_audio_file: AudioFileID,
     client_data_format: Option<AudioStreamBasicDescription>,
     current_bytes_read: i64,
+    owns_audio_file: bool,
+    conversion: ClientConversion,
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
+enum ClientConversion {
+    #[default]
+    Identity,
+    Unsigned8ToSigned16,
 }
 
 #[repr(C, packed)]
@@ -92,6 +103,8 @@ fn ExtAudioFileOpenURL(
         guest_audio_file,
         client_data_format: None,
         current_bytes_read: 0,
+        owns_audio_file: true,
+        conversion: ClientConversion::Identity,
     };
 
     let guest_extended_audio_file = env.mem.alloc_and_write(OpaqueExtAudioFile { _filler: 0 });
@@ -102,6 +115,39 @@ fn ExtAudioFileOpenURL(
     env.mem.write(out_ext_audio_file, guest_extended_audio_file);
 
     0 // success
+}
+
+fn ExtAudioFileWrapAudioFileID(
+    env: &mut Environment,
+    in_file_id: AudioFileID,
+    in_for_writing: bool,
+    out_ext_audio_file: MutPtr<ExtAudioFileRef>,
+) -> OSStatus {
+    if in_file_id.is_null() || out_ext_audio_file.is_null() || in_for_writing {
+        return paramErr;
+    }
+    if !env
+        .framework_state
+        .audio_toolbox
+        .audio_file
+        .audio_files
+        .contains_key(&in_file_id)
+    {
+        return paramErr;
+    }
+    let host_object = ExtAudioFileHostObject {
+        guest_audio_file: in_file_id,
+        client_data_format: None,
+        current_bytes_read: 0,
+        owns_audio_file: false,
+        conversion: ClientConversion::Identity,
+    };
+    let guest_extended_audio_file = env.mem.alloc_and_write(OpaqueExtAudioFile { _filler: 0 });
+    State::get(&mut env.framework_state)
+        .extended_audio_files
+        .insert(guest_extended_audio_file, host_object);
+    env.mem.write(out_ext_audio_file, guest_extended_audio_file);
+    0
 }
 
 fn ExtAudioFileGetProperty(
@@ -211,6 +257,34 @@ fn ExtAudioFileSetProperty(
     assert_eq!(format_id, kAudioFormatLinearPCM);
     assert!(is_supported_audio_format(&client_audio_desc));
 
+    let guest_audio_file = env
+        .framework_state
+        .audio_toolbox
+        .extended_audio_file
+        .extended_audio_files
+        .get(&in_ext_audio_file)
+        .unwrap()
+        .guest_audio_file;
+    let other_host_object = env
+        .framework_state
+        .audio_toolbox
+        .audio_file
+        .audio_files
+        .get(&guest_audio_file)
+        .unwrap();
+    let audio_desc = AudioStreamBasicDescription::from_audio_description(
+        other_host_object.audio_file.audio_description(),
+    );
+    let conversion = if audio_desc == client_audio_desc {
+        ClientConversion::Identity
+    } else if supports_unsigned8_to_signed16(audio_desc, client_audio_desc) {
+        ClientConversion::Unsigned8ToSigned16
+    } else {
+        panic!(
+            "Unsupported ExtAudioFile conversion {:?} -> {:?}",
+            audio_desc, client_audio_desc
+        );
+    };
     let host_object = env
         .framework_state
         .audio_toolbox
@@ -220,26 +294,7 @@ fn ExtAudioFileSetProperty(
         .unwrap();
     assert!(host_object.client_data_format.is_none());
     host_object.client_data_format = Some(client_audio_desc);
-
-    let host_object = env
-        .framework_state
-        .audio_toolbox
-        .extended_audio_file
-        .extended_audio_files
-        .get(&in_ext_audio_file)
-        .unwrap();
-    let other_host_object = env
-        .framework_state
-        .audio_toolbox
-        .audio_file
-        .audio_files
-        .get(&host_object.guest_audio_file)
-        .unwrap();
-    let audio_desc = AudioStreamBasicDescription::from_audio_description(
-        other_host_object.audio_file.audio_description(),
-    );
-    // TODO: support audio format conversions
-    assert_eq!(audio_desc, client_audio_desc);
+    host_object.conversion = conversion;
 
     0 // success
 }
@@ -268,20 +323,49 @@ fn ExtAudioFileRead(
         host_object.client_data_format.unwrap().channels_per_frame;
 
     let number_frames = env.mem.read(io_number_frames);
-    let bytes_per_frame = host_object.client_data_format.unwrap().bytes_per_frame;
-    let number_of_bytes = number_frames.checked_mul(bytes_per_frame).unwrap();
-    let number_of_bytes_ptr = env.mem.alloc_and_write(number_of_bytes);
+    let client_format = host_object.client_data_format.unwrap();
+    let conversion = host_object.conversion;
+    let guest_audio_file = host_object.guest_audio_file;
+    let current_bytes_read = host_object.current_bytes_read;
+    let source_format = AudioStreamBasicDescription::from_audio_description(
+        env.framework_state
+            .audio_toolbox
+            .audio_file
+            .audio_files
+            .get(&guest_audio_file)
+            .unwrap()
+            .audio_file
+            .audio_description(),
+    );
+    let source_bytes_requested = number_frames
+        .checked_mul(source_format.bytes_per_frame)
+        .unwrap();
+    let destination_bytes_requested = number_frames
+        .checked_mul(client_format.bytes_per_frame)
+        .unwrap();
+    if audio_buffer_list.buffers[0].data_byte_size < destination_bytes_requested {
+        return paramErr;
+    }
+    let source_buffer = if conversion == ClientConversion::Identity {
+        audio_buffer_list.buffers[0].data
+    } else {
+        env.mem.alloc(source_bytes_requested).cast()
+    };
+    let number_of_bytes_ptr = env.mem.alloc_and_write(source_bytes_requested);
     let res = AudioFileReadBytes(
         env,
-        host_object.guest_audio_file,
+        guest_audio_file,
         false,
-        host_object.current_bytes_read,
+        current_bytes_read,
         number_of_bytes_ptr,
-        audio_buffer_list.buffers[0].data,
+        source_buffer,
     );
     let number_of_bytes_read = env.mem.read(number_of_bytes_ptr);
     env.mem.free(number_of_bytes_ptr.cast());
     if res != 0 {
+        if conversion != ClientConversion::Identity {
+            env.mem.free(source_buffer);
+        }
         if res == eofErr {
             env.mem.write(io_number_frames, 0);
             return 0;
@@ -295,11 +379,22 @@ fn ExtAudioFileRead(
         );
         return res;
     }
-    env.mem.write(
-        io_number_frames,
-        number_of_bytes_read.checked_div(bytes_per_frame).unwrap(),
-    );
-    audio_buffer_list.buffers[0].data_byte_size = number_of_bytes_read;
+    let frames_read = number_of_bytes_read
+        .checked_div(source_format.bytes_per_frame)
+        .unwrap();
+    let destination_bytes_read = frames_read * client_format.bytes_per_frame;
+    if conversion == ClientConversion::Unsigned8ToSigned16 {
+        let converted = convert_unsigned8_to_signed16(
+            env.mem
+                .bytes_at(source_buffer.cast_const().cast(), number_of_bytes_read),
+        );
+        env.mem
+            .bytes_at_mut(audio_buffer_list.buffers[0].data.cast(), destination_bytes_read)
+            .copy_from_slice(&converted);
+        env.mem.free(source_buffer);
+    }
+    env.mem.write(io_number_frames, frames_read);
+    audio_buffer_list.buffers[0].data_byte_size = destination_bytes_read;
 
     let host_object = env
         .framework_state
@@ -313,6 +408,32 @@ fn ExtAudioFileRead(
     env.mem.write(io_data, audio_buffer_list);
 
     0 // success
+}
+
+fn supports_unsigned8_to_signed16(
+    source: AudioStreamBasicDescription,
+    destination: AudioStreamBasicDescription,
+) -> bool {
+    source.format_id == kAudioFormatLinearPCM
+        && destination.format_id == kAudioFormatLinearPCM
+        && (source.sample_rate - destination.sample_rate).abs() < 0.01
+        && source.channels_per_frame == destination.channels_per_frame
+        && source.bits_per_channel == 8
+        && source.bytes_per_frame == source.channels_per_frame
+        && source.format_flags & (kAudioFormatFlagIsFloat | kAudioFormatFlagIsBigEndian | kAudioFormatFlagIsSignedInteger) == 0
+        && source.format_flags & kAudioFormatFlagIsPacked != 0
+        && destination.bits_per_channel == 16
+        && destination.bytes_per_frame == destination.channels_per_frame * 2
+        && destination.format_flags & (kAudioFormatFlagIsFloat | kAudioFormatFlagIsBigEndian) == 0
+        && destination.format_flags & (kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked)
+            == (kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked)
+}
+
+fn convert_unsigned8_to_signed16(source: &[u8]) -> Vec<u8> {
+    source
+        .iter()
+        .flat_map(|&sample| ((i16::from(sample) - 128) << 8).to_le_bytes())
+        .collect()
 }
 
 fn ExtAudioFileSeek(
@@ -371,19 +492,12 @@ fn ExtAudioFileDispose(env: &mut Environment, in_ext_audio_file: ExtAudioFileRef
         .audio_toolbox
         .extended_audio_file
         .extended_audio_files
-        .get(&in_ext_audio_file)
-        .unwrap();
-
-    let res = AudioFileClose(env, host_object.guest_audio_file);
-    assert_eq!(res, 0); // success
-
-    let _host_object = env
-        .framework_state
-        .audio_toolbox
-        .extended_audio_file
-        .extended_audio_files
         .remove(&in_ext_audio_file)
         .unwrap();
+    if host_object.owns_audio_file {
+        let res = AudioFileClose(env, host_object.guest_audio_file);
+        assert_eq!(res, 0); // success
+    }
     env.mem.free(in_ext_audio_file.cast());
 
     0 // success
@@ -391,9 +505,48 @@ fn ExtAudioFileDispose(env: &mut Environment, in_ext_audio_file: ExtAudioFileRef
 
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(ExtAudioFileOpenURL(_, _)),
+    export_c_func!(ExtAudioFileWrapAudioFileID(_, _, _)),
     export_c_func!(ExtAudioFileGetProperty(_, _, _, _)),
     export_c_func!(ExtAudioFileSetProperty(_, _, _, _)),
     export_c_func!(ExtAudioFileRead(_, _, _)),
     export_c_func!(ExtAudioFileSeek(_, _)),
     export_c_func!(ExtAudioFileDispose(_)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mem::ConstVoidPtr;
+
+    #[test]
+    fn dev_244_unsigned8_pcm_widens_to_signed16_endpoints() {
+        assert_eq!(
+            convert_unsigned8_to_signed16(&[0, 128, 255]),
+            [0x00, 0x80, 0x00, 0x00, 0x00, 0x7f]
+        );
+    }
+
+    #[test]
+    fn dev_244_nonowning_extaudio_dispose_leaves_wrapped_audio_file_alive() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let audio_file: AudioFileID = env.mem.alloc(1).cast();
+        let wrapper = env.mem.alloc_and_write(OpaqueExtAudioFile { _filler: 0 });
+        State::get(&mut env.framework_state).extended_audio_files.insert(
+            wrapper,
+            ExtAudioFileHostObject {
+                guest_audio_file: audio_file,
+                client_data_format: None,
+                current_bytes_read: 0,
+                owns_audio_file: false,
+                conversion: ClientConversion::Identity,
+            },
+        );
+
+        assert_eq!(ExtAudioFileDispose(&mut env, wrapper), 0);
+        assert!(env
+            .mem
+            .get_bytes_fallible(ConstVoidPtr::from_bits(audio_file.to_bits()), 1)
+            .is_some());
+        env.mem.free(audio_file.cast());
+    }
+}

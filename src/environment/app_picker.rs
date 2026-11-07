@@ -818,17 +818,33 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
     // Exact bundle identifiers avoid prefix collisions such as Glyder/Glyder 2
     // and keep the focused device-test batch deterministic even when filenames
     // or localized display names differ.
-    const DEV_243_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
+    const DEV_244_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
+        "COMTOBIAPPSHUNDREDROOMS",
+        "UBI063WW",
+        "COMGAMEVILAIRPENGUIN",
         "COMMAJESTICSOFTWAREBLOT",
+        "COMBACKFLIPSTUDIOSBOUNCETHEBUNNY",
         "COMTURNERBRINGMESANDWICHES",
+        "COMTAGGAMESCARJACKST",
         "COMCONTINUITYGAMECONTINUITY2",
+        "COMDTPENTERTAINMENTCRAZYGOLF",
+        "COMEZONEDIVERSION",
+        "COMGALCONIDYNAMITEJACK",
+        "COMBIGDUCKGAMESFLOW",
+        "COMNAMCONETWORKSGALARG",
+        "COMCRITICALTHOUGHTGAMESGEODEFENSE",
         "COMIUGOIMPLODE",
         "COMMUMBOJUMBOLUXOR",
-        "COMREIGNDESIGNPIGRUSH",
+        "COMSUNTOWNSHIPGARBAGESPRITEHD",
+        "COMPLAYERXPANG",
+        "COMLIQUIDAIRLABRICKPRO",
+        "COMTAPULOUSRRF",
         "COMDEFIANTDEVSKISAFARI",
-        "COMPANDASTEAMWARS",
+        "COMCHILLINGOSPOING",
+        "COMCLICKGAMERSTICKY",
         "COMIUGOZOMBIES2",
-        "COMMIKAMOBILEZOMBIEVILLE2",
+        "COMKONGZHONGZOMBIEC",
+        "COMGAMEDRSZS",
     ];
     let started = Instant::now();
     apps.sort_by_key(|app| {
@@ -839,7 +855,7 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
                 .collect()
         };
         let bundle_identifier = normalized(&app.bundle_identifier);
-        let rank = DEV_243_TEST_BUNDLE_IDENTIFIERS
+        let rank = DEV_244_TEST_BUNDLE_IDENTIFIERS
             .iter()
             .position(|&identifier| bundle_identifier == identifier)
             .unwrap_or(usize::MAX);
@@ -1683,7 +1699,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.43",
+            "iDared 32bit {}{}{} · Dev 2.44",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""
@@ -2947,39 +2963,71 @@ mod tests {
     }
 
     #[test]
-    fn dev_243_test_batch_is_first_in_exact_alphabetical_order() {
+    fn dev_244_test_batch_is_first_in_exact_alphabetical_order() {
         let mut apps = vec![
             test_app("unrelated.bundle", "AAA unrelated"),
-            test_app("com.MikaMobile.Zombieville2", "Zombieville 2"),
-            test_app("com.panda.steamwars", "Steam Wars"),
-            test_app("com.continuitygame.continuity2", "Continuity 2"),
-            test_app("com.mumbojumbo.Luxor", "Luxor"),
-            test_app("com.reigndesign.Pigrush", "Pig Rush"),
-            test_app("com.iugo.Implode", "Implode!"),
-            test_app("com.turner.bringmesandwiches", "Sandwiches!!"),
-            test_app("com.iugo.zombies2", "ZA! 2ndWave"),
-            test_app("com.DefiantDev.SkiSafari", "Ski Safari"),
+            test_app("com.tobiapps.hundred-rooms", "100 Floors"),
+            test_app("UBI-063-WW", "AC Rearmed"),
+            test_app("com.gamevil.airpenguin", "Air Penguin"),
             test_app("com.majesticsoftware.blot", "Blot"),
+            test_app("com.backflipstudios.bouncethebunny", "Bounce"),
+            test_app("com.turner.bringmesandwiches", "Sandwiches!!"),
+            test_app("com.TagGames.CarJackSt", "Car Jack"),
+            test_app("com.continuitygame.continuity2", "Continuity 2"),
+            test_app("com.dtp-entertainment.crazygolf", "CrazyGolf"),
+            test_app("com.ezone.Diversion", "Diversion"),
+            test_app("com.galcon.idynamitejack", "DynamiteJack"),
+            test_app("com.bigduckgames.flow", "Flow"),
+            test_app("com.namconetworks.galarg", "GalagaRemix"),
+            test_app("com.criticalthoughtgames.geodefense", "geoDefense"),
+            test_app("com.iugo.Implode", "Implode!"),
+            test_app("com.mumbojumbo.Luxor", "Luxor"),
+            test_app("com.suntownship.GarbageSpriteHD", "Mech Guardian"),
+            test_app("com.playerx.pang", "Pang"),
+            test_app("com.liquidairlab.rickpro", "Rick Pro"),
+            test_app("com.tapulous.rrf", "Riddim"),
+            test_app("com.DefiantDev.SkiSafari", "Ski Safari"),
+            test_app("com.chillingo.spoing", "Spoing"),
+            test_app("com.clickgamer.sticky", "Sticky"),
+            test_app("com.iugo.zombies2", "ZA! 2ndWave"),
+            test_app("com.kongzhong.zombiec", "Zombie Crisis 3D"),
+            test_app("com.gamedrs.ZS", "ZS"),
         ];
         sort_picker_apps(&mut apps, &mut LibraryTiming::default());
         let names: Vec<&str> = apps
             .iter()
-            .take(10)
+            .take(26)
             .map(|app| app.display_name.as_str())
             .collect();
         assert_eq!(
             names,
             [
+                "100 Floors",
+                "AC Rearmed",
+                "Air Penguin",
                 "Blot",
+                "Bounce",
                 "Sandwiches!!",
+                "Car Jack",
                 "Continuity 2",
+                "CrazyGolf",
+                "Diversion",
+                "DynamiteJack",
+                "Flow",
+                "GalagaRemix",
+                "geoDefense",
                 "Implode!",
                 "Luxor",
-                "Pig Rush",
+                "Mech Guardian",
+                "Pang",
+                "Rick Pro",
+                "Riddim",
                 "Ski Safari",
-                "Steam Wars",
+                "Spoing",
+                "Sticky",
                 "ZA! 2ndWave",
-                "Zombieville 2",
+                "Zombie Crisis 3D",
+                "ZS",
             ]
         );
     }
