@@ -51,7 +51,7 @@ struct AVAudioPlayerHostObject {
 impl HostObject for AVAudioPlayerHostObject {}
 
 fn log_pang_lifetime(env: &mut Environment, this: id, event: &str) {
-    if env.bundle.bundle_identifier() != "com.playerx.pang" {
+    if env.bundle.bundle_identifier_optional() != Some("com.playerx.pang") {
         return;
     }
     let sequence = {

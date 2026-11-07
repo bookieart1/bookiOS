@@ -120,6 +120,16 @@ impl Bundle {
         self.plist["CFBundleIdentifier"].as_string().unwrap()
     }
 
+    /// The bundle identifier when it is present and is a string.
+    ///
+    /// Diagnostic-only paths use this for fake test environments, whose
+    /// deliberately empty bundle must not turn bounded logging into a crash.
+    pub fn bundle_identifier_optional(&self) -> Option<&str> {
+        self.plist
+            .get("CFBundleIdentifier")
+            .and_then(Value::as_string)
+    }
+
     pub fn bundle_version(&self) -> &str {
         self.plist["CFBundleVersion"].as_string().unwrap()
     }

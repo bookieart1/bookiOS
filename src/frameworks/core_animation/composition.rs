@@ -125,7 +125,7 @@ pub fn recomposite_if_necessary(env: &mut Environment, force: bool) -> Option<In
         .iter()
         .filter(|&&window| !msg![env; window isHidden])
         .count();
-    if env.bundle.bundle_identifier() == "com.turner.bringmesandwiches" {
+    if env.bundle.bundle_identifier_optional() == Some("com.turner.bringmesandwiches") {
         let state = &mut env.framework_state.core_animation.composition;
         state.startup_presentation_attempts = state.startup_presentation_attempts.saturating_add(1);
         if matches!(state.startup_presentation_attempts, 1 | 2 | 4 | 8 | 16 | 32) {
@@ -508,7 +508,7 @@ pub fn recomposite_if_necessary(env: &mut Environment, force: bool) -> Option<In
     std::mem::drop(gles);
     window.swap_window();
 
-    if env.bundle.bundle_identifier() == "com.turner.bringmesandwiches"
+    if env.bundle.bundle_identifier_optional() == Some("com.turner.bringmesandwiches")
         && !env
             .framework_state
             .core_animation

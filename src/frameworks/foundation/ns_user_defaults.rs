@@ -397,6 +397,8 @@ mod tests {
     fn nil_setting_removes_only_application_value_and_reveals_fallbacks() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let pool: id = msg_class![env; NSAutoreleasePool new];
         // Isolate the domains without touching the developer's preferences.
         // All reads/mutations below go through real Objective-C dispatch.
@@ -440,6 +442,8 @@ mod tests {
         assert!(failure.is_err());
         release(env, defaults);
         release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 
     #[test]

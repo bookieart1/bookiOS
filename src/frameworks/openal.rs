@@ -50,7 +50,7 @@ pub struct State {
 }
 
 fn log_zombie_crisis_lifetime(env: &mut Environment, event: &str, primary: u32, secondary: i32) {
-    if env.bundle.bundle_identifier() != "com.kongzhong.zombiec" {
+    if env.bundle.bundle_identifier_optional() != Some("com.kongzhong.zombiec") {
         return;
     }
     let (sequence, current_context, context_count, device_count) = {
