@@ -9,6 +9,7 @@
 mod av_asset;
 mod av_audio_player;
 mod av_audio_session;
+mod av_capture;
 
 pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
     path: "/System/Library/Frameworks/AVFoundation.framework/AVFoundation",
@@ -18,7 +19,11 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
         av_audio_player::CLASSES,
         av_audio_session::CLASSES,
     ],
-    constant_exports: &[av_audio_session::CONSTANTS],
+    constant_exports: &[
+        av_asset::CONSTANTS,
+        av_audio_session::CONSTANTS,
+        av_capture::CONSTANTS,
+    ],
     function_exports: &[],
 };
 

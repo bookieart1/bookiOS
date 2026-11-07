@@ -136,6 +136,29 @@ pub const CLASSES: ClassExports = objc_classes! {
     () = msg![env; this setNeedsDisplay];
 }
 
+// UIKit's animated variant has the same final-state contract as the plain
+// setter. touchHLE does not synthesize intermediate animation frames yet, so
+// complete the transition synchronously while still delivering the delegate
+// notifications that historical clients use to advance their UI state.
+- (())setContentOffset:(CGPoint)offset animated:(bool)animated {
+    let old_offset: CGPoint = msg![env; this contentOffset];
+    env.diagnostic_campaign_event(
+        "scroll-view",
+        "setContentOffset:animated: view,old-x,old-y,new-x,new-y,animated",
+        [
+            this.to_bits(), old_offset.x.to_bits(), old_offset.y.to_bits(),
+            offset.x.to_bits(), offset.y.to_bits(), u32::from(animated), 0, 0,
+        ],
+    );
+    () = msg![env; this setContentOffset:offset];
+    if old_offset != offset {
+        tell_delegate(env, this, "scrollViewDidScroll:");
+        if animated {
+            tell_delegate(env, this, "scrollViewDidEndScrollingAnimation:");
+        }
+    }
+}
+
 // Scrolls as little as needed to show the rect. TODO: animate, rather than
 // jumping straight there.
 - (())scrollRectToVisible:(CGRect)rect animated:(bool)animated {

@@ -14,12 +14,13 @@ use crate::environment::{MutexId, PTHREAD_MUTEX_DEFAULT};
 use crate::frameworks::foundation::NSInteger;
 use crate::libc::pthread::cond::{
     pthread_cond_broadcast, pthread_cond_destroy, pthread_cond_init, pthread_cond_signal,
-    pthread_cond_t, pthread_cond_wait,
+    pthread_cond_t, pthread_cond_timedwait, pthread_cond_wait,
 };
 use crate::libc::pthread::mutex::{
     pthread_mutex_destroy, pthread_mutex_init, pthread_mutex_lock, pthread_mutex_t,
     pthread_mutex_trylock, pthread_mutex_unlock,
 };
+use crate::libc::time::timespec;
 use crate::mem::{guest_size_of, ConstPtr, MutPtr};
 use crate::objc::{id, msg, nil, objc_classes, release, ClassExports, HostObject};
 
@@ -200,6 +201,36 @@ pub const CLASSES: ClassExports = objc_classes! {
     while env.objc.borrow::<NSConditionLockHostObject>(this).condition != condition {
         pthread_cond_wait(env, cond, mutex);
     }
+}
+
+- (bool)lockWhenCondition:(NSInteger)condition beforeDate:(id)limit {
+    let &NSConditionLockHostObject { mutex, cond, .. } = env.objc.borrow(this);
+    pthread_mutex_lock(env, mutex);
+    while env.objc.borrow::<NSConditionLockHostObject>(this).condition != condition {
+        let interval: f64 = msg![env; limit timeIntervalSince1970];
+        let seconds = interval.floor();
+        let nanoseconds = ((interval - seconds) * 1_000_000_000.0).round();
+        let deadline = timespec {
+            tv_sec: seconds as _,
+            tv_nsec: nanoseconds.clamp(0.0, 999_999_999.0) as _,
+        };
+        let deadline_ptr = env.mem.alloc_and_write(deadline);
+        let result = pthread_cond_timedwait(env, cond, mutex, deadline_ptr.cast_const());
+        env.mem.free(deadline_ptr.cast());
+        if result != 0 {
+            env.diagnostic_campaign_event(
+                "condition-lock", "timed-out lock,condition,date,result",
+                [this.to_bits(), condition as u32, limit.to_bits(), result as u32, 0, 0, 0, 0]
+            );
+            pthread_mutex_unlock(env, mutex);
+            return false;
+        }
+    }
+    env.diagnostic_campaign_event(
+        "condition-lock", "acquired lock,condition,date",
+        [this.to_bits(), condition as u32, limit.to_bits(), 0, 0, 0, 0, 0]
+    );
+    true
 }
 
 - (bool)tryLock {

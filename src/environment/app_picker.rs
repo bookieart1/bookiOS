@@ -811,6 +811,85 @@ fn inspect_app_package(
     )
 }
 
+const DEV_248_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
+    "COMTOBIAPPSHUNDREDROOMS",
+    "COMGEEKBEACHAMONSTERATEMYHOMEWORK",
+    "UBI063WW",
+    "COMGAMEVILAIRPENGUIN",
+    "COMKROMEBOOMERANGBLAST",
+    "COMBABYNINJABABYNINJA",
+    "NETSKYVUBATTLEBEARSNEG1",
+    "COMMAJESTICSOFTWAREBLOT",
+    "COMBACKFLIPSTUDIOSBOUNCETHEBUNNY",
+    "COMTURNERBRINGMESANDWICHES",
+    "COMDIGITALPRUNESBUNGEEBALL2PRO",
+    "COMXMGSTUDIOCANNONCADETS",
+    "COMTAGGAMESCARJACKST",
+    "COM2KPLAYCARNIVAL",
+    "COMCHILLINGOCONTREJOURHD",
+    "COMDTPENTERTAINMENTCRAZYGOLF",
+    "COMTINKERHOUSEGAMESCURRENT",
+    "COMPHOSPHORPACTGAME",
+    "COMMIKEMASSEIDAREDEVILDAVE",
+    "COMSECRETEXITSDT",
+    "COMEZONEDIVERSION",
+    "COMGALCONIDYNAMITEJACK",
+    "COMNOTDOPPLEREARNTODIE",
+    "FALLDOWN",
+    "FIELDRUNNERS2IPHONE",
+    "COMSHAUNINMANFLIPSESCAPE",
+    "COMROBTOPMAGEGAME",
+    "COMMINICLIPFRAGGER",
+    "COMNAMCONETWORKSGALARG",
+    "COMGLUGUNBROS",
+    "COMBATTERYACIDHIGHWAYRIDER",
+    "COMMIXELWEBHILLBILLYGREEN",
+    "COMIUGOIMPLODE",
+    "COMNAUGHTYBITSISHOOT2",
+    "COMPROFUSIONSTUDIOSISTUNTPRO",
+    "PLIDREAMSJELLYINVADERS",
+    "COMWALABERJELLYCAR",
+    "COMSQUAREENIXLARACROFTANDTHEGUARDIANOFLIGHT",
+    "COMLIVGAMESLEGENDARYWARS",
+    "COMCHILLINGOMINIGORE",
+    "JPCOCAPCOMMONHUNIPUS",
+    "COMORIGIN8MONSTERKILL",
+    "COMMEDUSAODDYSMOGFINAL",
+    "COMPLAYERXPANG",
+    "COMPOPCAPPEGGLE",
+    "COMKONAMIEUROPEPES2012",
+    "COMROCKETCATQUICKHOOK",
+    "COMFIREMINTREALRACING",
+    "COMFIREMINTREALRACINGGTI",
+    "COMFFEROBOTO",
+    "COMCHILLINGOROGUESKY",
+    "COMJOYSTICKGENERALSSTACTIONPIG",
+    "COMMADFINGERGAMESSHADOWGUN",
+    "COMONIRICGAMESSILENTSWORDSZERO",
+    "COMMTVNSKIRUNNER",
+    "COMDEFIANTDEVSKISAFARI",
+    "COMEEENMACHINESKYBURGER",
+    "COMSEGASPINBALL",
+    "COMCHILLINGOSPOING",
+    "COMMTVNSPONGEBOBDINERDASH",
+    "COMCLICKGAMERSTICKY",
+    "COMCRANEBALLSSTUNTMAN",
+    "COMTOUCHFOOSWORDIGO",
+    "COMDIGITALCHOCOLATEIHOUSE",
+    "COMIUGOTOYBOTDIARIES",
+    "COMUNIVERSOMOTRENCHBUILD",
+    "COMNEKKIVECTORIPHONE",
+    "COMSEGAVIRTUAFIGHTER2",
+    "COMKONAMIEUOPEWIREWAY",
+    "9X8UEF6RBGCOMGRUMPYFACEWISPIN",
+    "COMTEAM17WORMSEXPRESS",
+    "COMIUGOZOMBIES2",
+    "COMSEGAZAXXONESCAPE",
+    "COMKONGZHONGZOMBIEC",
+    "COMGAMEDRSZS",
+    "COMPOPCAPIOSZUMAHD",
+];
+
 fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
     // Put the current focused device-test batch first, in alphabetical order,
     // so a full round can be exercised without repeatedly paging through the
@@ -818,42 +897,6 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
     // Exact bundle identifiers avoid prefix collisions such as Glyder/Glyder 2
     // and keep the focused device-test batch deterministic even when filenames
     // or localized display names differ.
-    const DEV_247_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
-        "COMTOBIAPPSHUNDREDROOMS",
-        "COMGEEKBEACHAMONSTERATEMYHOMEWORK",
-        "UBI063WW",
-        "COMGAMEVILAIRPENGUIN",
-        "COMXMGSTUDIOCANNONCADETS",
-        "COMTINKERHOUSEGAMESCURRENT",
-        "COMGALCONIDYNAMITEJACK",
-        "FIELDRUNNERS2IPHONE",
-        "COMSHAUNINMANFLIPSESCAPE",
-        "COMROBTOPMAGEGAME",
-        "COMGLUGUNBROS",
-        "COMBATTERYACIDHIGHWAYRIDER",
-        "COMIUGOIMPLODE",
-        "COMNAUGHTYBITSISHOOT2",
-        "COMPROFUSIONSTUDIOSISTUNTPRO",
-        "PLIDREAMSJELLYINVADERS",
-        "COMWALABERJELLYCAR",
-        "COMLIVGAMESLEGENDARYWARS",
-        "JPCOCAPCOMMONHUNIPUS",
-        "COMPLAYERXPANG",
-        "COMROCKETCATQUICKHOOK",
-        "COMFIREMINTREALRACING",
-        "COMFIREMINTREALRACINGGTI",
-        "COMMADFINGERGAMESSHADOWGUN",
-        "COMONIRICGAMESSILENTSWORDSZERO",
-        "COMJOYSTICKGENERALSSTACTIONPIG",
-        "COMCRANEBALLSSTUNTMAN",
-        "COMTOUCHFOOSWORDIGO",
-        "COMDIGITALCHOCOLATEIHOUSE",
-        "COMUNIVERSOMOTRENCHBUILD",
-        "COMKONAMIEUOPEWIREWAY",
-        "9X8UEF6RBGCOMGRUMPYFACEWISPIN",
-        "COMSEGAZAXXONESCAPE",
-        "COMPOPCAPIOSZUMAHD",
-    ];
     let started = Instant::now();
     apps.sort_by_key(|app| {
         let normalized = |text: &str| -> String {
@@ -863,7 +906,7 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
                 .collect()
         };
         let bundle_identifier = normalized(&app.bundle_identifier);
-        let rank = DEV_247_TEST_BUNDLE_IDENTIFIERS
+        let rank = DEV_248_TEST_BUNDLE_IDENTIFIERS
             .iter()
             .position(|&identifier| bundle_identifier == identifier)
             .unwrap_or(usize::MAX);
@@ -1707,7 +1750,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.47",
+            "iDared 32bit {}{}{} · Dev 2.48",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""
@@ -2982,11 +3025,14 @@ mod tests {
     }
 
     #[test]
-    fn dev_247_test_batch_is_first_in_exact_alphabetical_order() {
+    fn dev_248_test_batch_is_first_in_exact_alphabetical_order() {
         let mut apps = vec![
             test_app("unrelated.bundle", "AAA unrelated"),
             test_app("com.tobiapps.hundred-rooms", "100 Floors"),
-            test_app("com.geekbeach.amonsteratemyhomework", "A Monster Ate My Homework"),
+            test_app(
+                "com.geekbeach.amonsteratemyhomework",
+                "A Monster Ate My Homework",
+            ),
             test_app("UBI-063-WW", "AC Rearmed"),
             test_app("com.gamevil.airpenguin", "Air Penguin"),
             test_app("com.xmgstudio.cannoncadets", "Cannon Cadets"),
@@ -3052,9 +3098,9 @@ mod tests {
                 "QuickHook",
                 "Real Racing",
                 "Real Racing GTI",
+                "S.T. ActionPig",
                 "ShadowGun",
                 "Silent Swords Zero",
-                "S.T. ActionPig",
                 "SUPERFALL",
                 "Swordigo",
                 "TowerBloxx",

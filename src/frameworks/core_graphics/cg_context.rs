@@ -273,6 +273,7 @@ type ContextState = (
     Vec<ClipPath>,                        // clipping path intersections
     CGTextDrawingMode,                    // text drawing mode
     CGTextEncoding,                       // legacy byte-to-glyph encoding
+    bool,                                 // should antialias
 );
 
 pub(super) struct CGContextHostObject {
@@ -299,6 +300,8 @@ pub(super) struct CGContextHostObject {
     pub(super) rgb_stroke_color: (CGFloat, CGFloat, CGFloat, CGFloat),
     pub(super) path: CGMutablePathRef,
     pub(super) clip_paths: Vec<ClipPath>,
+    pub(super) should_antialias: bool,
+    pub(super) allows_antialiasing: bool,
 }
 impl HostObject for CGContextHostObject {}
 
@@ -728,6 +731,7 @@ pub fn CGContextSaveGState(env: &mut Environment, context: CGContextRef) {
         host_obj.clip_paths.clone(),
         host_obj.text_drawing_mode,
         host_obj.text_encoding,
+        host_obj.should_antialias,
     ));
     CGFontRetain(env, env.objc.borrow::<CGContextHostObject>(context).font);
 }
@@ -753,6 +757,7 @@ pub fn CGContextRestoreGState(env: &mut Environment, context: CGContextRef) {
     host_obj.clip_paths = state.9;
     host_obj.text_drawing_mode = state.10;
     host_obj.text_encoding = state.11;
+    host_obj.should_antialias = state.12;
 }
 
 fn CGContextSetInterpolationQuality(
@@ -766,11 +771,20 @@ fn CGContextSetInterpolationQuality(
         quality
     );
 }
-fn CGContextSetAllowsAntialiasing(_env: &mut Environment, context: CGContextRef, allow: bool) {
-    log!(
-        "TODO: CGContextSetAllowsAntialiasing({:?}, {})",
-        context,
-        allow
+fn CGContextSetAllowsAntialiasing(env: &mut Environment, context: CGContextRef, allow: bool) {
+    env.objc
+        .borrow_mut::<CGContextHostObject>(context)
+        .allows_antialiasing = allow;
+}
+
+fn CGContextSetShouldAntialias(env: &mut Environment, context: CGContextRef, should: bool) {
+    env.objc
+        .borrow_mut::<CGContextHostObject>(context)
+        .should_antialias = should;
+    env.diagnostic_campaign_event(
+        "core-graphics",
+        "CGContextSetShouldAntialias context,value",
+        [context.to_bits(), u32::from(should), 0, 0, 0, 0, 0, 0],
     );
 }
 
@@ -1106,7 +1120,9 @@ fn CGContextSetLineJoin(env: &mut Environment, context: CGContextRef, join: CGLi
         join,
         kCGLineJoinMiter | kCGLineJoinRound | kCGLineJoinBevel
     ));
-    env.objc.borrow_mut::<CGContextHostObject>(context).line_join = join;
+    env.objc
+        .borrow_mut::<CGContextHostObject>(context)
+        .line_join = join;
 }
 
 fn CGContextSetRenderingIntent(
@@ -1407,6 +1423,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGContextRestoreGState(_)),
     export_c_func!(CGContextSetInterpolationQuality(_, _)),
     export_c_func!(CGContextSetAllowsAntialiasing(_, _)),
+    export_c_func!(CGContextSetShouldAntialias(_, _)),
     export_c_func!(CGContextSetShouldSmoothFonts(_, _)),
     export_c_func!(CGContextSetAlpha(_, _)),
     export_c_func!(CGContextSetFont(_, _)),

@@ -9,6 +9,7 @@
 //! duration, metadata or playback support. It only implements the historical
 //! construction contract needed before those later operations can be seen.
 
+use crate::dyld::{ConstantExports, HostConstant};
 use crate::frameworks::foundation::NSInteger;
 use crate::objc::{
     autorelease, id, msg, nil, objc_classes, release, retain, ClassExports, HostObject, NSZonePtr,
@@ -16,6 +17,13 @@ use crate::objc::{
 
 pub type AVPlayerItemStatus = NSInteger;
 pub const AVPLAYER_ITEM_STATUS_UNKNOWN: AVPlayerItemStatus = 0;
+
+pub const AVPlayerItemDidPlayToEndTimeNotification: &str =
+    "AVPlayerItemDidPlayToEndTimeNotification";
+pub const CONSTANTS: ConstantExports = &[(
+    "_AVPlayerItemDidPlayToEndTimeNotification",
+    HostConstant::NSString(AVPlayerItemDidPlayToEndTimeNotification),
+)];
 
 struct AVURLAssetHostObject {
     url: id,
@@ -217,5 +225,17 @@ mod tests {
         let count_after: NSUInteger = msg![env; asset retainCount];
         assert_eq!(count_after, count_before);
         release(env, asset);
+    }
+
+    #[test]
+    fn dev_248_playback_end_notification_has_historical_identity() {
+        let (_, constant) = CONSTANTS
+            .iter()
+            .find(|(symbol, _)| *symbol == "_AVPlayerItemDidPlayToEndTimeNotification")
+            .unwrap();
+        let HostConstant::NSString(value) = constant else {
+            panic!("notification was not exported as NSString")
+        };
+        assert_eq!(*value, "AVPlayerItemDidPlayToEndTimeNotification");
     }
 }

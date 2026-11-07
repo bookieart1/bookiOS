@@ -12,14 +12,13 @@ use super::cf_allocator::{kCFAllocatorDefault, CFAllocatorRef};
 use super::CFIndex;
 use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
 use crate::frameworks::core_foundation::cf_string::{
-    kCFStringEncodingASCII, CFStringConvertEncodingToNSStringEncoding, CFStringEncoding,
-    CFStringRef,
-};
-use crate::frameworks::foundation::ns_string::{
-    from_rust_string, get_static_str, to_rust_string, NSASCIIStringEncoding,
-    NSUTF8StringEncoding,
+    kCFStringEncodingASCII, kCFStringEncodingUTF8, CFStringConvertEncodingToNSStringEncoding,
+    CFStringEncoding, CFStringRef,
 };
 use crate::frameworks::foundation::ns_file_manager::NSFileSize;
+use crate::frameworks::foundation::ns_string::{
+    from_rust_string, get_static_str, to_rust_string, NSASCIIStringEncoding, NSUTF8StringEncoding,
+};
 use crate::frameworks::foundation::NSUInteger;
 use crate::mem::{ConstPtr, MutPtr, Ptr};
 use crate::objc::{id, msg, msg_class, nil, release, retain};
@@ -87,7 +86,10 @@ fn CFURLCreatePropertyFromResource(
 
     let file_length_key = get_static_str(env, "kCFURLFileLength");
     if !msg![env; property isEqual:file_length_key] {
-        log!("Warning: CFURLCreatePropertyFromResource unsupported property {:?}", property);
+        log!(
+            "Warning: CFURLCreatePropertyFromResource unsupported property {:?}",
+            property
+        );
         if !error_code.is_null() {
             env.mem.write(error_code, -12); // kCFURLPropertyKeyUnavailableError
         }
@@ -147,21 +149,23 @@ fn CFURLCreateWithBytes(
     base_url: CFURLRef,
 ) -> CFURLRef {
     assert!(allocator == kCFAllocatorDefault || env.mem.read(allocator).is_system_default()); // unimplemented
-    assert_eq!(encoding, kCFStringEncodingASCII); // TODO
+    if !matches!(encoding, kCFStringEncodingASCII | kCFStringEncodingUTF8) {
+        return Ptr::null();
+    }
     assert!(base_url.is_null()); // TODO
 
     // TODO: interpret percent escape sequences using encoding as well
     let encoding = CFStringConvertEncodingToNSStringEncoding(env, encoding);
     let length: NSUInteger = length.try_into().unwrap();
 
-    if length == 0 {
-        return Ptr::null();
-    }
-
     let string: id = msg_class![env; NSString alloc];
     let string: id = msg![env; string initWithBytes:url_bytes
                                              length:length
                                            encoding:encoding];
+
+    if string == nil {
+        return Ptr::null();
+    }
 
     assert!(!to_rust_string(env, string).contains("://")); // TODO
 
@@ -347,5 +351,46 @@ mod tests {
         release(env, copied);
         release(env, path);
         assert_eq!(CFURLCopyPath(env, nil), nil);
+    }
+
+    #[test]
+    fn dev_248_create_with_bytes_accepts_valid_utf8_and_rejects_malformed_utf8() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        env.is_app_picker = true;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let valid: MutPtr<u8> = env.mem.alloc(10).cast();
+        env.mem
+            .bytes_at_mut(valid.cast(), 10)
+            .copy_from_slice(b"/tmp/caf\xc3\xa9");
+        let url = CFURLCreateWithBytes(
+            env,
+            kCFAllocatorDefault,
+            valid.cast_const(),
+            10,
+            kCFStringEncodingUTF8,
+            nil,
+        );
+        assert_ne!(url, nil);
+        let path: id = msg![env; url path];
+        assert_eq!(to_rust_string(env, path), "/tmp/café");
+        release(env, url);
+
+        let invalid: MutPtr<u8> = env.mem.alloc(2).cast();
+        env.mem
+            .bytes_at_mut(invalid.cast(), 2)
+            .copy_from_slice(&[b'/', 0xff]);
+        let bad = CFURLCreateWithBytes(
+            env,
+            kCFAllocatorDefault,
+            invalid.cast_const(),
+            2,
+            kCFStringEncodingUTF8,
+            nil,
+        );
+        assert_eq!(bad, nil);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

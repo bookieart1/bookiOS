@@ -148,6 +148,8 @@ pub fn CGBitmapContextCreate(
         rendering_intent: 0,
         path: Ptr::null(),
         clip_paths: Vec::new(),
+        should_antialias: true,
+        allows_antialiasing: true,
     };
     let isa = env
         .objc

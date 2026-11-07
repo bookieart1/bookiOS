@@ -55,6 +55,7 @@ struct NSURLConnectionHostObject {
     /// Run loop on which the connection was created or explicitly scheduled.
     run_loop: id,
     state: ConnectionState,
+    local_file_transport: bool,
 }
 impl HostObject for NSURLConnectionHostObject {}
 
@@ -159,6 +160,7 @@ expectedContentLength:(NSInteger)expected_content_length
         delegate: nil,
         run_loop: nil,
         state: ConnectionState::Initialized,
+        local_file_transport: false,
     });
     env.objc.alloc_object(this, host_object, &mut env.mem)
 }
@@ -226,19 +228,12 @@ expectedContentLength:(NSInteger)expected_content_length
 - (id)initWithRequest:(id)request // NSURLRequest *
              delegate:(id)delegate
      startImmediately:(bool)start_immediately {
-    if local_file_url_from_request(env, request).is_none() {
-        log!(
-            "TODO: [(NSURLConnection *){:?} initWithRequest:{:?} ('{}') delegate:{:?} startImmediately:{}] -> nil",
-            this,
-            request,
-            url_string_from_request(env, request),
-            delegate,
-            start_immediately,
-        );
-        release(env, this);
-        return nil;
-    }
-
+    let local_file_transport = local_file_url_from_request(env, request).is_some();
+    env.diagnostic_campaign_event(
+        "url-connection",
+        "init connection,request,delegate,start-immediately,local-file",
+        [this.to_bits(), request.to_bits(), delegate.to_bits(), u32::from(start_immediately), u32::from(local_file_transport), 0, 0, 0],
+    );
     let request: id = msg![env; request copy];
     let delegate = retain(env, delegate);
     let run_loop: id = msg_class![env; NSRunLoop currentRunLoop];
@@ -247,15 +242,17 @@ expectedContentLength:(NSInteger)expected_content_length
         delegate,
         run_loop,
         state: ConnectionState::Initialized,
+        local_file_transport,
     };
 
     log!(
-        "[(NSURLConnection *){:?} initWithRequest:{:?} ('{}') delegate:{:?} startImmediately:{}] using local-file transport",
+        "[(NSURLConnection *){:?} initWithRequest:{:?} ('{}') delegate:{:?} startImmediately:{}] using {} transport",
         this,
         request,
         url_string_from_request(env, request),
         delegate,
         start_immediately,
+        if local_file_transport { "local-file" } else { "finite-offline-failure" },
     );
     if start_immediately {
         schedule_connection(env, this);
@@ -320,11 +317,7 @@ fn make_url_error(env: &mut Environment, request: id, code: NSURLErrorCode) -> i
 /// Build the standard URL-loading error used by Foundation APIs which accept
 /// an NSURL directly rather than an NSURLRequest. Keeping this in one place
 /// ensures the domain, code and failing-URL metadata agree across both paths.
-pub(crate) fn make_url_error_for_url(
-    env: &mut Environment,
-    url: id,
-    code: NSURLErrorCode,
-) -> id {
+pub(crate) fn make_url_error_for_url(env: &mut Environment, url: id, code: NSURLErrorCode) -> id {
     let domain = ns_string::get_static_str(env, NSURLErrorDomain);
     let user_info = if url == nil {
         nil
@@ -443,17 +436,35 @@ fn release_finished_delegate(env: &mut Environment, connection: id) {
 }
 
 fn fail_local_file_connection(env: &mut Environment, connection: id) {
+    fail_connection(env, connection, NSURLErrorFileDoesNotExist);
+}
+
+fn fail_connection(env: &mut Environment, connection: id, code: NSURLErrorCode) {
     let request = env
         .objc
         .borrow::<NSURLConnectionHostObject>(connection)
         .request;
     let delegate = finish_connection(env, connection);
+    env.diagnostic_campaign_event(
+        "url-connection",
+        "terminal-failure connection,request,delegate,error-code",
+        [
+            connection.to_bits(),
+            request.to_bits(),
+            delegate.to_bits(),
+            code as u32,
+            0,
+            0,
+            0,
+            0,
+        ],
+    );
     if delegate != nil {
         let selector = env
             .objc
             .register_host_selector("connection:didFailWithError:".to_string(), &mut env.mem);
         if msg![env; delegate respondsToSelector:selector] {
-            let error = make_url_error(env, request, NSURLErrorFileDoesNotExist);
+            let error = make_url_error(env, request, code);
             () = msg_send(env, (delegate, selector, connection, error));
         }
     }
@@ -461,14 +472,18 @@ fn fail_local_file_connection(env: &mut Environment, connection: id) {
 }
 
 fn run_local_file_connection(env: &mut Environment, connection: id) {
-    let request = {
+    let (request, local_file_transport) = {
         let host = env.objc.borrow_mut::<NSURLConnectionHostObject>(connection);
         if host.state != ConnectionState::Scheduled {
             return;
         }
         host.state = ConnectionState::Running;
-        host.request
+        (host.request, host.local_file_transport)
     };
+    if !local_file_transport {
+        fail_connection(env, connection, NSURLErrorNotConnectedToInternet);
+        return;
+    }
     let Some(url) = local_file_url_from_request(env, request) else {
         fail_local_file_connection(env, connection);
         return;
@@ -564,6 +579,37 @@ mod tests {
         release(env, path);
         release(env, string);
         release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
+
+    #[test]
+    fn dev_248_unsupported_async_request_keeps_connection_identity_until_cancelled() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let string = ns_string::from_rust_string(env, "https://example.invalid/".to_owned());
+        let url: id = msg_class![env; NSURL URLWithString:string];
+        let request: id = msg_class![env; NSURLRequest requestWithURL:url];
+        let connection: id = msg_class![env; NSURLConnection alloc];
+        let connection: id =
+            msg![env; connection initWithRequest:request delegate:nil startImmediately:false];
+        assert_ne!(connection, nil);
+        assert!(
+            !env.objc
+                .borrow::<NSURLConnectionHostObject>(connection)
+                .local_file_transport
+        );
+        () = msg![env; connection cancel];
+        assert_eq!(
+            env.objc
+                .borrow::<NSURLConnectionHostObject>(connection)
+                .state,
+            ConnectionState::Cancelled
+        );
+        release(env, connection);
+        release(env, string);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);
     }

@@ -236,6 +236,10 @@ pub enum ThreadBlock {
     Semaphore(MutPtr<sem_t>),
     // Thread is waiting on a condition variable
     Condition(MutPtr<pthread_cond_t>, Option<Duration>),
+    // Thread is waiting for a Mach port receive. The current single-process
+    // runtime has no exception messages to enqueue, but a receive-only call
+    // must block instead of reporting millions of false successful receives.
+    MachMessageReceive(u32),
     // Thread is waiting for another thread to finish (joining).
     Joining(ThreadId, MutPtr<MutVoidPtr>),
     // Thread has hit a cpu error, and is waiting to be debugged.
@@ -262,6 +266,9 @@ impl std::fmt::Display for ThreadBlock {
             ThreadBlock::Mutex(ptr) => write!(f, "Blocked on mutex {ptr:?}"),
             ThreadBlock::Semaphore(ptr) => write!(f, "Blocked on semaphore {ptr:?}"),
             ThreadBlock::Condition(ptr, _) => write!(f, "Blocked on condition {ptr:?}"),
+            ThreadBlock::MachMessageReceive(port) => {
+                write!(f, "Blocked receiving on Mach port {port}")
+            }
             // tid adds 1 to match gdb's thread numbers
             ThreadBlock::Joining(tid, _) => write!(f, "Joining on thread {}", tid + 1),
             ThreadBlock::Suspended(count, old) => {
@@ -1664,6 +1671,7 @@ impl Environment {
                         ThreadBlock::Mutex(mutex) => (2, *mutex as u32),
                         ThreadBlock::Semaphore(pointer) => (3, pointer.to_bits()),
                         ThreadBlock::Condition(pointer, _) => (4, pointer.to_bits()),
+                        ThreadBlock::MachMessageReceive(port) => (9, *port),
                         ThreadBlock::Joining(joined, _) => (5, *joined as u32),
                         ThreadBlock::WaitingForDebugger(_) => (6, 0),
                         ThreadBlock::Suspended(count, _) => (7, *count as u32),
@@ -2539,6 +2547,10 @@ impl Environment {
                                 return thread_id;
                             }
                         }
+                    }
+                    ThreadBlock::MachMessageReceive(_) => {
+                        // A future Mach queue implementation will wake this
+                        // thread when a message is enqueued for the port.
                     }
                     ThreadBlock::Joining(joinee_thread, ptr) => {
                         if !self.threads[joinee_thread].is_alive() {

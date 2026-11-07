@@ -352,6 +352,48 @@ pub const CLASSES: ClassExports = objc_classes! {
     msg_class![env; NSDate dateWithTimeIntervalSinceReferenceDate:result]
 }
 
+// Foundation ordinals are one-based. This models the Gregorian/GMT calendar
+// already used by the rest of this implementation and covers the historical
+// unit/container pairs used by early iPhone applications. Unsupported pairs
+// return NSNotFound rather than inventing a value.
+- (NSUInteger)ordinalityOfUnit:(NSUInteger)smaller
+                         inUnit:(NSUInteger)larger
+                        forDate:(id)date {
+    if date == nil {
+        return NSUInteger::MAX;
+    }
+    let time_interval: NSTimeInterval = msg![env; date timeIntervalSinceReferenceDate];
+    let gregorian = CFAbsoluteTimeGetGregorianDate(env, time_interval, nil);
+    let ordinal: Option<u64> = match (smaller, larger) {
+        (NSMonthCalendarUnit, NSYearCalendarUnit) => Some(gregorian.month as u64),
+        (NSDayCalendarUnit, NSMonthCalendarUnit) => Some(gregorian.day as u64),
+        (NSDayCalendarUnit, NSYearCalendarUnit) => {
+            let year_start = absolute_time_from_gregorian(
+                i64::from(gregorian.year), 1, 1, 0, 0, 0.0,
+            );
+            Some(((time_interval - year_start) / 86_400.0).floor() as u64 + 1)
+        }
+        (NSHourCalendarUnit, NSDayCalendarUnit) => Some(gregorian.hours as u64 + 1),
+        (NSMinuteCalendarUnit, NSHourCalendarUnit) => Some(gregorian.minutes as u64 + 1),
+        (NSSecondCalendarUnit, NSMinuteCalendarUnit) => {
+            Some(gregorian.seconds.floor() as u64 + 1)
+        }
+        (NSWeekdayCalendarUnit, NSWeekCalendarUnit) => {
+            let days = (time_interval / 86_400.0).floor() as i64;
+            Some(((days + 1).rem_euclid(7) + 1) as u64)
+        }
+        _ => None,
+    };
+    env.diagnostic_campaign_event(
+        "calendar",
+        "ordinalityOfUnit:inUnit:forDate: calendar,smaller,larger,date,ordinal",
+        [this.to_bits(), smaller, larger, date.to_bits(), ordinal.unwrap_or(u64::MAX) as u32, 0, 0, 0],
+    );
+    ordinal
+        .and_then(|value| NSUInteger::try_from(value).ok())
+        .unwrap_or(NSUInteger::MAX)
+}
+
 @end
 
 @implementation NSDateComponents: NSObject
@@ -486,6 +528,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 #[cfg(test)]
 mod constant_tests {
     use super::*;
+    use crate::Environment;
 
     #[test]
     fn calendar_identifiers_export_historical_string_values() {
@@ -511,5 +554,27 @@ mod constant_tests {
             };
             assert_eq!(*actual, expected);
         }
+    }
+
+    #[test]
+    fn dev_248_gregorian_ordinality_is_one_based_and_handles_leap_years() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let leap_year_march = absolute_time_from_gregorian(2024, 3, 1, 0, 0, 0.0);
+        let date: id = msg_class![env; NSDate dateWithTimeIntervalSinceReferenceDate:
+            leap_year_march];
+        let calendar: id = msg_class![env; NSCalendar currentCalendar];
+        let day: NSUInteger = msg![env; calendar ordinalityOfUnit:NSDayCalendarUnit
+                                                           inUnit:NSYearCalendarUnit
+                                                          forDate:date];
+        let month: NSUInteger = msg![env; calendar ordinalityOfUnit:NSMonthCalendarUnit
+                                                             inUnit:NSYearCalendarUnit
+                                                            forDate:date];
+        assert_eq!(day, 61);
+        assert_eq!(month, 3);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

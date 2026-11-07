@@ -29,6 +29,7 @@
 //! - If you want to go deeper, check out "Chapter 4: Inter Process Communication" of [The GNU Mach Reference Manual](https://www.gnu.org/software/hurd/gnumach-doc/mach.pdf).
 
 use crate::dyld::{export_c_func, FunctionExports};
+use crate::environment::ThreadBlock;
 use crate::libc::mach::core_types::{boolean_t, integer_t, natural_t};
 use crate::libc::mach::thread_info::{kern_return_t, KERN_SUCCESS};
 use crate::mem::MutVoidPtr;
@@ -43,7 +44,7 @@ type mach_msg_timeout_t = natural_t;
 
 #[allow(clippy::too_many_arguments)]
 fn mach_msg(
-    _env: &mut Environment,
+    env: &mut Environment,
     msg: MutVoidPtr, // TODO: use MutPtr<mach_msg_header_t>,
     option: mach_msg_option_t,
     send_size: mach_msg_size_t,
@@ -67,6 +68,19 @@ fn mach_msg(
         timeout,
         notify
     );
+    // MACH_RCV_MSG is bit 1. A receive-only, no-timeout call is a true wait:
+    // Mono's exception server uses this exact shape and asserts only after a
+    // real receive returns. Do not turn the absence of a message into success.
+    const MACH_RCV_MSG: mach_msg_option_t = 0x2;
+    if option & MACH_RCV_MSG != 0 && send_size == 0 && rcv_size > 0 && timeout == 0 {
+        env.diagnostic_campaign_event(
+            "mach-message",
+            "blocking receive-only msg,option,receive-size,port",
+            [msg.to_bits(), option as u32, rcv_size, rcv_name, 0, 0, 0, 0],
+        );
+        env.yield_thread(ThreadBlock::MachMessageReceive(rcv_name));
+    }
+
     // Note: Because Unity _do_ check the return value of this function
     // with an assert, we must return a success here.
     // (See [mini-darwin.c](https://github.com/mono/mono/blob/62121afbb28f0b62f100ec9a942d10c5e0f4814f/mono/mini/mini-darwin.c#L139))

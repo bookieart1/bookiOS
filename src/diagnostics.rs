@@ -1457,9 +1457,9 @@ fn describe_object(objc: &ObjC, mem: &Mem, address: u32, include_string: bool) -
 }
 
 impl Environment {
-    /// Record one package-focused Level 3 event. The campaign option is off by
-    /// default and the fixed ring prevents per-frame or callback spam from
-    /// growing the log without bound.
+    /// Record one package-focused Level 3 event. Dev diagnostic builds may
+    /// enable the passive campaign by default; the fixed ring prevents
+    /// per-frame or callback spam from growing the log without bound.
     pub fn diagnostic_campaign_event(
         &mut self,
         family: &'static str,

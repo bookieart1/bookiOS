@@ -8,6 +8,7 @@
 pub mod stat;
 pub mod statvfs;
 
+use self::stat::mode_t;
 use crate::abi::DotDotDot;
 use crate::dyld::{export_c_func, FunctionExports};
 use crate::fs::{FsError, GuestFile, GuestOpenOptions, GuestPath};
@@ -22,12 +23,19 @@ use crate::mem::{
 };
 use crate::Environment;
 use std::io::{Read, Seek, SeekFrom, Write};
-use self::stat::mode_t;
 
-#[derive(Default)]
 pub struct State {
     /// File descriptors _other than stdin, stdout, and stderr_
     files: Vec<Option<PosixFileHostObject>>,
+    file_creation_mask: mode_t,
+}
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            files: Vec::new(),
+            file_creation_mask: 0o022,
+        }
+    }
 }
 impl State {
     fn file_for_fd(&mut self, fd: FileDescriptor) -> Option<&mut PosixFileHostObject> {
@@ -211,9 +219,7 @@ pub fn open_direct(env: &mut Environment, path: ConstPtr<u8>, flags: i32) -> Fil
         }
     };
     if matches!(path_string.as_str(), "/dev/random" | "/dev/urandom") {
-        if flags & O_ACCMODE != O_RDONLY
-            || flags & (O_APPEND | O_CREAT | O_TRUNC | O_EXCL) != 0
-        {
+        if flags & O_ACCMODE != O_RDONLY || flags & (O_APPEND | O_CREAT | O_TRUNC | O_EXCL) != 0 {
             log!(
                 "Warning: entropy device {:?} is read-only; rejecting open flags {:#x}",
                 path_string,
@@ -230,7 +236,11 @@ pub fn open_direct(env: &mut Environment, path: ConstPtr<u8>, flags: i32) -> Fil
             status_flags: flags & (O_ACCMODE | O_NONBLOCK),
         };
         let fd = find_or_create_fd(env, host_object);
-        log!("Opened read-only entropy device {:?} as fd {}", path_string, fd);
+        log!(
+            "Opened read-only entropy device {:?} as fd {}",
+            path_string,
+            fd
+        );
         return fd;
     }
     // TODO: symlinks don't exist in the FS yet, so we can't "not follow" them.
@@ -935,9 +945,7 @@ fn fcntl(
             // locks don't do anything, so they can temporarily be ignored.
             // TODO: Actually set locks when multiproccess support is added and
             // the file system supports it.
-            log_once!(
-                "TODO: fcntl(F_SETLK) called. Locking unimplemented, ignoring lock."
-            );
+            log_once!("TODO: fcntl(F_SETLK) called. Locking unimplemented, ignoring lock.");
         }
         F_NOCACHE => {
             let mut args = args.start();
@@ -1131,6 +1139,18 @@ fn setxattr(
     0
 }
 
+fn umask(env: &mut Environment, mask: mode_t) -> mode_t {
+    let mask = mask & 0o777;
+    let previous = std::mem::replace(&mut env.libc_state.posix_io.file_creation_mask, mask);
+    log_dbg!("umask({:#o}) -> {:#o}", mask, previous);
+    env.diagnostic_campaign_event(
+        "posix-files",
+        "umask new,previous",
+        [u32::from(mask), u32::from(previous), 0, 0, 0, 0, 0, 0],
+    );
+    previous
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(open(_, _, _)),
     export_c_func!(creat(_, _)),
@@ -1150,6 +1170,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(ftruncate(_, _)),
     export_c_func!(truncate(_, _)),
     export_c_func!(setxattr(_, _, _, _, _, _)),
+    export_c_func!(umask(_)),
 ];
 
 /// Helper function, not part of API
@@ -1284,9 +1305,26 @@ mod tests {
 
     #[test]
     fn standard_descriptors_are_not_treated_as_file_table_slots() {
-        assert_eq!(standard_descriptor_status_flags(STDIN_FILENO), Some(O_RDONLY));
-        assert_eq!(standard_descriptor_status_flags(STDOUT_FILENO), Some(O_WRONLY));
-        assert_eq!(standard_descriptor_status_flags(STDERR_FILENO), Some(O_WRONLY));
+        assert_eq!(
+            standard_descriptor_status_flags(STDIN_FILENO),
+            Some(O_RDONLY)
+        );
+        assert_eq!(
+            standard_descriptor_status_flags(STDOUT_FILENO),
+            Some(O_WRONLY)
+        );
+        assert_eq!(
+            standard_descriptor_status_flags(STDERR_FILENO),
+            Some(O_WRONLY)
+        );
         assert_eq!(standard_descriptor_status_flags(NORMAL_FILENO_BASE), None);
+    }
+
+    #[test]
+    fn dev_248_umask_returns_previous_mask_and_limits_to_permission_bits() {
+        let mut env = Environment::new_fake_for_test();
+        assert_eq!(umask(&mut env, 0o077), 0o022);
+        assert_eq!(umask(&mut env, 0o1777), 0o077);
+        assert_eq!(env.libc_state.posix_io.file_creation_mask, 0o777);
     }
 }

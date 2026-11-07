@@ -5,9 +5,12 @@
  */
 //! `NSFileManager` etc.
 
-use super::{ns_array, ns_string, NSUInteger};
+use super::{ns_array, ns_string, NSInteger, NSUInteger};
 use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
-use crate::frameworks::foundation::ns_error::{NSCocoaErrorDomain, NSFileReadNoSuchFileError};
+use crate::frameworks::foundation::ns_error::{
+    NSCocoaErrorDomain, NSFilePathErrorKey, NSFileReadNoSuchFileError, NSFileWriteFileExistsError,
+    NSFileWriteUnknownError,
+};
 use crate::frameworks::foundation::ns_string::get_static_str;
 use crate::fs::{FsError, FsNodeType, GuestPath, GuestPathBuf};
 use crate::mem::{ConstPtr, MutPtr, Ptr};
@@ -530,19 +533,44 @@ includingPropertiesForKeys:(id)_keys // NSArray*, only prefetching
 - (bool)copyItemAtPath:(id)src // NSString*
                 toPath:(id)dst // NSString*
                  error:(MutPtr<id>)error { // NSError**
-    let src = ns_string::to_rust_string(env, src);
-    let dst = ns_string::to_rust_string(env, dst);
+    if !error.is_null() {
+        env.mem.write(error, nil);
+    }
+    let src_object = src;
+    let dst_object = dst;
+    let src = ns_string::to_rust_string(env, src_object);
+    let dst = ns_string::to_rust_string(env, dst_object);
     let data = match env.fs.read(GuestPath::new(src.as_ref())) {
         Ok(d) => d,
         Err(_) => {
-            assert!(error.is_null()); // TODO
+            env.diagnostic_campaign_event(
+                "file-copy", "source-read-failed manager,source,destination,error-code",
+                [this.to_bits(), src_object.to_bits(), dst_object.to_bits(), NSFileReadNoSuchFileError as u32, 0, 0, 0, 0]
+            );
+            populate_copy_error(env, error, src_object, NSFileReadNoSuchFileError);
             return false;
         }
     };
-    if env.fs.write(GuestPath::new(dst.as_ref()), &data).is_err() {
-        assert!(error.is_null()); // TODO
+    if env.fs.exists(GuestPath::new(dst.as_ref())) {
+        env.diagnostic_campaign_event(
+            "file-copy", "destination-exists manager,source,destination,error-code",
+            [this.to_bits(), src_object.to_bits(), dst_object.to_bits(), NSFileWriteFileExistsError as u32, 0, 0, 0, 0]
+        );
+        populate_copy_error(env, error, dst_object, NSFileWriteFileExistsError);
         return false;
     }
+    if env.fs.write(GuestPath::new(dst.as_ref()), &data).is_err() {
+        env.diagnostic_campaign_event(
+            "file-copy", "destination-write-failed manager,source,destination,error-code",
+            [this.to_bits(), src_object.to_bits(), dst_object.to_bits(), NSFileWriteUnknownError as u32, 0, 0, 0, 0]
+        );
+        populate_copy_error(env, error, dst_object, NSFileWriteUnknownError);
+        return false;
+    }
+    env.diagnostic_campaign_event(
+        "file-copy", "success manager,source,destination,bytes",
+        [this.to_bits(), src_object.to_bits(), dst_object.to_bits(), data.len() as u32, 0, 0, 0, 0]
+    );
     true
 }
 
@@ -748,6 +776,17 @@ includingPropertiesForKeys:(id)_keys // NSArray*, only prefetching
 @end
 
 };
+
+fn populate_copy_error(env: &mut Environment, out_error: MutPtr<id>, path: id, code: NSInteger) {
+    if out_error.is_null() {
+        return;
+    }
+    let domain = get_static_str(env, NSCocoaErrorDomain);
+    let path_key = get_static_str(env, NSFilePathErrorKey);
+    let user_info: id = msg_class![env; NSDictionary dictionaryWithObject:path forKey:path_key];
+    let error: id = msg_class![env; NSError errorWithDomain:domain code:code userInfo:user_info];
+    env.mem.write(out_error, error);
+}
 
 /// Helper function for `fileAttributesAtPath:traverseLink:` and
 /// `attributesOfItemAtPath:error:`

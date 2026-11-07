@@ -501,16 +501,19 @@ pub(super) fn UIApplicationMain(
         let _: () = msg![env; pool drain];
     }
 
+    // Activation precedes the first forced layout pass. Applications may
+    // construct renderer or engine singletons in applicationDidBecomeActive:;
+    // forcing layoutSubviews first can enter draw code against uninitialized
+    // state. UIKit remains free to perform layout during launch itself, but
+    // iDared's synthetic catch-up pass must not invert this lifecycle order.
+    notify_did_become_active(env);
+
     // Call layoutSubviews on all views in the view hierarchy.
     // See https://medium.com/geekculture/uiview-lifecycle-part-5-faa2d44511c9
     let views = env.framework_state.uikit.ui_view.views.clone();
     for view in views {
         () = msg![env; view layoutIfNeeded];
     }
-
-    // Send applicationDidBecomeActive now that the application is ready to
-    // become active.
-    notify_did_become_active(env);
 
     // FIXME: There are more messages we should send.
 

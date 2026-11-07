@@ -49,6 +49,7 @@ pub const NSStringEncodingConversionExternalRepresentation: NSStringEncodingConv
 pub const NSASCIIStringEncoding: NSUInteger = 1;
 pub const NSUTF8StringEncoding: NSUInteger = 4;
 pub const NSISOLatin1StringEncoding: NSUInteger = 5;
+pub const NSNonLossyASCIIStringEncoding: NSUInteger = 7;
 pub const NSShiftJISStringEncoding: NSUInteger = 8;
 pub const NSUnicodeStringEncoding: NSUInteger = 10;
 pub const NSWindowsCP1252StringEncoding: NSUInteger = 12;
@@ -76,6 +77,7 @@ const C_STRING_FRIENDLY_ENCODINGS: &[NSStringEncoding] = &[
     NSWindowsCP1252StringEncoding,
     NSMacOSRomanStringEncoding,
     NSISOLatin1StringEncoding,
+    NSNonLossyASCIIStringEncoding,
     NSDOSKoreanStringEncoding,
 ];
 
@@ -167,6 +169,10 @@ impl StringHostObject {
     /// semantics for malformed UTF-8. Other encodings still use the existing
     /// decoder until their error handling is made failable as well.
     fn try_decode(bytes: Cow<[u8]>, encoding: NSStringEncoding) -> Option<StringHostObject> {
+        if encoding == NSNonLossyASCIIStringEncoding {
+            return decode_non_lossy_ascii(&bytes)
+                .map(|string| StringHostObject::Utf8(Cow::Owned(string)));
+        }
         if encoding == NSUTF8StringEncoding {
             if bytes.is_empty() {
                 return Some(StringHostObject::Utf8(Cow::Borrowed("")));
@@ -380,6 +386,80 @@ impl StringHostObject {
             .map(|&cp| char::from_u32(cp).unwrap())
             .collect()
     }
+}
+
+/// Decode Foundation's historical non-lossy ASCII representation. Printable
+/// ASCII is copied directly; non-ASCII UTF-16 code units are represented with
+/// `\\uXXXX`, and legacy writers may use three-digit octal byte escapes.
+/// Malformed escapes make the failable NSString initializer return nil.
+fn decode_non_lossy_ascii(bytes: &[u8]) -> Option<String> {
+    let mut units = Vec::<u16>::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte != b'\\' {
+            if !byte.is_ascii() {
+                return None;
+            }
+            units.push(u16::from(byte));
+            index += 1;
+            continue;
+        }
+
+        index += 1;
+        let escaped = *bytes.get(index)?;
+        match escaped {
+            b'\\' | b'"' | b'\'' => {
+                units.push(u16::from(escaped));
+                index += 1;
+            }
+            b'n' => {
+                units.push(u16::from(b'\n'));
+                index += 1;
+            }
+            b'r' => {
+                units.push(u16::from(b'\r'));
+                index += 1;
+            }
+            b't' => {
+                units.push(u16::from(b'\t'));
+                index += 1;
+            }
+            b'b' => {
+                units.push(u16::from(b'\x08'));
+                index += 1;
+            }
+            b'f' => {
+                units.push(u16::from(b'\x0c'));
+                index += 1;
+            }
+            b'u' | b'U' => {
+                let digits = bytes.get(index + 1..index + 5)?;
+                let mut value = 0u16;
+                for &digit in digits {
+                    value = value
+                        .checked_mul(16)?
+                        .checked_add(u16::from((digit as char).to_digit(16)? as u8))?;
+                }
+                units.push(value);
+                index += 5;
+            }
+            b'0'..=b'7' => {
+                let digits = bytes.get(index..index + 3)?;
+                let mut value = 0u16;
+                for &digit in digits {
+                    if !(b'0'..=b'7').contains(&digit) {
+                        return None;
+                    }
+                    value = value * 8 + u16::from(digit - b'0');
+                }
+                units.push(value);
+                index += 3;
+            }
+            _ => return None,
+        }
+    }
+    String::from_utf16(&units).ok()
 }
 
 #[derive(Clone)]
@@ -2849,6 +2929,21 @@ mod ns_string_tests {
     }
 
     #[test]
+    fn dev_248_non_lossy_ascii_decodes_unicode_octal_and_escapes() {
+        let decoded = StringHostObject::try_decode(
+            Cow::Borrowed(br"caf\u00e9\\line\n\101"),
+            NSNonLossyASCIIStringEncoding,
+        )
+        .unwrap();
+        assert_eq!(decoded.to_utf8().unwrap(), "café\\line\nA");
+        assert!(StringHostObject::try_decode(
+            Cow::Borrowed(br"broken\u12"),
+            NSNonLossyASCIIStringEncoding,
+        )
+        .is_none());
+    }
+
+    #[test]
     fn dos_korean_uses_cp949_and_round_trips() {
         let decoded =
             StringHostObject::try_decode(Cow::Borrowed(&[0xb0, 0xa1]), NSDOSKoreanStringEncoding)
@@ -2908,7 +3003,10 @@ mod ns_string_tests {
 
     #[test]
     fn dev_239_detected_file_encoding_reports_the_encoding_used() {
-        assert_eq!(detect_file_string_encoding(b"plain text"), NSUTF8StringEncoding);
+        assert_eq!(
+            detect_file_string_encoding(b"plain text"),
+            NSUTF8StringEncoding
+        );
         assert_eq!(
             detect_file_string_encoding(&[0xef, 0xbb, 0xbf, b'x']),
             NSUTF8StringEncoding
