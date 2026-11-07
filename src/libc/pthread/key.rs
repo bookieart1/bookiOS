@@ -65,8 +65,9 @@ fn pthread_getspecific(env: &mut Environment, key: pthread_key_t) -> MutVoidPtr 
 }
 
 fn pthread_setspecific(env: &mut Environment, key: pthread_key_t, value: ConstVoidPtr) -> i32 {
-    // TODO: return error instead of panicking if key is invalid?
-    let idx: usize = key.checked_sub(1).unwrap().try_into().unwrap();
+    let Some(idx) = key.checked_sub(1).map(|idx| idx as usize) else {
+        return EINVAL;
+    };
     let current_thread = env.current_thread;
     match State::get(env).keys.get_mut(idx) {
         Some(Some((map, _))) => {
@@ -78,8 +79,9 @@ fn pthread_setspecific(env: &mut Environment, key: pthread_key_t, value: ConstVo
 }
 
 fn pthread_key_delete(env: &mut Environment, key: pthread_key_t) -> i32 {
-    // Use of invalid key is undefined, panicking is fine.
-    let idx: usize = key.checked_sub(1).unwrap().try_into().unwrap();
+    let Some(idx) = key.checked_sub(1).map(|idx| idx as usize) else {
+        return EINVAL;
+    };
     match State::get(env).keys.get_mut(idx) {
         Some(slot @ Some(_)) => {
             *slot = None;
@@ -95,3 +97,28 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(pthread_setspecific(_, _)),
     export_c_func!(pthread_key_delete(_)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dev_243_invalid_zero_and_out_of_range_keys_return_einval_without_allocating() {
+        let mut env = Environment::new_fake_for_test();
+        assert_eq!(pthread_setspecific(&mut env, 0, Ptr::null()), EINVAL);
+        assert_eq!(pthread_key_delete(&mut env, 0), EINVAL);
+        assert_eq!(pthread_setspecific(&mut env, 999, Ptr::null()), EINVAL);
+        assert_eq!(pthread_key_delete(&mut env, 999), EINVAL);
+
+        let key_ptr = env.mem.alloc(4).cast();
+        assert_eq!(
+            pthread_key_create(&mut env, key_ptr, GuestFunction::from_addr_with_thumb_bit(0)),
+            0
+        );
+        let key: pthread_key_t = env.mem.read(key_ptr);
+        assert_eq!(key, 1);
+        assert_eq!(pthread_setspecific(&mut env, key, Ptr::null()), 0);
+        assert_eq!(pthread_key_delete(&mut env, key), 0);
+        env.mem.free(key_ptr.cast());
+    }
+}

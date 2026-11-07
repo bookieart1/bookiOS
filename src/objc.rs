@@ -33,6 +33,7 @@ mod selectors;
 mod synchronization;
 
 pub use classes::{objc_classes, Class, ClassExports, ClassTemplate};
+pub(crate) use classes::{class_getVersion, class_setVersion};
 pub use messages::{
     autorelease, msg, msg_class, msg_send, msg_send_no_initialize, msg_send_no_type_checking,
     msg_send_super2, msg_super, objc_super, release, retain,
@@ -288,6 +289,8 @@ const FUNCTIONS: FunctionExports = &[
     export_c_func!(class_copyPropertyList(_, _)),
     export_c_func!(class_getInstanceSize(_)),
     export_c_func!(class_getSuperclass(_)),
+    export_c_func!(class_getVersion(_)),
+    export_c_func!(class_setVersion(_, _)),
     export_c_func!(class_isMetaClass(_)),
     export_c_func!(class_conformsToProtocol(_, _)),
     export_c_func!(protocol_conformsToProtocol(_, _)),

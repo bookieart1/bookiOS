@@ -51,6 +51,13 @@ pub struct UITableViewHostObject {
     visible_cells: Vec<id>,
     /// Cells retained by the table after leaving the visible hierarchy.
     reusable_cells: Vec<id>,
+    /// Retained immutable NSIndexPath for the current programmatic or user
+    /// selection. Selection highlighting is not rendered yet.
+    selected_index_path: id,
+    /// A data source may select a row reentrantly while reloadData is still
+    /// constructing cells, before section_row_counts is committed.
+    is_reloading: bool,
+    pending_selection_scroll: Option<(UITableViewScrollPosition, bool)>,
     diagnostic_reload_logs: u8,
     diagnostic_selection_logs: u8,
 }
@@ -66,6 +73,9 @@ impl Default for UITableViewHostObject {
             allows_selection: true,
             visible_cells: Vec::new(),
             reusable_cells: Vec::new(),
+            selected_index_path: nil,
+            is_reloading: false,
+            pending_selection_scroll: None,
             diagnostic_reload_logs: 0,
             diagnostic_selection_logs: 0,
         }
@@ -136,6 +146,11 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (())reloadData {
     env.diagnostic_selector_event("table-reload-begin", this, nil, "reloadData", nil, None);
+    {
+        let host = env.objc.borrow_mut::<UITableViewHostObject>(this);
+        host.is_reloading = true;
+        host.pending_selection_scroll = None;
+    }
     let old_cells = std::mem::take(
         &mut env.objc.borrow_mut::<UITableViewHostObject>(this).visible_cells,
     );
@@ -220,10 +235,13 @@ pub const CLASSES: ClassExports = objc_classes! {
             flat_row += 1;
         }
     }
-    let (visible_count, reusable_count, should_log) = {
+    let (visible_count, reusable_count, should_log, pending_scroll, selected_index_path) = {
         let host = env.objc.borrow_mut::<UITableViewHostObject>(this);
         host.section_row_counts = section_row_counts;
         host.visible_cells = cells;
+        host.is_reloading = false;
+        let pending_scroll = host.pending_selection_scroll.take();
+        let selected_index_path = host.selected_index_path;
         let should_log = host.diagnostic_reload_logs < 8;
         if should_log {
             host.diagnostic_reload_logs += 1;
@@ -232,8 +250,17 @@ pub const CLASSES: ClassExports = objc_classes! {
             host.visible_cells.len(),
             host.reusable_cells.len(),
             should_log,
+            pending_scroll,
+            selected_index_path,
         )
     };
+    if let Some((position, animated)) = pending_scroll {
+        if selected_index_path != nil {
+            () = msg![env; this scrollToRowAtIndexPath:selected_index_path
+                                  atScrollPosition:position
+                                          animated:animated];
+        }
+    }
     if should_log {
         let counts = env
             .objc
@@ -346,12 +373,17 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (())dealloc {
-    let reusable_cells = std::mem::take(
-        &mut env.objc.borrow_mut::<UITableViewHostObject>(this).reusable_cells,
-    );
+    let (reusable_cells, selected_index_path) = {
+        let host = env.objc.borrow_mut::<UITableViewHostObject>(this);
+        (
+            std::mem::take(&mut host.reusable_cells),
+            std::mem::replace(&mut host.selected_index_path, nil),
+        )
+    };
     for cell in reusable_cells {
         release(env, cell);
     }
+    release(env, selected_index_path);
     msg_super![env; this dealloc]
 }
 
@@ -418,8 +450,50 @@ pub const CLASSES: ClassExports = objc_classes! {
         () = msg![env; this setContentOffset:offset];
     }
 }
-- (())deselectRowAtIndexPath:(id)_index_path animated:(bool)_animated {
-    // Selection highlighting is not rendered yet.
+- (())selectRowAtIndexPath:(id)index_path
+                  animated:(bool)animated
+            scrollPosition:(UITableViewScrollPosition)position {
+    let stored: id = if index_path == nil {
+        nil
+    } else {
+        msg![env; index_path copy]
+    };
+    let (old, is_reloading) = {
+        let host = env.objc.borrow_mut::<UITableViewHostObject>(this);
+        let old = std::mem::replace(&mut host.selected_index_path, stored);
+        if index_path == nil {
+            host.pending_selection_scroll = None;
+        } else if host.is_reloading {
+            host.pending_selection_scroll = Some((position, animated));
+        }
+        (old, host.is_reloading)
+    };
+    release(env, old);
+    if index_path != nil && !is_reloading {
+        () = msg![env; this scrollToRowAtIndexPath:index_path
+                              atScrollPosition:position
+                                      animated:animated];
+    }
+}
+- (id)indexPathForSelectedRow {
+    env.objc.borrow::<UITableViewHostObject>(this).selected_index_path
+}
+- (())deselectRowAtIndexPath:(id)index_path animated:(bool)_animated {
+    let selected = env
+        .objc
+        .borrow::<UITableViewHostObject>(this)
+        .selected_index_path;
+    let should_clear: bool = selected != nil
+        && index_path != nil
+        && msg![env; selected isEqual:index_path];
+    if should_clear {
+        let old = {
+            let host = env.objc.borrow_mut::<UITableViewHostObject>(this);
+            host.pending_selection_scroll = None;
+            std::mem::replace(&mut host.selected_index_path, nil)
+        };
+        release(env, old);
+    }
 }
 
 - (())touchesEnded:(id)touches withEvent:(id)_event {
@@ -474,6 +548,12 @@ pub const CLASSES: ClassExports = objc_classes! {
         return;
     };
     let index_path: id = msg_class![env; NSIndexPath indexPathForRow:row inSection:section];
+    let selected: id = msg![env; index_path copy];
+    let old = std::mem::replace(
+        &mut env.objc.borrow_mut::<UITableViewHostObject>(this).selected_index_path,
+        selected,
+    );
+    release(env, old);
     let delegate: id = msg![env; this delegate];
     if delegate != nil {
         let selector: SEL = env.objc.register_host_selector(
@@ -592,6 +672,47 @@ mod tests {
             .is_empty());
         release(env, table);
         release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
+
+    #[test]
+    fn dev_243_programmatic_selection_is_retained_queryable_and_deferred_during_reload() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack_size = 0x1000;
+        let stack = env.mem.alloc(stack_size);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + stack_size;
+        let table: id = msg_class![env; UITableView new];
+        let path: id = msg_class![env; NSIndexPath indexPathForRow:0i32 inSection:0i32];
+        env.objc.borrow_mut::<UITableViewHostObject>(table).is_reloading = true;
+
+        () = msg![env; table selectRowAtIndexPath:path
+                                  animated:true
+                            scrollPosition:UITableViewScrollPositionTop];
+
+        let selected: id = msg![env; table indexPathForSelectedRow];
+        let equal: bool = msg![env; selected isEqual:path];
+        assert!(equal);
+        assert_eq!(env.objc.get_refcount(path).get(), 2);
+        assert_eq!(
+            env.objc
+                .borrow::<UITableViewHostObject>(table)
+                .pending_selection_scroll,
+            Some((UITableViewScrollPositionTop, true))
+        );
+
+        () = msg![env; table deselectRowAtIndexPath:path animated:false];
+        let selected: id = msg![env; table indexPathForSelectedRow];
+        assert_eq!(selected, nil);
+        assert_eq!(env.objc.get_refcount(path).get(), 1);
+        assert!(env
+            .objc
+            .borrow::<UITableViewHostObject>(table)
+            .pending_selection_scroll
+            .is_none());
+
+        release(env, table);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);
     }

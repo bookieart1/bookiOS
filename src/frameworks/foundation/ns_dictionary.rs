@@ -438,6 +438,19 @@ fn escape_strings_file_component(component: &str) -> String {
     escaped
 }
 
+fn alloc_mutable_dictionary_class_cluster_member(
+    env: &mut Environment,
+    class: Class,
+    zone: NSZonePtr,
+) -> id {
+    if class == env.objc.get_known_class("NSMutableDictionary", &mut env.mem) {
+        msg_class![env; _touchHLE_NSMutableDictionary allocWithZone:zone]
+    } else {
+        env.objc
+            .alloc_object(class, Box::new(TrivialHostObject), &mut env.mem)
+    }
+}
+
 pub const CLASSES: ClassExports = objc_classes! {
 
 (env, this, _cmd);
@@ -514,7 +527,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)init {
-    todo!("TODO: Implement [dictionary init] for custom subclasses")
+    // NSDictionary is an abstract class cluster root. A genuine subclass owns
+    // its own primitive storage, so its superclass initializer must preserve
+    // the allocated object rather than substitute touchHLE's concrete class.
+    this
 }
 
 // Private bridge used by CFDictionaryGetValueIfPresent. Ordinary
@@ -813,10 +829,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 @implementation NSMutableDictionary: NSDictionary
 
 + (id)allocWithZone:(NSZonePtr)zone {
-    // NSDictionary might be subclassed by something which needs allocWithZone:
-    // to have the normal behaviour. Unimplemented: call superclass alloc then.
-    assert!(this == env.objc.get_known_class("NSMutableDictionary", &mut env.mem));
-    msg_class![env; _touchHLE_NSMutableDictionary allocWithZone:zone]
+    // True subclasses implement the abstract primitives themselves and must
+    // retain their identity and guest ivars.
+    alloc_mutable_dictionary_class_cluster_member(env, this, zone)
 }
 
 + (id)dictionaryWithCapacity:(NSUInteger)capacity {
@@ -1639,5 +1654,28 @@ mod tests {
         assert!(!network_success);
         release(env, dictionary);
         release(env, url_string);
+    }
+
+    #[test]
+    fn dev_243_mutable_dictionary_subclass_allocation_preserves_requested_class_identity() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let subclass = env
+            .objc
+            .get_known_class("_touchHLE_NSMutableDictionary", &mut env.mem);
+        let object = alloc_mutable_dictionary_class_cluster_member(
+            env,
+            subclass,
+            MutVoidPtr::null(),
+        );
+        let actual_class: Class = msg![env; object class];
+        assert_eq!(actual_class, subclass);
+        assert!(env
+            .objc
+            .get_host_object(object)
+            .unwrap()
+            .as_any()
+            .is::<TrivialHostObject>());
+        env.objc.dealloc_object(object, &mut env.mem);
     }
 }

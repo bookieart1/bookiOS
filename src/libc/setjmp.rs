@@ -89,4 +89,45 @@ fn longjmp(env: &mut Environment, jmp_buf: MutPtr<JmpBuf>, status: u32) {
         .branch(GuestFunction::from_addr_with_thumb_bit(buf.lr));
 }
 
-pub const FUNCTIONS: FunctionExports = &[export_c_func!(setjmp(_)), export_c_func!(longjmp(_, _))];
+fn sigsetjmp(env: &mut Environment, jmp_buf: MutPtr<JmpBuf>, _save_mask: i32) -> i32 {
+    // touchHLE's signal surface does not maintain a process signal mask. Keep
+    // that bounded policy while sharing the established register-buffer ABI.
+    setjmp(env, jmp_buf)
+}
+
+fn siglongjmp(env: &mut Environment, jmp_buf: MutPtr<JmpBuf>, status: u32) {
+    longjmp(env, jmp_buf, status)
+}
+
+pub const FUNCTIONS: FunctionExports = &[
+    export_c_func!(setjmp(_)),
+    export_c_func!(longjmp(_, _)),
+    export_c_func!(sigsetjmp(_, _)),
+    export_c_func!(siglongjmp(_, _)),
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dev_243_sigsetjmp_uses_the_existing_register_buffer_abi() {
+        let mut env = Environment::new_fake_for_test();
+        env.cpu.regs_mut()[4] = 0x44;
+        env.cpu.regs_mut()[5] = 0x55;
+        env.cpu.regs_mut()[abi::FRAME_POINTER] = 0x66;
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0x77;
+        env.cpu.regs_mut()[crate::cpu::Cpu::LR] = 0x89;
+        let buffer = env.mem.alloc(std::mem::size_of::<JmpBuf>() as u32).cast();
+
+        assert_eq!(sigsetjmp(&mut env, buffer, 1), 0);
+        let saved = env.mem.read(buffer);
+        let JmpBuf { r4, r5, fp, sp, lr, .. } = saved;
+        assert_eq!(r4, 0x44);
+        assert_eq!(r5, 0x55);
+        assert_eq!(fp, 0x66);
+        assert_eq!(sp, 0x77);
+        assert_eq!(lr, 0x89);
+        env.mem.free(buffer.cast());
+    }
+}

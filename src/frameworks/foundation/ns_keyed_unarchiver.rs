@@ -45,6 +45,9 @@ struct NSKeyedUnarchiverHostObject {
     /// Instead of reusing the same buffer, we allocate different ones that get
     /// freed on dealloc. A similar behavior has been observed in real iOS.
     temporary_buffers: Vec<MutVoidPtr>,
+    /// Whether finishDecoding has completed. Finalization is idempotent so an
+    /// application's defensive second call cannot duplicate delegate events.
+    finished: bool,
 }
 impl HostObject for NSKeyedUnarchiverHostObject {}
 
@@ -61,6 +64,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         already_unarchived: Vec::new(),
         delegate: nil,
         temporary_buffers: Vec::new(),
+        finished: false,
     });
     env.objc.alloc_object(this, unarchiver, &mut env.mem)
 }
@@ -106,6 +110,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     host_obj.already_unarchived = vec![None; key_count];
     host_obj.plist = plist;
+    host_obj.finished = false;
 
     this
 }
@@ -134,6 +139,38 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (id)delegate {
     env.objc.borrow::<NSKeyedUnarchiverHostObject>(this).delegate
+}
+
+- (())finishDecoding {
+    let (delegate, already_finished) = {
+        let host = env.objc.borrow::<NSKeyedUnarchiverHostObject>(this);
+        (host.delegate, host.finished)
+    };
+    if already_finished {
+        return;
+    }
+    // Mark first so a delegate that reenters finishDecoding cannot cause a
+    // second notification pair.
+    env.objc.borrow_mut::<NSKeyedUnarchiverHostObject>(this).finished = true;
+    if delegate == nil {
+        return;
+    }
+    let will_finish = env.objc.register_host_selector(
+        "unarchiverWillFinish:".to_owned(),
+        &mut env.mem,
+    );
+    let did_finish = env.objc.register_host_selector(
+        "unarchiverDidFinish:".to_owned(),
+        &mut env.mem,
+    );
+    let responds: bool = msg![env; delegate respondsToSelector:will_finish];
+    if responds {
+        () = msg![env; delegate unarchiverWillFinish:this];
+    }
+    let responds: bool = msg![env; delegate respondsToSelector:did_finish];
+    if responds {
+        () = msg![env; delegate unarchiverDidFinish:this];
+    }
 }
 
 // These methods drive most of the decoding. They get called in two cases:
@@ -522,6 +559,22 @@ mod tests {
         }
 
         assert_eq!(unarchive_key(env, unarchiver, Uid::new(0)), nil);
+        release(env, unarchiver);
+    }
+
+    #[test]
+    fn dev_243_finish_decoding_is_supported_and_idempotent_without_a_delegate() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let unarchiver: id = msg_class![env; NSKeyedUnarchiver new];
+
+        () = msg![env; unarchiver finishDecoding];
+        () = msg![env; unarchiver finishDecoding];
+
+        assert!(env
+            .objc
+            .borrow::<NSKeyedUnarchiverHostObject>(unarchiver)
+            .finished);
         release(env, unarchiver);
     }
 }

@@ -57,6 +57,9 @@ pub(super) struct ClassHostObject {
     pub(super) instance_size: GuestUSize,
     /// Checks if +initialize has been called yet.
     pub(super) is_initialized: InitializationStatus,
+    /// Historical Objective-C per-Class version metadata. This is exposed by
+    /// NSObject's +version/+setVersion: and class_getVersion/class_setVersion.
+    pub(super) version: i32,
 }
 impl HostObject for ClassHostObject {}
 
@@ -471,6 +474,7 @@ impl ClassHostObject {
             ivars: HashMap::default(),
             properties: Vec::new(),
             is_initialized: InitializationStatus::NotInitialized,
+            version: 0,
         }
     }
 
@@ -503,6 +507,7 @@ impl ClassHostObject {
             ivars: HashMap::new(),
             properties: read_property_list(base_properties, mem),
             is_initialized: InitializationStatus::NotInitialized,
+            version: 0,
         };
 
         if !base_methods.is_null() {
@@ -1058,6 +1063,7 @@ impl ObjC {
                         instance_size: Default::default(),
                         ivars: Default::default(),
                         is_initialized: InitializationStatus::NotInitialized,
+                        version: 0,
                     },
                 );
                 log_dbg!(
@@ -1263,6 +1269,20 @@ pub(super) fn class_getInstanceSize(env: &mut Environment, cls: Class) -> GuestU
         0
     } else {
         env.objc.borrow::<ClassHostObject>(cls).instance_size
+    }
+}
+
+pub(crate) fn class_getVersion(env: &mut Environment, cls: Class) -> i32 {
+    if cls == nil {
+        0
+    } else {
+        env.objc.borrow::<ClassHostObject>(cls).version
+    }
+}
+
+pub(crate) fn class_setVersion(env: &mut Environment, cls: Class, version: i32) {
+    if cls != nil {
+        env.objc.borrow_mut::<ClassHostObject>(cls).version = version;
     }
 }
 

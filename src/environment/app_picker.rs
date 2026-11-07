@@ -818,19 +818,17 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
     // Exact bundle identifiers avoid prefix collisions such as Glyder/Glyder 2
     // and keep the focused device-test batch deterministic even when filenames
     // or localized display names differ.
-    const DEV_242_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
-        "COMYOURCOMPANYARCADECRANE",
-        "COMTAYASUICATAGUGL",
+    const DEV_243_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
+        "COMMAJESTICSOFTWAREBLOT",
+        "COMTURNERBRINGMESANDWICHES",
         "COMCONTINUITYGAMECONTINUITY2",
-        "COMDTPENTERTAINMENTCRAZYGOLF",
         "COMIUGOIMPLODE",
-        "COMSQUAREENIXLARACROFTANDTHEGUARDIANOFLIGHT",
-        "COMSULAKENIKO",
-        "COMKONAMIEUROPEPES2012",
+        "COMMUMBOJUMBOLUXOR",
         "COMREIGNDESIGNPIGRUSH",
-        "COMWANDAKEROBOKILLIPHONE",
-        "COMMADFINGERGAMESSAMURAI2",
-        "COMTEAM17WORMSEXPRESS",
+        "COMDEFIANTDEVSKISAFARI",
+        "COMPANDASTEAMWARS",
+        "COMIUGOZOMBIES2",
+        "COMMIKAMOBILEZOMBIEVILLE2",
     ];
     let started = Instant::now();
     apps.sort_by_key(|app| {
@@ -841,7 +839,7 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
                 .collect()
         };
         let bundle_identifier = normalized(&app.bundle_identifier);
-        let rank = DEV_242_TEST_BUNDLE_IDENTIFIERS
+        let rank = DEV_243_TEST_BUNDLE_IDENTIFIERS
             .iter()
             .position(|&identifier| bundle_identifier == identifier)
             .unwrap_or(usize::MAX);
@@ -1685,7 +1683,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.42",
+            "iDared 32bit {}{}{} · Dev 2.43",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""
@@ -2949,46 +2947,39 @@ mod tests {
     }
 
     #[test]
-    fn dev_242_test_batch_is_first_in_exact_alphabetical_order() {
+    fn dev_243_test_batch_is_first_in_exact_alphabetical_order() {
         let mut apps = vec![
             test_app("unrelated.bundle", "AAA unrelated"),
-            test_app("com.team17.wormsexpress", "Worms"),
+            test_app("com.MikaMobile.Zombieville2", "Zombieville 2"),
+            test_app("com.panda.steamwars", "Steam Wars"),
             test_app("com.continuitygame.continuity2", "Continuity 2"),
-            test_app("com.wandake.robokilliphone", "Robokill"),
-            test_app("com.yourcompany.ArcadeCrane", "Arcade Claw"),
-            test_app("com.konami-europe.pes2012", "PES2012"),
-            test_app("com.tayasui.catagugl", "CataGugl"),
+            test_app("com.mumbojumbo.Luxor", "Luxor"),
             test_app("com.reigndesign.Pigrush", "Pig Rush"),
             test_app("com.iugo.Implode", "Implode!"),
-            test_app("com.sulake.niko", "Niko"),
-            test_app("com.madfingergames.Samurai2", "Samurai2"),
-            test_app("com.dtp-entertainment.crazygolf", "CrazyGolf"),
-            test_app(
-                "com.square-enix.laracroftandtheguardianoflight",
-                "Lara Croft and the Guardian of Light",
-            ),
+            test_app("com.turner.bringmesandwiches", "Sandwiches!!"),
+            test_app("com.iugo.zombies2", "ZA! 2ndWave"),
+            test_app("com.DefiantDev.SkiSafari", "Ski Safari"),
+            test_app("com.majesticsoftware.blot", "Blot"),
         ];
         sort_picker_apps(&mut apps, &mut LibraryTiming::default());
         let names: Vec<&str> = apps
             .iter()
-            .take(12)
+            .take(10)
             .map(|app| app.display_name.as_str())
             .collect();
         assert_eq!(
             names,
             [
-                "Arcade Claw",
-                "CataGugl",
+                "Blot",
+                "Sandwiches!!",
                 "Continuity 2",
-                "CrazyGolf",
                 "Implode!",
-                "Lara Croft and the Guardian of Light",
-                "Niko",
-                "PES2012",
+                "Luxor",
                 "Pig Rush",
-                "Robokill",
-                "Samurai2",
-                "Worms",
+                "Ski Safari",
+                "Steam Wars",
+                "ZA! 2ndWave",
+                "Zombieville 2",
             ]
         );
     }

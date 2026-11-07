@@ -207,6 +207,22 @@ pub const CLASSES: ClassExports = objc_classes! {
     idx != NSNotFound as NSUInteger
 }
 
+- (id)arrayByAddingObjectsFromArray:(id)other { // NSArray *
+    let own_count: NSUInteger = msg![env; this count];
+    let other_count: NSUInteger = msg![env; other count];
+    let mut objects = Vec::with_capacity((own_count + other_count) as usize);
+    for index in 0..own_count {
+        let object: id = msg![env; this objectAtIndex:index];
+        objects.push(retain(env, object));
+    }
+    for index in 0..other_count {
+        let object: id = msg![env; other objectAtIndex:index];
+        objects.push(retain(env, object));
+    }
+    let combined = from_vec(env, objects);
+    autorelease(env, combined)
+}
+
 - (id)firstObject {
     let size: NSUInteger = msg![env; this count];
     if size == 0 {
@@ -1261,6 +1277,37 @@ mod tests {
         release(env, second);
         release(env, first);
         env.mem.free(objects.cast());
+    }
+
+    #[test]
+    fn dev_243_array_by_adding_objects_preserves_order_ownership_and_inputs() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let first: id = msg_class![env; NSObject new];
+        let second: id = msg_class![env; NSObject new];
+        let left: id = msg_class![env; NSArray arrayWithObject:first];
+        let right: id = msg_class![env; NSArray arrayWithObject:second];
+
+        let combined: id = msg![env; left arrayByAddingObjectsFromArray:right];
+        let combined_count: NSUInteger = msg![env; combined count];
+        let left_count: NSUInteger = msg![env; left count];
+        let right_count: NSUInteger = msg![env; right count];
+        let combined_first: id = msg![env; combined objectAtIndex:0u32];
+        let combined_second: id = msg![env; combined objectAtIndex:1u32];
+        assert_eq!(combined_count, 2);
+        assert_eq!(left_count, 1);
+        assert_eq!(right_count, 1);
+        assert_eq!(combined_first, first);
+        assert_eq!(combined_second, second);
+        assert_eq!(env.objc.get_refcount(first).get(), 3);
+        assert_eq!(env.objc.get_refcount(second).get(), 3);
+
+        release(env, pool);
+        assert_eq!(env.objc.get_refcount(first).get(), 1);
+        assert_eq!(env.objc.get_refcount(second).get(), 1);
+        release(env, first);
+        release(env, second);
     }
 
     #[test]

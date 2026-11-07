@@ -209,6 +209,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.class_conforms_to_protocol(this, protocol, &env.mem)
 }
 
++ (i32)version {
+    crate::objc::class_getVersion(env, this)
+}
++ (())setVersion:(i32)version {
+    crate::objc::class_setVersion(env, this, version)
+}
+
 // See the instance method section for the normal versions of these.
 + (id)retain {
     this // classes are not refcounted
@@ -996,5 +1003,35 @@ mod tests {
 
         let copied: id = msg![env; class copyWithZone:(MutVoidPtr::null())];
         assert_eq!(copied, class);
+    }
+
+    #[test]
+    fn dev_243_class_versions_default_to_zero_and_remain_independent_and_signed() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let object_class = env.objc.get_known_class("NSObject", &mut env.mem);
+        let dictionary_class = env
+            .objc
+            .get_known_class("NSDictionary", &mut env.mem);
+
+        let object_default: i32 = msg![env; object_class version];
+        let dictionary_default: i32 = msg![env; dictionary_class version];
+        assert_eq!(object_default, 0);
+        assert_eq!(dictionary_default, 0);
+
+        () = msg![env; object_class setVersion:(-7i32)];
+        () = msg![env; dictionary_class setVersion:42i32];
+        let object_version: i32 = msg![env; object_class version];
+        let dictionary_version: i32 = msg![env; dictionary_class version];
+        assert_eq!(object_version, -7);
+        assert_eq!(dictionary_version, 42);
+        assert_eq!(crate::objc::class_getVersion(env, object_class), -7);
+        assert_eq!(crate::objc::class_getVersion(env, dictionary_class), 42);
+
+        crate::objc::class_setVersion(env, object_class, i32::MIN);
+        let round_trip: i32 = msg![env; object_class version];
+        assert_eq!(round_trip, i32::MIN);
+        assert_eq!(crate::objc::class_getVersion(env, nil), 0);
+        crate::objc::class_setVersion(env, nil, 99);
     }
 }
