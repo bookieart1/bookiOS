@@ -818,20 +818,14 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
     // Exact bundle identifiers avoid prefix collisions such as Glyder/Glyder 2
     // and keep the focused device-test batch deterministic even when filenames
     // or localized display names differ.
-    const DEV_245_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
+    const DEV_246_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
         "COMTOBIAPPSHUNDREDROOMS",
+        "COMGEEKBEACHAMONSTERATEMYHOMEWORK",
         "UBI063WW",
         "COMGAMEVILAIRPENGUIN",
-        "COMCRESCENTMOONGAMESARALON",
-        "NETSKYVUBATTLEBEARS1",
         "COMMAJESTICSOFTWAREBLOT",
-        "COMTURNERBRINGMESANDWICHES",
-        "COMCONTINUITYGAMECONTINUITY2",
         "COMEABURNOUTCRASHBV",
-        "COMMIKEMASSEIDAREDEVILDAVE",
-        "COMEZONEDIVERSION",
         "COMGALCONIDYNAMITEJACK",
-        "COMNOTDOPPLEREARNTODIE",
         "COMBIGDUCKGAMESFLOW",
         "COMROBTOPMAGEGAME",
         "COMEZONEGALACTIC",
@@ -842,18 +836,11 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
         "COMNAUGHTYBITSISHOOT2",
         "COMRACETOTHEMOONISR",
         "COMPLAYERXPANG",
-        "COMCHILLINGORAVENSWORD",
-        "COMCAZUALGAMEZREDBALLPRO",
-        "COMTAPULOUSRRF",
-        "COMJOYSTICKGENERALSSTACTIONPIG",
+        "COMDEFIANTDEVSKISAFARI",
         "COMSEGASPINBALL",
-        "COMMTVNSPONGEBOBDINERDASH",
-        "COMCHILLINGOSPOING",
-        "COMEASIMPSONSARCADEBV",
-        "COMNEKKIVECTORIPHONE",
+        "COMJOYSTICKGENERALSSTACTIONPIG",
         "COMSEGAVIRTUAFIGHTER2",
         "9X8UEF6RBGCOMGRUMPYFACEWISPIN",
-        "COMKONGZHONGZOMBIEC",
         "COMGAMEDRSZS",
     ];
     let started = Instant::now();
@@ -865,7 +852,7 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
                 .collect()
         };
         let bundle_identifier = normalized(&app.bundle_identifier);
-        let rank = DEV_245_TEST_BUNDLE_IDENTIFIERS
+        let rank = DEV_246_TEST_BUNDLE_IDENTIFIERS
             .iter()
             .position(|&identifier| bundle_identifier == identifier)
             .unwrap_or(usize::MAX);
@@ -1709,7 +1696,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.45",
+            "iDared 32bit {}{}{} · Dev 2.46",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""
@@ -2973,22 +2960,16 @@ mod tests {
     }
 
     #[test]
-    fn dev_245_test_batch_is_first_in_exact_alphabetical_order() {
+    fn dev_246_test_batch_is_first_in_exact_alphabetical_order() {
         let mut apps = vec![
             test_app("unrelated.bundle", "AAA unrelated"),
             test_app("com.tobiapps.hundred-rooms", "100 Floors"),
+            test_app("com.geekbeach.amonsteratemyhomework", "A Monster"),
             test_app("UBI-063-WW", "AC Rearmed"),
             test_app("com.gamevil.airpenguin", "Air Penguin"),
-            test_app("com.crescentmoongames.aralon", "Aralon HD"),
-            test_app("net.skyvu.battlebears1", "Battle Bears"),
             test_app("com.majesticsoftware.blot", "Blot"),
-            test_app("com.turner.bringmesandwiches", "Sandwiches!!"),
-            test_app("com.continuitygame.continuity2", "Continuity 2"),
             test_app("com.ea.burnoutcrash.bv", "Crash!"),
-            test_app("com.mikemassei.daredevildave", "Daredevil Dav"),
-            test_app("com.ezone.Diversion", "Diversion"),
             test_app("com.galcon.idynamitejack", "DynamiteJack"),
-            test_app("com.notdoppler.EarntoDie", "Earn to Die"),
             test_app("com.bigduckgames.flow", "Flow"),
             test_app("com.robtop.magegame", "Forlorn"),
             test_app("com.ezone.Galactic", "Galactic"),
@@ -3002,42 +2983,29 @@ mod tests {
             test_app("com.naughtybits.iShoot2", "iShoot 2"),
             test_app("com.RaceToTheMoon.iSR", "iSR"),
             test_app("com.playerx.pang", "Pang"),
-            test_app("com.chillingo.ravensword", "Ravensword"),
-            test_app("com.cazualgamez.RedBallPro", "RedBallPro"),
-            test_app("com.tapulous.rrf", "Riddim"),
-            test_app("com.joystickgenerals.STActionPig", "S.T.ActionPig"),
-            test_app("com.sega.spinball", "Spinball"),
-            test_app("com.mtvn.SpongeBobDinerDash", "SpongeBob Diner Dash"),
-            test_app("com.chillingo.spoing", "Spoing"),
-            test_app("com.ea.simpsonsarcade.bv", "TheSimpsons"),
-            test_app("com.nekki.vector.iphone", "Vector"),
+            test_app("com.DefiantDev.SkiSafari", "Ski Safari"),
+            test_app("com.sega.spinball", "Sonic Spinball"),
+            test_app("com.joystickgenerals.STActionPig", "S.T. ActionPig"),
             test_app("com.sega.virtuafighter2", "Virtua Fighter"),
             test_app("9X8UEF6RBG.com.GrumpyFace.Wispin", "Wispin"),
-            test_app("com.kongzhong.zombiec", "Zombie Crisis 3D"),
-            test_app("com.gamedrs.ZS", "ZS"),
+            test_app("com.gamedrs.ZS", "ZombieSmash"),
         ];
         sort_picker_apps(&mut apps, &mut LibraryTiming::default());
         let names: Vec<&str> = apps
             .iter()
-            .take(36)
+            .take(23)
             .map(|app| app.display_name.as_str())
             .collect();
         assert_eq!(
             names,
             [
                 "100 Floors",
+                "A Monster",
                 "AC Rearmed",
                 "Air Penguin",
-                "Aralon HD",
-                "Battle Bears",
                 "Blot",
-                "Sandwiches!!",
-                "Continuity 2",
                 "Crash!",
-                "Daredevil Dav",
-                "Diversion",
                 "DynamiteJack",
-                "Earn to Die",
                 "Flow",
                 "Forlorn",
                 "Galactic",
@@ -3048,19 +3016,12 @@ mod tests {
                 "iShoot 2",
                 "iSR",
                 "Pang",
-                "Ravensword",
-                "RedBallPro",
-                "Riddim",
-                "S.T.ActionPig",
-                "Spinball",
-                "SpongeBob Diner Dash",
-                "Spoing",
-                "TheSimpsons",
-                "Vector",
+                "Ski Safari",
+                "Sonic Spinball",
+                "S.T. ActionPig",
                 "Virtua Fighter",
                 "Wispin",
-                "Zombie Crisis 3D",
-                "ZS",
+                "ZombieSmash",
             ]
         );
     }

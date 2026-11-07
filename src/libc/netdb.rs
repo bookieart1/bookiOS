@@ -5,11 +5,13 @@
  */
 //! `netdb.h`
 
-use crate::dyld::FunctionExports;
+use crate::dyld::{ConstantExports, FunctionExports, HostConstant};
 use crate::export_c_func;
 use crate::libc::sys::socket::{sockaddr, AF_INET, SOCK_DGRAM, SOCK_STREAM};
 use crate::mem::{guest_size_of, ConstPtr, MutPtr, Ptr, SafeRead};
 use crate::Environment;
+use std::collections::HashMap;
+use std::io::Write;
 use std::net::Ipv4Addr;
 
 const AI_PASSIVE: i32 = 0x1;
@@ -18,6 +20,10 @@ pub const IPPROTO_TCP: i32 = 6;
 pub const IPPROTO_UDP: i32 = 17;
 
 const EAI_FAIL: i32 = 4;
+const HOST_NOT_FOUND: i32 = 1;
+const TRY_AGAIN: i32 = 2;
+const NO_RECOVERY: i32 = 3;
+const NO_DATA: i32 = 4;
 
 #[allow(non_camel_case_types)]
 pub type socklen_t = u32;
@@ -44,6 +50,62 @@ pub struct State {
     aliases: Option<MutPtr<MutPtr<u8>>>,
     address: Option<MutPtr<u8>>,
     address_list: Option<MutPtr<MutPtr<u8>>>,
+    h_errno: Option<MutPtr<i32>>,
+    error_strings: HashMap<i32, MutPtr<u8>>,
+}
+
+fn h_errno_ptr(env: &mut Environment) -> MutPtr<i32> {
+    if env.libc_state.netdb.h_errno.is_none() {
+        env.libc_state.netdb.h_errno = Some(env.mem.alloc_and_write(0));
+    }
+    env.libc_state.netdb.h_errno.unwrap()
+}
+
+fn set_h_errno(env: &mut Environment, value: i32) {
+    let pointer = h_errno_ptr(env);
+    env.mem.write(pointer, value);
+}
+
+fn __h_errno(env: &mut Environment) -> MutPtr<i32> {
+    h_errno_ptr(env)
+}
+
+fn h_error_text(error: i32) -> &'static str {
+    match error {
+        0 => "Resolver Error 0 (no error)",
+        HOST_NOT_FOUND => "Unknown host",
+        TRY_AGAIN => "Host name lookup failure",
+        NO_RECOVERY => "Unknown server error",
+        NO_DATA => "No address associated with name",
+        _ => "Unknown resolver error",
+    }
+}
+
+fn hstrerror(env: &mut Environment, error: i32) -> MutPtr<u8> {
+    if let Some(&pointer) = env.libc_state.netdb.error_strings.get(&error) {
+        return pointer;
+    }
+    let pointer = env
+        .mem
+        .alloc_and_write_cstr(h_error_text(error).as_bytes());
+    env.libc_state.netdb.error_strings.insert(error, pointer);
+    pointer
+}
+
+fn herror(env: &mut Environment, prefix: ConstPtr<u8>) {
+    let error_pointer = h_errno_ptr(env);
+    let error = env.mem.read(error_pointer);
+    let mut message = String::new();
+    if !prefix.is_null() {
+        let prefix = env.mem.cstr_at_utf8(prefix).unwrap_or("<invalid>");
+        if !prefix.is_empty() {
+            message.push_str(prefix);
+            message.push_str(": ");
+        }
+    }
+    message.push_str(h_error_text(error));
+    message.push('\n');
+    let _ = std::io::stderr().write_all(message.as_bytes());
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -128,9 +190,11 @@ fn gethostbyname(env: &mut Environment, name: ConstPtr<u8>) -> MutPtr<hostent> {
             name,
             name_text
         );
-        // TODO: set h_errno once its guest storage is implemented.
+        set_h_errno(env, HOST_NOT_FOUND);
         return Ptr::null();
     };
+
+    set_h_errno(env, 0);
 
     // Numeric IPv4 literals are resolved locally by historical BSD/Darwin
     // gethostbyname(). This does not perform DNS and does not grant network
@@ -191,9 +255,9 @@ fn gethostbyname(env: &mut Environment, name: ConstPtr<u8>) -> MutPtr<hostent> {
     result
 }
 
-fn gethostent(_env: &mut Environment) -> MutPtr<hostent> {
+fn gethostent(env: &mut Environment) -> MutPtr<hostent> {
     log!("TODO: gethostent() => NULL");
-    // TODO: set h_errno
+    set_h_errno(env, HOST_NOT_FOUND);
     Ptr::null()
 }
 
@@ -202,7 +266,15 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(freeaddrinfo(_)),
     export_c_func!(gethostbyname(_)),
     export_c_func!(gethostent()),
+    export_c_func!(__h_errno()),
+    export_c_func!(hstrerror(_)),
+    export_c_func!(herror(_)),
 ];
+
+pub const CONSTANTS: ConstantExports = &[(
+    "_h_errno",
+    HostConstant::Custom(|env| h_errno_ptr(env).cast().cast_const()),
+)];
 
 #[cfg(test)]
 mod tests {
@@ -241,5 +313,12 @@ mod tests {
         let mut env = Environment::new_fake_for_test();
         let name = env.mem.alloc_and_write_cstr(b"example.invalid");
         assert!(gethostbyname(&mut env, name.cast_const()).is_null());
+        let error_pointer = __h_errno(&mut env);
+        assert_eq!(env.mem.read(error_pointer), HOST_NOT_FOUND);
+        let error_text = hstrerror(&mut env, HOST_NOT_FOUND);
+        assert_eq!(
+            env.mem.cstr_at_utf8(error_text.cast_const()),
+            Ok("Unknown host")
+        );
     }
 }

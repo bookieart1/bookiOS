@@ -541,6 +541,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.borrow_mut::<CALayerHostObject>(this).needs_display = true;
 }
 
+- (())setNeedsDisplayInRect:(CGRect)_rect {
+    // The compositor stores a single dirty bit rather than a damage region.
+    // Redrawing the complete layer is the correct conservative superset.
+    env.objc.borrow_mut::<CALayerHostObject>(this).needs_display = true;
+}
+
 - (bool)needsDisplayOnBoundsChange {
     env.objc.borrow::<CALayerHostObject>(this).needs_display_on_bounds_change
 }
@@ -548,7 +554,6 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.borrow_mut::<CALayerHostObject>(this).needs_display_on_bounds_change = value;
 }
 
-// TODO: support setNeedsDisplayInRect:
 - (())displayIfNeeded {
     let &mut CALayerHostObject {
         ref mut needs_display,
@@ -1024,5 +1029,27 @@ mod tests {
         let updated: id = msg![env; layer contentsGravity];
         assert_eq!(updated, bottom_right);
         release(env, layer);
+    }
+
+    #[test]
+    fn dev_246_rect_invalidation_marks_the_layer_for_display() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let layer: id = msg_class![env; CALayer new];
+        let dirty = CGRect {
+            origin: CGPoint { x: 3.0, y: 4.0 },
+            size: CGSize {
+                width: 5.0,
+                height: 6.0,
+            },
+        };
+        () = msg![env; layer setNeedsDisplayInRect:dirty];
+        let needs_display: bool = msg![env; layer needsDisplay];
+        assert!(needs_display);
+        release(env, layer);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }

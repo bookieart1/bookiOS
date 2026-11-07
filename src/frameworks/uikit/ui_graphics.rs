@@ -27,6 +27,35 @@ use crate::Environment;
 pub(super) struct State {
     pub(super) context_stack: Vec<CGContextRef>,
     image_contexts: Vec<CGContextRef>,
+    focused_context_events: u8,
+}
+
+fn log_focused_context_event(env: &mut Environment, event: &str, context: CGContextRef) {
+    if !matches!(
+        env.bundle.bundle_identifier_optional(),
+        Some("com.geekbeach.amonsteratemyhomework" | "com.gamevil.airpenguin")
+    ) {
+        return;
+    }
+    let (sequence, depth, image_depth) = {
+        let state = &mut env.framework_state.uikit.ui_graphics;
+        if state.focused_context_events >= 96 {
+            return;
+        }
+        state.focused_context_events += 1;
+        (
+            state.focused_context_events,
+            state.context_stack.len(),
+            state.image_contexts.len(),
+        )
+    };
+    let regs = env.cpu.regs();
+    log!(
+        "Focused UIKit graphics-context diagnostic: sequence={sequence} event={event} context={context:?} stack_depth={depth} image_depth={image_depth} thread={} pc={:#010x} lr={:#010x}",
+        env.current_thread,
+        regs[crate::cpu::Cpu::PC],
+        regs[crate::cpu::Cpu::LR]
+    );
 }
 
 pub fn UIGraphicsPushContext(env: &mut Environment, context: CGContextRef) {
@@ -36,19 +65,26 @@ pub fn UIGraphicsPushContext(env: &mut Environment, context: CGContextRef) {
         .ui_graphics
         .context_stack
         .push(context);
+    log_focused_context_event(env, "push", context);
 }
 pub fn UIGraphicsPopContext(env: &mut Environment) {
     let context = env.framework_state.uikit.ui_graphics.context_stack.pop();
-    CGContextRelease(env, context.unwrap());
+    let context = context.unwrap();
+    log_focused_context_event(env, "pop", context);
+    CGContextRelease(env, context);
 }
 pub fn UIGraphicsGetCurrentContext(env: &mut Environment) -> CGContextRef {
-    env.framework_state
+    let context = env.framework_state
         .uikit
         .ui_graphics
         .context_stack
         .last()
         .copied()
-        .unwrap_or(nil)
+        .unwrap_or(nil);
+    if context.is_null() {
+        log_focused_context_event(env, "get-nil", context);
+    }
+    context
 }
 
 fn UIGraphicsBeginImageContext(env: &mut Environment, size: CGSize) {
@@ -99,6 +135,7 @@ fn UIGraphicsBeginImageContextWithOptions(
         .ui_graphics
         .image_contexts
         .push(context);
+    log_focused_context_event(env, "begin-image", context);
 }
 
 fn UIGraphicsGetImageFromCurrentImageContext(env: &mut Environment) -> id {
@@ -129,6 +166,7 @@ fn UIGraphicsEndImageContext(env: &mut Environment) {
         .image_contexts
         .pop()
         .expect("UIGraphicsEndImageContext without a matching begin");
+    log_focused_context_event(env, "end-image", context);
     assert_eq!(UIGraphicsGetCurrentContext(env), context);
     UIGraphicsPopContext(env);
 }

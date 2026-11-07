@@ -19,9 +19,10 @@ use super::cg_font::{
 use super::cg_gradient::{CGGradientHostObject, CGGradientRef};
 use super::cg_image::CGImageRef;
 use super::cg_path::{
-    kCGLineCapButt, kCGLineCapRound, kCGLineCapSquare, kCGPathElementAddLineToPoint,
-    kCGPathElementCloseSubpath, kCGPathElementMoveToPoint, CGLineCap, CGMutablePathHostObject,
-    CGMutablePathRef, CGPathCloseSubpath, CGPathCreateMutable, CGPathElement,
+    kCGLineCapButt, kCGLineCapRound, kCGLineCapSquare, kCGLineJoinBevel, kCGLineJoinMiter,
+    kCGLineJoinRound, kCGPathElementAddLineToPoint, kCGPathElementCloseSubpath,
+    kCGPathElementMoveToPoint, CGLineCap, CGLineJoin, CGMutablePathHostObject, CGMutablePathRef,
+    CGPathCloseSubpath, CGPathCreateMutable, CGPathElement,
 };
 use super::{cg_bitmap_context, cg_color, CGFloat, CGPoint, CGRect, CGSize};
 use crate::dyld::{export_c_func, FunctionExports};
@@ -34,6 +35,12 @@ use crate::Environment;
 use encoding_rs::Encoding;
 
 type CGInterpolationQuality = i32;
+type CGColorRenderingIntent = i32;
+const K_CG_RENDERING_INTENT_DEFAULT: CGColorRenderingIntent = 0;
+const K_CG_RENDERING_INTENT_ABSOLUTE_COLORIMETRIC: CGColorRenderingIntent = 1;
+const K_CG_RENDERING_INTENT_RELATIVE_COLORIMETRIC: CGColorRenderingIntent = 2;
+const K_CG_RENDERING_INTENT_PERCEPTUAL: CGColorRenderingIntent = 3;
+const K_CG_RENDERING_INTENT_SATURATION: CGColorRenderingIntent = 4;
 type CGGradientDrawingOptions = u32;
 const K_CG_GRADIENT_DRAWS_BEFORE_START_LOCATION: CGGradientDrawingOptions = 1;
 const K_CG_GRADIENT_DRAWS_AFTER_END_LOCATION: CGGradientDrawingOptions = 2;
@@ -260,6 +267,8 @@ type ContextState = (
     CGFloat,                              // font size
     CGBlendMode,                          // blend mode
     CGLineCap,                            // line cap
+    CGLineJoin,                           // line join
+    CGColorRenderingIntent,               // rendering intent
     (CGFloat, CGFloat, CGFloat, CGFloat), // RGB stroke color
     Vec<ClipPath>,                        // clipping path intersections
     CGTextDrawingMode,                    // text drawing mode
@@ -283,7 +292,9 @@ pub(super) struct CGContextHostObject {
     pub(super) text_encoding: CGTextEncoding,
     /// Line/Path data
     pub(super) line_cap: CGLineCap,
+    pub(super) line_join: CGLineJoin,
     pub(super) line_width: CGFloat,
+    pub(super) rendering_intent: CGColorRenderingIntent,
     pub(super) state_stack: Vec<ContextState>,
     pub(super) rgb_stroke_color: (CGFloat, CGFloat, CGFloat, CGFloat),
     pub(super) path: CGMutablePathRef,
@@ -711,6 +722,8 @@ pub fn CGContextSaveGState(env: &mut Environment, context: CGContextRef) {
         host_obj.font_size,
         host_obj.blend_mode,
         host_obj.line_cap,
+        host_obj.line_join,
+        host_obj.rendering_intent,
         host_obj.rgb_stroke_color,
         host_obj.clip_paths.clone(),
         host_obj.text_drawing_mode,
@@ -734,10 +747,12 @@ pub fn CGContextRestoreGState(env: &mut Environment, context: CGContextRef) {
     host_obj.font_size = state.3;
     host_obj.blend_mode = state.4;
     host_obj.line_cap = state.5;
-    host_obj.rgb_stroke_color = state.6;
-    host_obj.clip_paths = state.7;
-    host_obj.text_drawing_mode = state.8;
-    host_obj.text_encoding = state.9;
+    host_obj.line_join = state.6;
+    host_obj.rendering_intent = state.7;
+    host_obj.rgb_stroke_color = state.8;
+    host_obj.clip_paths = state.9;
+    host_obj.text_drawing_mode = state.10;
+    host_obj.text_encoding = state.11;
 }
 
 fn CGContextSetInterpolationQuality(
@@ -882,6 +897,47 @@ mod text_drawing_mode_tests {
             advanced_text_position(origin, 4.0, transform),
             CGPoint { x: 3.0, y: 13.0 }
         );
+    }
+}
+
+#[cfg(test)]
+mod dev_246_graphics_state_tests {
+    use super::*;
+    use crate::frameworks::core_graphics::cg_bitmap_context::CGBitmapContextCreate;
+    use crate::frameworks::core_graphics::cg_image::kCGImageAlphaOnly;
+    use crate::mem::Ptr;
+
+    #[test]
+    fn line_join_and_rendering_intent_follow_save_restore_state() {
+        let mut env = Environment::new_fake_for_test();
+        let context = CGBitmapContextCreate(
+            &mut env,
+            Ptr::null(),
+            2,
+            2,
+            8,
+            0,
+            Ptr::null(),
+            kCGImageAlphaOnly,
+        );
+        CGContextSetLineJoin(&mut env, context, kCGLineJoinRound);
+        CGContextSetRenderingIntent(
+            &mut env,
+            context,
+            K_CG_RENDERING_INTENT_RELATIVE_COLORIMETRIC,
+        );
+        CGContextSaveGState(&mut env, context);
+        CGContextSetLineJoin(&mut env, context, kCGLineJoinBevel);
+        CGContextSetRenderingIntent(&mut env, context, K_CG_RENDERING_INTENT_SATURATION);
+        CGContextRestoreGState(&mut env, context);
+
+        let state = env.objc.borrow::<CGContextHostObject>(context);
+        assert_eq!(state.line_join, kCGLineJoinRound);
+        assert_eq!(
+            state.rendering_intent,
+            K_CG_RENDERING_INTENT_RELATIVE_COLORIMETRIC
+        );
+        CGContextRelease(&mut env, context);
     }
 }
 
@@ -1043,6 +1099,35 @@ fn CGContextSetLineCap(env: &mut Environment, context: CGContextRef, cap: CGLine
 
     assert!(cap == kCGLineCapButt || cap == kCGLineCapRound || cap == kCGLineCapSquare);
     env.objc.borrow_mut::<CGContextHostObject>(context).line_cap = cap;
+}
+
+fn CGContextSetLineJoin(env: &mut Environment, context: CGContextRef, join: CGLineJoin) {
+    assert!(matches!(
+        join,
+        kCGLineJoinMiter | kCGLineJoinRound | kCGLineJoinBevel
+    ));
+    env.objc.borrow_mut::<CGContextHostObject>(context).line_join = join;
+}
+
+fn CGContextSetRenderingIntent(
+    env: &mut Environment,
+    context: CGContextRef,
+    intent: CGColorRenderingIntent,
+) {
+    assert!(matches!(
+        intent,
+        K_CG_RENDERING_INTENT_DEFAULT
+            | K_CG_RENDERING_INTENT_ABSOLUTE_COLORIMETRIC
+            | K_CG_RENDERING_INTENT_RELATIVE_COLORIMETRIC
+            | K_CG_RENDERING_INTENT_PERCEPTUAL
+            | K_CG_RENDERING_INTENT_SATURATION
+    ));
+    // The bitmap backend works in one RGB space, so the intent currently has
+    // no additional conversion to select. It is nevertheless part of the
+    // graphics state and must survive save/restore correctly.
+    env.objc
+        .borrow_mut::<CGContextHostObject>(context)
+        .rendering_intent = intent;
 }
 
 fn CGContextSetLineWidth(env: &mut Environment, context: CGContextRef, width: CGFloat) {
@@ -1334,6 +1419,8 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGContextShowGlyphsAtPositions(_, _, _, _)),
     export_c_func!(CGContextShowTextAtPoint(_, _, _, _, _)),
     export_c_func!(CGContextSetLineCap(_, _)),
+    export_c_func!(CGContextSetLineJoin(_, _)),
+    export_c_func!(CGContextSetRenderingIntent(_, _)),
     export_c_func!(CGContextSetLineWidth(_, _)),
     export_c_func!(CGContextMoveToPoint(_, _, _)),
     export_c_func!(CGContextAddLineToPoint(_, _, _)),

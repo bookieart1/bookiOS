@@ -34,6 +34,7 @@ pub mod math;
 pub mod net;
 pub mod netdb;
 pub mod posix_io;
+pub mod posix_regex;
 pub mod pthread;
 pub mod sched;
 pub mod semaphore;
@@ -60,6 +61,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
         stdio::CONSTANTS,
         stdlib::CONSTANTS,
         mach::init::CONSTANTS,
+        netdb::CONSTANTS,
     ],
     function_exports: &[
         arpa::inet::FUNCTIONS,
@@ -97,6 +99,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
         posix_io::FUNCTIONS,
         posix_io::stat::FUNCTIONS,
         posix_io::statvfs::FUNCTIONS,
+        posix_regex::FUNCTIONS,
         pthread::cond::FUNCTIONS,
         pthread::key::FUNCTIONS,
         pthread::mutex::FUNCTIONS,
@@ -140,6 +143,7 @@ pub struct State {
     math: math::State,
     netdb: netdb::State,
     posix_io: posix_io::State,
+    posix_regex: posix_regex::State,
     signal: signal::State,
     pub pthread: pthread::State,
     pub semaphore: semaphore::State,

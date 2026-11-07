@@ -116,7 +116,7 @@ fn _touchHLE_check_file_object_lock(env: &mut Environment, file_ptr: MutPtr<FILE
 #[allow(non_camel_case_types)]
 type fpos_t = off_t;
 
-fn fopen(env: &mut Environment, filename: ConstPtr<u8>, mode: ConstPtr<u8>) -> MutPtr<FILE> {
+fn fopen_flags(env: &Environment, mode: ConstPtr<u8>) -> i32 {
     // Some testing on macOS suggests Apple's implementation will just ignore
     // flags it doesn't know about, and unfortunately real-world apps seem to
     // rely on this, e.g. using "wt" to mean open for writing in text mode,
@@ -142,7 +142,7 @@ fn fopen(env: &mut Environment, filename: ConstPtr<u8>, mode: ConstPtr<u8>) -> M
         }
     }
 
-    let flags = match (basic_mode, plus) {
+    match (basic_mode, plus) {
         (b'r', false) => O_RDONLY,
         (b'r', true) => O_RDWR,
         (b'w', false) => O_WRONLY | O_CREAT | O_TRUNC,
@@ -150,7 +150,11 @@ fn fopen(env: &mut Environment, filename: ConstPtr<u8>, mode: ConstPtr<u8>) -> M
         (b'a', false) => O_WRONLY | O_APPEND | O_CREAT,
         (b'a', true) => O_RDWR | O_APPEND | O_CREAT,
         _ => unreachable!(),
-    };
+    }
+}
+
+fn fopen(env: &mut Environment, filename: ConstPtr<u8>, mode: ConstPtr<u8>) -> MutPtr<FILE> {
+    let flags = fopen_flags(env, mode);
 
     match posix_io::open_direct(env, filename, flags) {
         -1 => Ptr::null(),
@@ -167,6 +171,41 @@ fn fopen(env: &mut Environment, filename: ConstPtr<u8>, mode: ConstPtr<u8>) -> M
             );
             res
         }
+    }
+}
+
+fn freopen(
+    env: &mut Environment,
+    filename: ConstPtr<u8>,
+    mode: ConstPtr<u8>,
+    file_ptr: MutPtr<FILE>,
+) -> MutPtr<FILE> {
+    if file_ptr.is_null() || filename.is_null() || mode.is_null() {
+        set_errno(env, EINVAL);
+        return Ptr::null();
+    }
+
+    _touchHLE_check_file_object_lock(env, file_ptr);
+    let flags = fopen_flags(env, mode);
+    let old_fd = env.mem.read(file_ptr).fd;
+
+    // `freopen` closes the old stream even if opening the replacement fails.
+    // Keep the caller-owned FILE allocation itself stable, as required by a
+    // successful call, and leave it with an invalid descriptor on failure so a
+    // later fclose can still release the stream object deterministically.
+    let _ = posix_io::close(env, old_fd);
+    let new_fd = posix_io::open_direct(env, filename, flags);
+    env.mem.write(file_ptr, FILE { fd: new_fd });
+    let host = env
+        .libc_state
+        .stdio
+        .get_file_host_obj_mut(&mut env.mem, file_ptr);
+    host.pushbacks.clear();
+
+    if new_fd == -1 {
+        Ptr::null()
+    } else {
+        file_ptr
     }
 }
 
@@ -778,6 +817,7 @@ pub const CONSTANTS: ConstantExports = &[
 pub const FUNCTIONS: FunctionExports = &[
     // Standard C functions
     export_c_func!(fopen(_, _)),
+    export_c_func!(freopen(_, _, _)),
     export_c_func!(fread(_, _, _, _)),
     export_c_func!(fgetc(_)),
     export_c_func!(getc(_)),
@@ -828,5 +868,34 @@ mod tests {
         assert_eq!(setvbuf(&mut env, stream, Ptr::null(), _IONBF, 0), 0);
         assert_eq!(setvbuf(&mut env, stream, Ptr::null(), 99, 0), -1);
         assert_eq!(get_errno(&mut env), EINVAL);
+    }
+
+    #[test]
+    fn freopen_preserves_stream_identity_and_replaces_descriptor() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let host_root = std::env::temp_dir().join(format!(
+            "touchhle-freopen-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&host_root);
+        std::fs::create_dir(&host_root).unwrap();
+        *env.fs = crate::fs::Fs::new_fake_fs_with_writable_host_root(&host_root);
+        let first = env.mem.alloc_and_write_cstr(b"/freopen-first.txt");
+        let second = env.mem.alloc_and_write_cstr(b"/freopen-second.txt");
+        let mode = env.mem.alloc_and_write_cstr(b"w+");
+
+        let stream = fopen(&mut env, first.cast_const(), mode.cast_const());
+        assert!(!stream.is_null());
+        let reopened = freopen(
+            &mut env,
+            second.cast_const(),
+            mode.cast_const(),
+            stream,
+        );
+        assert_eq!(reopened, stream);
+        assert!(env.mem.read(stream).fd >= 0);
+        assert_eq!(fclose(&mut env, stream), 0);
+        assert!(host_root.join("freopen-second.txt").is_file());
+        std::fs::remove_dir_all(host_root).unwrap();
     }
 }

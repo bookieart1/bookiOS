@@ -786,6 +786,15 @@ impl Fs {
         }
     }
 
+    #[cfg(test)]
+    pub fn new_fake_fs_with_writable_host_root(host_path: &Path) -> Fs {
+        Fs {
+            root: FsNode::from_host_dir(host_path, true),
+            working_directory: GuestPathBuf::from("/".to_owned()),
+            home_directory: GuestPathBuf::from("/".to_owned()),
+        }
+    }
+
     /// Get the absolute path of the guest app's (sandboxed) home directory.
     pub fn home_directory(&self) -> &GuestPath {
         &self.home_directory

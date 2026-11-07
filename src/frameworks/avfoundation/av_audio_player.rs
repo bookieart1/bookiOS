@@ -73,8 +73,12 @@ fn log_pang_lifetime(env: &mut Environment, this: id, event: &str) {
         )
     };
     let refcount = env.objc.refcount_for_diagnostics(this);
+    let regs = env.cpu.regs();
     log!(
-        "Pang bounded AVAudioPlayer lifetime diagnostic: sequence={sequence} event={event} object={this:?} refcount={refcount:?} url={url:?} file={file:?} queue={queue:?} buffers={buffers:?} playing={playing}"
+        "Pang bounded AVAudioPlayer lifetime diagnostic: sequence={sequence} event={event} object={this:?} refcount={refcount:?} url={url:?} file={file:?} queue={queue:?} buffers={buffers:?} playing={playing} thread={} pc={:#010x} lr={:#010x}",
+        env.current_thread,
+        regs[crate::cpu::Cpu::PC],
+        regs[crate::cpu::Cpu::LR]
     );
 }
 
@@ -282,6 +286,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (bool)isPlaying {
+    log_pang_lifetime(env, this, "is-playing");
     env.objc.borrow::<AVAudioPlayerHostObject>(this).is_playing
 }
 

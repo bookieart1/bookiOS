@@ -225,6 +225,29 @@ pub(super) fn object_setInstanceVariable(
     ivar_handle
 }
 
+/// Sets an object-valued instance variable using the stable runtime `Ivar`
+/// handle returned by `class_getInstanceVariable`. The historical runtime API
+/// is a direct pointer-sized store; ownership policy remains the responsibility
+/// of the declaring class just as it is for `object_setInstanceVariable`.
+pub(super) fn object_setIvar(
+    env: &mut Environment,
+    obj: id,
+    ivar: ConstPtr<ivar_t>,
+    value: id,
+) {
+    if obj == nil || ivar.is_null() {
+        return;
+    }
+
+    let offset_ptr = env.mem.read(ivar).offset;
+    if offset_ptr.is_null() {
+        return;
+    }
+    let offset = env.mem.read(offset_ptr);
+    let destination = MutPtr::<GuestUSize>::from_bits(obj.to_bits() + offset);
+    env.mem.write(destination, value.to_bits());
+}
+
 /// Returns the compiler-provided Objective-C type encoding for an ivar runtime
 /// handle. Ivar handles exposed by this runtime are stable pointers to the
 /// guest binary's `ivar_t` metadata, so the returned string has the same
@@ -248,6 +271,65 @@ pub(super) fn ivar_getOffset(env: &mut Environment, ivar: ConstPtr<ivar_t>) -> G
     let offset_ptr = env.mem.read(ivar).offset;
     let offset = env.mem.read(offset_ptr);
     GuestISize::try_from(offset).expect("ivar offset does not fit in guest ptrdiff_t")
+}
+
+#[cfg(test)]
+mod dev_246_tests {
+    use super::*;
+    use crate::objc::{msg_class, release, TrivialHostObject};
+
+    #[test]
+    fn object_set_ivar_performs_a_nonowning_pointer_sized_store() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let class = env.objc.get_known_class("NSObject", &mut env.mem);
+        let offset = env.mem.alloc_and_write(4_u32);
+        let name = env.mem.alloc_and_write_cstr(b"_dev246Value");
+        let type_encoding = env.mem.alloc_and_write_cstr(b"@");
+        let handle = env.mem.alloc_and_write(ivar_t {
+            offset: offset.cast_const(),
+            name: name.cast_const(),
+            type_: type_encoding.cast_const(),
+            alignment: 2,
+            size: 4,
+        });
+        {
+            let class = env.objc.borrow_mut::<ClassHostObject>(class);
+            class.instance_size = class.instance_size.max(8);
+            class.ivars.insert(
+                "_dev246Value".to_owned(),
+                IVar {
+                    type_: "@".to_owned(),
+                    offset: offset.cast_const(),
+                    alignment: 2,
+                    handle: handle.cast_const(),
+                },
+            );
+        }
+        let object = env
+            .objc
+            .alloc_object(class, Box::new(TrivialHostObject), &mut env.mem);
+        let value: id = msg_class![env; NSObject new];
+        let initial_refcount = env.objc.get_refcount(value);
+
+        object_setIvar(env, object, handle.cast_const(), value);
+
+        assert_eq!(env.mem.read(MutPtr::<id>::from_bits(object.to_bits() + 4)), value);
+        assert_eq!(env.objc.get_refcount(value), initial_refcount);
+        object_setIvar(env, nil, handle.cast_const(), value);
+        object_setIvar(env, object, Ptr::null(), value);
+
+        env.objc
+            .borrow_mut::<ClassHostObject>(class)
+            .ivars
+            .remove("_dev246Value");
+        release(env, object);
+        release(env, value);
+        env.mem.free(handle.cast());
+        env.mem.free(type_encoding.cast());
+        env.mem.free(name.cast());
+        env.mem.free(offset.cast());
+    }
 }
 
 /// Undocumented function (see link above) apparently used by auto-generated

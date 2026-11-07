@@ -82,6 +82,7 @@ pub struct State {
     /// Last UIKit lifecycle mutations. This is diagnostic-only, bounded, and
     /// intentionally stores no strong object references.
     recent_view_transitions: VecDeque<ViewTransitionDiagnostic>,
+    implode_hit_test_events: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -275,6 +276,34 @@ fn record_view_transition(env: &mut Environment, action: &'static str, view: id,
         history.pop_front();
     }
     history.push_back(transition);
+}
+
+fn log_implode_hit_test(
+    env: &mut Environment,
+    stage: &str,
+    view: id,
+    point: CGPoint,
+    result: id,
+) {
+    if env.bundle.bundle_identifier_optional() != Some("com.iugo.Implode") {
+        return;
+    }
+    let sequence = {
+        let state = &mut env.framework_state.uikit.ui_view;
+        if state.implode_hit_test_events >= 96 {
+            return;
+        }
+        state.implode_hit_test_events += 1;
+        state.implode_hit_test_events
+    };
+    let class_name = ObjC::try_read_isa(view, &env.mem)
+        .and_then(|class| env.objc.try_get_class_name(class))
+        .unwrap_or("<invalid-view>");
+    let x = point.x;
+    let y = point.y;
+    log!(
+        "Implode bounded hit-test diagnostic: sequence={sequence} stage={stage} view={view:?} class={class_name} point=({x:.3},{y:.3}) result={result:?}"
+    );
 }
 
 /// Dump the last UIKit attachment/visibility mutations when a title is left.
@@ -1072,7 +1101,6 @@ pub const CLASSES: ClassExports = objc_classes! {
     msg![env; layer setBackgroundColor:color]
 }
 
-// TODO: support setNeedsDisplayInRect:
 - (())setNeedsDisplay {
     // UIView has a method called drawRect: that subclasses override if they
     // need custom drawing. touchHLE's UIView (a CALayerDelegate) provides
@@ -1099,6 +1127,13 @@ pub const CLASSES: ClassExports = objc_classes! {
         let layer = env.objc.borrow::<UIViewHostObject>(this).layer;
         msg![env; layer setNeedsDisplay]
     }
+}
+
+- (())setNeedsDisplayInRect:(CGRect)_rect {
+    // CALayer currently tracks whole-layer dirtiness. Invalidating a superset
+    // is semantically safe: it preserves UIKit's redraw scheduling without
+    // pretending that the requested rectangle was ignored.
+    () = msg![env; this setNeedsDisplay];
 }
 
 - (CGRect)bounds {
@@ -1192,7 +1227,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (id)hitTest:(CGPoint)point
     withEvent:(id)event { // UIEvent* (possibly nil)
+    log_implode_hit_test(env, "enter", this, point, nil);
     if !msg![env; this pointInside:point withEvent:event] {
+        log_implode_hit_test(env, "outside", this, point, nil);
         return nil;
     }
     // TODO: avoid copy somehow?
@@ -1207,9 +1244,11 @@ pub const CLASSES: ClassExports = objc_classes! {
         let point: CGPoint = msg![env; subview convertPoint:point fromView:this];
         let subview: id = msg![env; subview hitTest:point withEvent:event];
         if subview != nil {
+            log_implode_hit_test(env, "descendant", this, point, subview);
             return subview;
         }
     }
+    log_implode_hit_test(env, "self", this, point, this);
     this
 }
 

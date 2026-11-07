@@ -40,6 +40,11 @@ pub const kCGLineCapButt: CGLineCap = 0; // Default
 pub const kCGLineCapRound: CGLineCap = 1;
 pub const kCGLineCapSquare: CGLineCap = 2;
 
+pub type CGLineJoin = i32;
+pub const kCGLineJoinMiter: CGLineJoin = 0; // Default
+pub const kCGLineJoinRound: CGLineJoin = 1;
+pub const kCGLineJoinBevel: CGLineJoin = 2;
+
 #[derive(Clone)]
 pub struct CGPathElement {
     pub points: Vec<CGPoint>,

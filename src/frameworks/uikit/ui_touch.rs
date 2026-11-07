@@ -27,6 +27,7 @@ pub const UITouchPhaseEnded: UITouchPhase = 3;
 #[derive(Default)]
 pub struct State {
     pub(super) current_touches: HashMap<FingerId, id>,
+    implode_coordinate_events: u8,
 }
 
 pub(super) struct UITouchHostObject {
@@ -72,11 +73,50 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (CGPoint)locationInView:(id)that_view { // UIView*
     let &UITouchHostObject { location, window, .. } = env.objc.borrow(this);
     let location_in_window: CGPoint = msg![env; window convertPoint:location fromWindow:nil];
-    if that_view == nil {
+    let converted = if that_view == nil {
         location_in_window
     } else {
         msg![env; that_view convertPoint:location_in_window fromView:window]
+    };
+    if env.bundle.bundle_identifier_optional() == Some("com.iugo.Implode") {
+        let sequence = {
+            let state = &mut env.framework_state.uikit.ui_touch;
+            if state.implode_coordinate_events >= 64 {
+                return converted;
+            }
+            state.implode_coordinate_events += 1;
+            state.implode_coordinate_events
+        };
+        let host = env.objc.borrow::<UITouchHostObject>(this);
+        let target = host.view;
+        let phase = host.phase;
+        let timestamp = host.timestamp;
+        let location = host.location;
+        let previous_location = host.previous_location;
+        let screen_x = location.x;
+        let screen_y = location.y;
+        let previous_x = previous_location.x;
+        let previous_y = previous_location.y;
+        let window_x = location_in_window.x;
+        let window_y = location_in_window.y;
+        let converted_x = converted.x;
+        let converted_y = converted.y;
+        log!(
+            "Implode bounded touch-coordinate diagnostic: sequence={sequence} touch={this:?} view={that_view:?} target={:?} phase={} timestamp={:.6} screen=({:.3},{:.3}) previous=({:.3},{:.3}) window=({:.3},{:.3}) converted=({:.3},{:.3})",
+            target,
+            phase,
+            timestamp,
+            screen_x,
+            screen_y,
+            previous_x,
+            previous_y,
+            window_x,
+            window_y,
+            converted_x,
+            converted_y
+        );
     }
+    converted
 }
 - (CGPoint)previousLocationInView:(id)that_view { // UIView*
     let &UITouchHostObject { previous_location, window, .. } = env.objc.borrow(this);

@@ -956,6 +956,22 @@ pub const CLASSES: ClassExports = objc_classes! {
     release(env, object)
 }
 
+- (())removeObjectsInRange:(NSRange)range {
+    let count: NSUInteger = msg![env; this count];
+    let end = range
+        .location
+        .checked_add(range.length)
+        .expect("removeObjectsInRange: range overflow");
+    assert!(end <= count, "removeObjectsInRange: range out of bounds");
+
+    // Validate the complete range before mutating. Descending removal keeps
+    // every index meaningful and reuses the class cluster's ownership and
+    // diagnostic behavior.
+    for index in (range.location..end).rev() {
+        () = msg![env; this removeObjectAtIndex:index];
+    }
+}
+
 - (())replaceObjectAtIndex:(NSUInteger)index withObject:(id)obj {
     let count: NSUInteger = env.objc.borrow::<ArrayHostObject>(this).array.len().try_into().unwrap();
     retain(env, obj);
@@ -1435,6 +1451,37 @@ mod tests {
         assert_eq!(remaining, second);
         release(env, array);
         release(env, pool);
+    }
+
+    #[test]
+    fn dev_246_remove_objects_in_range_preserves_order_and_ownership() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let objects: Vec<id> = (0..5).map(|_| msg_class![env; NSObject new]).collect();
+        let owned_objects = objects.iter().map(|&object| retain(env, object)).collect();
+        let array = mutable_from_vec(env, owned_objects);
+
+        let range = NSRange {
+            location: 1,
+            length: 3,
+        };
+        () = msg![env; array removeObjectsInRange:range];
+
+        let count: NSUInteger = msg![env; array count];
+        let first: id = msg![env; array objectAtIndex:0u32];
+        let second: id = msg![env; array objectAtIndex:1u32];
+        assert_eq!(count, 2);
+        assert_eq!(first, objects[0]);
+        assert_eq!(second, objects[4]);
+        for (index, &object) in objects.iter().enumerate() {
+            let expected = if (1..4).contains(&index) { 1 } else { 2 };
+            assert_eq!(env.objc.get_refcount(object).get(), expected);
+        }
+
+        release(env, array);
+        for object in objects {
+            release(env, object);
+        }
     }
 
     #[test]

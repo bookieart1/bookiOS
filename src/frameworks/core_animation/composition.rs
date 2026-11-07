@@ -38,6 +38,7 @@ pub(super) struct State {
     input_diagnostic_emitted: u8,
     startup_presentation_attempts: u16,
     startup_frame_presented: bool,
+    focused_gl_frames: u8,
 }
 
 impl State {
@@ -56,6 +57,22 @@ impl State {
         }
         self.input_diagnostic_remaining -= 1;
         self.input_diagnostic_emitted += 1;
+        true
+    }
+
+    fn begin_focused_gl_frame(&mut self, bundle_identifier: Option<&str>) -> bool {
+        if !matches!(
+            bundle_identifier,
+            Some(
+                "com.robtop.magegame"
+                    | "com.joystickgenerals.STActionPig"
+                    | "9X8UEF6RBG.com.GrumpyFace.Wispin"
+            )
+        ) || self.focused_gl_frames >= 12
+        {
+            return false;
+        }
+        self.focused_gl_frames += 1;
         true
     }
 }
@@ -194,11 +211,12 @@ pub fn recomposite_if_necessary(env: &mut Environment, force: bool) -> Option<In
         .composition
         .recomposite_next = new_recomposite_next;
 
-    let diagnostic_layer_checks = env
-        .framework_state
-        .core_animation
-        .composition
-        .begin_input_diagnostic_frame();
+    let bundle_identifier = env.bundle.bundle_identifier_optional().map(str::to_owned);
+    let diagnostic_layer_checks = {
+        let state = &mut env.framework_state.core_animation.composition;
+        state.begin_input_diagnostic_frame()
+            || state.begin_focused_gl_frame(bundle_identifier.as_deref())
+    };
 
     let window_layers: Vec<id> = windows
         .into_iter()
