@@ -109,6 +109,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.borrow::<ErrorHostObject>(this).user_info
 }
 
+// NSError is immutable. NSCopying therefore returns the same retained
+// instance rather than requiring callers to special-case error objects.
+- (id)copyWithZone:(NSZonePtr)_zone {
+    retain(env, this)
+}
+
 @end
 
 };
@@ -135,3 +141,28 @@ pub const CONSTANTS: ConstantExports = &[
         HostConstant::NSString(NSOSStatusErrorDomain),
     ),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objc::{msg_class, release};
+    use crate::Environment;
+
+    #[test]
+    fn immutable_error_copy_returns_the_same_retained_object() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let domain = ns_string::get_static_str(env, "Dev249ErrorDomain");
+        let error: id = msg_class![env; NSError alloc];
+        let error: id = msg![env; error initWithDomain:domain code:249i32 userInfo:nil];
+        let before = env.objc.get_refcount(error).get();
+        let copied: id = msg![env; error copyWithZone:(crate::mem::MutVoidPtr::null())];
+        assert_eq!(copied, error);
+        assert_eq!(env.objc.get_refcount(error).get(), before + 1);
+        release(env, copied);
+        release(env, error);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+    }
+}

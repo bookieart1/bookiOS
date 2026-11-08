@@ -9,9 +9,12 @@ use crate::abi::{CallFromHost, GuestFunction};
 use crate::dyld::{export_c_func, FunctionExports};
 use crate::frameworks::core_foundation::cf_allocator::{kCFAllocatorDefault, CFAllocatorRef};
 use crate::frameworks::core_foundation::CFTypeRef;
+use crate::frameworks::foundation::ns_run_loop::{
+    add_perform_request, cancel_perform_requests,
+};
 use crate::libc::sys::socket::sockaddr;
 use crate::mem::{ConstPtr, MutPtr, MutVoidPtr, Ptr, SafeRead};
-use crate::objc::{msg, objc_classes, Class, ClassExports, HostObject};
+use crate::objc::{msg, nil, objc_classes, Class, ClassExports, HostObject};
 use crate::Environment;
 use std::net::SocketAddrV4;
 
@@ -27,6 +30,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 // but the result of "Create" or "Copy" functions here is expected to be
 // released with CFRelease().
 @implementation _touchHLE_SCNetworkReachability: NSObject
+
+- (())_touchHLE_deliverOfflineCallback {
+    deliver_offline_callback(env, this)
+}
 @end
 
 };
@@ -35,6 +42,7 @@ struct SCNetworkReachabilityHostObject {
     address: Option<SocketAddrV4>,
     callback: Option<(GuestFunction, MutVoidPtr)>,
     delivered_offline_callback: bool,
+    offline_callback_pending: bool,
 }
 impl HostObject for SCNetworkReachabilityHostObject {}
 
@@ -76,6 +84,7 @@ fn SCNetworkReachabilityCreateWithName(
             address: None,
             callback: None,
             delivered_offline_callback: false,
+            offline_callback_pending: false,
         }), // TODO
         &mut env.mem,
     );
@@ -105,6 +114,7 @@ fn SCNetworkReachabilityCreateWithAddress(
             address: Some(address_val.to_sockaddr_v4()),
             callback: None,
             delivered_offline_callback: false,
+            offline_callback_pending: false,
         }),
         &mut env.mem,
     );
@@ -199,8 +209,34 @@ fn SCNetworkReachabilitySetCallback(
     let host_object = env
         .objc
         .borrow_mut::<SCNetworkReachabilityHostObject>(target);
+    let callback_changed = match (host_object.callback, callback) {
+        (None, None) => false,
+        (Some((old, old_info)), Some((new, new_info))) => {
+            old.addr_with_thumb_bit() != new.addr_with_thumb_bit() || old_info != new_info
+        }
+        _ => true,
+    };
     host_object.callback = callback;
-    host_object.delivered_offline_callback = false;
+    if callback_changed {
+        host_object.delivered_offline_callback = false;
+    }
+    let delivered = host_object.delivered_offline_callback;
+    let pending = host_object.offline_callback_pending;
+    let info = host_object.callback.map_or(0, |(_, info)| info.to_bits());
+    env.diagnostic_campaign_event(
+        "reachability",
+        "set-callback target,callout,context,info,changed,delivered,pending",
+        [
+            target.to_bits(),
+            callout.addr_with_thumb_bit(),
+            context.to_bits(),
+            info,
+            u32::from(callback_changed),
+            u32::from(delivered),
+            u32::from(pending),
+            0,
+        ],
+    );
     log!(
         "SCNetworkReachabilitySetCallback({:?}, {:?}, {:?}) -> TRUE",
         target,
@@ -213,7 +249,7 @@ fn SCNetworkReachabilitySetCallback(
 fn SCNetworkReachabilityScheduleWithRunLoop(
     env: &mut Environment,
     target: SCNetworkReachabilityRef,
-    _run_loop: CFTypeRef,
+    run_loop: CFTypeRef,
     _run_loop_mode: CFTypeRef,
 ) -> bool {
     let target_class: Class = msg![env; target class];
@@ -222,33 +258,87 @@ fn SCNetworkReachabilityScheduleWithRunLoop(
         env.objc
             .get_known_class("_touchHLE_SCNetworkReachability", &mut env.mem)
     );
-    // Older reachability wrappers expect an initial callback after scheduling.
-    // Deliver a single stable offline result when networking is disabled. This
-    // also prevents retired SDKs from repeatedly creating new reachability
-    // objects while waiting for a state notification that never arrives.
+    // Older reachability wrappers expect an initial callback after scheduling,
+    // but Core Foundation never invokes it reentrantly from this scheduling
+    // call. Queue one delivery on the requested run loop. Keeping an identical
+    // callback registration's delivered state also prevents legacy wrappers
+    // from creating an endless next-turn notification loop.
     if !env.options.network_access {
-        let callback = {
+        let should_schedule = {
             let host_object = env
                 .objc
                 .borrow_mut::<SCNetworkReachabilityHostObject>(target);
-            if host_object.delivered_offline_callback {
-                None
+            if host_object.delivered_offline_callback
+                || host_object.offline_callback_pending
+                || host_object.callback.is_none()
+            {
+                false
             } else {
-                host_object.delivered_offline_callback = true;
-                host_object.callback
+                host_object.offline_callback_pending = true;
+                true
             }
         };
-        if let Some((callback, info)) = callback {
-            () = callback.call_from_host(env, (target, 0_u32, info));
+        if should_schedule {
+            let selector = env
+                .objc
+                .lookup_selector("_touchHLE_deliverOfflineCallback")
+                .unwrap();
+            add_perform_request(env, run_loop, target, selector, nil, Some(0.0), false);
         }
+        env.diagnostic_campaign_event(
+            "reachability",
+            "schedule-offline target,run-loop,mode,queued",
+            [
+                target.to_bits(),
+                run_loop.to_bits(),
+                _run_loop_mode.to_bits(),
+                u32::from(should_schedule),
+                0,
+                0,
+                0,
+                0,
+            ],
+        );
     }
     true
+}
+
+fn deliver_offline_callback(env: &mut Environment, target: SCNetworkReachabilityRef) {
+    let callback = {
+        let host_object = env
+            .objc
+            .borrow_mut::<SCNetworkReachabilityHostObject>(target);
+        host_object.offline_callback_pending = false;
+        if host_object.delivered_offline_callback {
+            None
+        } else {
+            host_object.delivered_offline_callback = true;
+            host_object.callback
+        }
+    };
+    if let Some((callback, info)) = callback {
+        env.diagnostic_campaign_event(
+            "reachability",
+            "deliver-offline target,callout,info",
+            [
+                target.to_bits(),
+                callback.addr_with_thumb_bit(),
+                info.to_bits(),
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
+        );
+        () = callback.call_from_host(env, (target, 0_u32, info));
+    }
 }
 
 fn SCNetworkReachabilityUnscheduleFromRunLoop(
     env: &mut Environment,
     target: SCNetworkReachabilityRef,
-    _run_loop: CFTypeRef,
+    run_loop: CFTypeRef,
     _run_loop_mode: CFTypeRef,
 ) -> bool {
     let target_class: Class = msg![env; target class];
@@ -257,6 +347,14 @@ fn SCNetworkReachabilityUnscheduleFromRunLoop(
         env.objc
             .get_known_class("_touchHLE_SCNetworkReachability", &mut env.mem)
     );
+    let selector = env
+        .objc
+        .lookup_selector("_touchHLE_deliverOfflineCallback")
+        .unwrap();
+    cancel_perform_requests(env, run_loop, target, selector, nil);
+    env.objc
+        .borrow_mut::<SCNetworkReachabilityHostObject>(target)
+        .offline_callback_pending = false;
     true
 }
 
@@ -268,3 +366,55 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(SCNetworkReachabilityScheduleWithRunLoop(_, _, _)),
     export_c_func!(SCNetworkReachabilityUnscheduleFromRunLoop(_, _, _)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identical_callback_registration_keeps_the_delivered_generation() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        env.options.diagnostic_campaign = crate::options::DiagnosticCampaign::Off;
+        env.bundle.set_fake_identity_for_test();
+        let name = env.mem.alloc_and_write_cstr(b"example.invalid");
+        let target = SCNetworkReachabilityCreateWithName(
+            &mut env,
+            kCFAllocatorDefault,
+            name.cast_const(),
+        );
+        let callback = GuestFunction::from_addr_with_thumb_bit(0x1001);
+        assert!(SCNetworkReachabilitySetCallback(
+            &mut env,
+            target,
+            callback,
+            Ptr::null(),
+        ));
+        env.objc
+            .borrow_mut::<SCNetworkReachabilityHostObject>(target)
+            .delivered_offline_callback = true;
+
+        assert!(SCNetworkReachabilitySetCallback(
+            &mut env,
+            target,
+            callback,
+            Ptr::null(),
+        ));
+        assert!(
+            env.objc
+                .borrow::<SCNetworkReachabilityHostObject>(target)
+                .delivered_offline_callback
+        );
+
+        assert!(SCNetworkReachabilitySetCallback(
+            &mut env,
+            target,
+            GuestFunction::from_addr_with_thumb_bit(0x2001),
+            Ptr::null(),
+        ));
+        assert!(
+            !env.objc
+                .borrow::<SCNetworkReachabilityHostObject>(target)
+                .delivered_offline_callback
+        );
+    }
+}

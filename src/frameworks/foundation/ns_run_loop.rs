@@ -417,7 +417,7 @@ fn add_perform_request_with_order(
 /// Cancels a selector that was previously requested by [add_perform_request].
 /// The argument arg is compared via isEqual, [as documented by Apple]
 /// (<https://developer.apple.com/documentation/objectivec/nsobject/1410849-cancelpreviousperformrequestswit?language=objc>)
-pub(super) fn cancel_perform_requests(
+pub(crate) fn cancel_perform_requests(
     env: &mut Environment,
     run_loop: id,
     target: id,

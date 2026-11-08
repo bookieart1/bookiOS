@@ -811,81 +811,45 @@ fn inspect_app_package(
     )
 }
 
-const DEV_248_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
+const DEV_249_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
     "COMTOBIAPPSHUNDREDROOMS",
     "COMGEEKBEACHAMONSTERATEMYHOMEWORK",
-    "UBI063WW",
     "COMGAMEVILAIRPENGUIN",
     "COMKROMEBOOMERANGBLAST",
     "COMBABYNINJABABYNINJA",
     "NETSKYVUBATTLEBEARSNEG1",
     "COMMAJESTICSOFTWAREBLOT",
-    "COMBACKFLIPSTUDIOSBOUNCETHEBUNNY",
     "COMTURNERBRINGMESANDWICHES",
     "COMDIGITALPRUNESBUNGEEBALL2PRO",
     "COMXMGSTUDIOCANNONCADETS",
-    "COMTAGGAMESCARJACKST",
-    "COM2KPLAYCARNIVAL",
-    "COMCHILLINGOCONTREJOURHD",
-    "COMDTPENTERTAINMENTCRAZYGOLF",
+    "COMCONTINUITYGAMECONTINUITY2",
     "COMTINKERHOUSEGAMESCURRENT",
     "COMPHOSPHORPACTGAME",
-    "COMMIKEMASSEIDAREDEVILDAVE",
-    "COMSECRETEXITSDT",
-    "COMEZONEDIVERSION",
     "COMGALCONIDYNAMITEJACK",
-    "COMNOTDOPPLEREARNTODIE",
-    "FALLDOWN",
     "FIELDRUNNERS2IPHONE",
-    "COMSHAUNINMANFLIPSESCAPE",
     "COMROBTOPMAGEGAME",
     "COMMINICLIPFRAGGER",
     "COMNAMCONETWORKSGALARG",
-    "COMGLUGUNBROS",
     "COMBATTERYACIDHIGHWAYRIDER",
     "COMMIXELWEBHILLBILLYGREEN",
     "COMIUGOIMPLODE",
-    "COMNAUGHTYBITSISHOOT2",
     "COMPROFUSIONSTUDIOSISTUNTPRO",
-    "PLIDREAMSJELLYINVADERS",
-    "COMWALABERJELLYCAR",
-    "COMSQUAREENIXLARACROFTANDTHEGUARDIANOFLIGHT",
-    "COMLIVGAMESLEGENDARYWARS",
-    "COMCHILLINGOMINIGORE",
     "JPCOCAPCOMMONHUNIPUS",
-    "COMORIGIN8MONSTERKILL",
     "COMMEDUSAODDYSMOGFINAL",
     "COMPLAYERXPANG",
     "COMPOPCAPPEGGLE",
-    "COMKONAMIEUROPEPES2012",
-    "COMROCKETCATQUICKHOOK",
-    "COMFIREMINTREALRACING",
-    "COMFIREMINTREALRACINGGTI",
-    "COMFFEROBOTO",
     "COMCHILLINGOROGUESKY",
     "COMJOYSTICKGENERALSSTACTIONPIG",
-    "COMMADFINGERGAMESSHADOWGUN",
-    "COMONIRICGAMESSILENTSWORDSZERO",
-    "COMMTVNSKIRUNNER",
-    "COMDEFIANTDEVSKISAFARI",
-    "COMEEENMACHINESKYBURGER",
     "COMSEGASPINBALL",
-    "COMCHILLINGOSPOING",
     "COMMTVNSPONGEBOBDINERDASH",
-    "COMCLICKGAMERSTICKY",
-    "COMCRANEBALLSSTUNTMAN",
+    "COMCHILLINGOSPOING",
     "COMTOUCHFOOSWORDIGO",
     "COMDIGITALCHOCOLATEIHOUSE",
-    "COMIUGOTOYBOTDIARIES",
     "COMUNIVERSOMOTRENCHBUILD",
-    "COMNEKKIVECTORIPHONE",
     "COMSEGAVIRTUAFIGHTER2",
     "COMKONAMIEUOPEWIREWAY",
     "9X8UEF6RBGCOMGRUMPYFACEWISPIN",
-    "COMTEAM17WORMSEXPRESS",
     "COMIUGOZOMBIES2",
-    "COMSEGAZAXXONESCAPE",
-    "COMKONGZHONGZOMBIEC",
     "COMGAMEDRSZS",
     "COMPOPCAPIOSZUMAHD",
 ];
@@ -906,7 +870,7 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
                 .collect()
         };
         let bundle_identifier = normalized(&app.bundle_identifier);
-        let rank = DEV_248_TEST_BUNDLE_IDENTIFIERS
+        let rank = DEV_249_TEST_BUNDLE_IDENTIFIERS
             .iter()
             .position(|&identifier| bundle_identifier == identifier)
             .unwrap_or(usize::MAX);
@@ -1750,7 +1714,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Dev 2.48",
+            "iDared 32bit {}{}{} · Dev 2.49",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""
@@ -3025,92 +2989,62 @@ mod tests {
     }
 
     #[test]
-    fn dev_248_test_batch_is_first_in_exact_alphabetical_order() {
-        let mut apps = vec![
-            test_app("unrelated.bundle", "AAA unrelated"),
-            test_app("com.tobiapps.hundred-rooms", "100 Floors"),
-            test_app(
-                "com.geekbeach.amonsteratemyhomework",
-                "A Monster Ate My Homework",
-            ),
-            test_app("UBI-063-WW", "AC Rearmed"),
-            test_app("com.gamevil.airpenguin", "Air Penguin"),
-            test_app("com.xmgstudio.cannoncadets", "Cannon Cadets"),
-            test_app("com.tinkerhousegames.current", "Current"),
-            test_app("com.galcon.idynamitejack", "Dynamite Jack"),
-            test_app("fieldrunners2.iphone", "Fieldrunners 2"),
-            test_app("com.shauninman.flipsescape", "Flip's Escape"),
-            test_app("com.robtop.magegame", "Forlorn"),
-            test_app("com.glu.gunbros", "Gun Bros"),
-            test_app("com.batteryacid.highwayrider", "Highway Rider"),
-            test_app("com.iugo.Implode", "Implode!"),
-            test_app("com.naughtybits.iShoot2", "iShoot 2"),
-            test_app("com.profusionstudios.istuntpro", "iStunt Reloaded Pro"),
-            test_app("pl.idreams.jellyinvaders", "Jelly Invaders"),
-            test_app("com.walaber.jellycar", "JellyCar 1.5.4"),
-            test_app("com.liv-games.legendarywars", "Legendary Wars"),
-            test_app("jp.co.capcom.monhunipus", "Monster Hunter"),
-            test_app("com.playerx.pang", "Pang"),
-            test_app("com.rocketcat.QuickHook", "QuickHook"),
-            test_app("com.firemint.realracing", "Real Racing"),
-            test_app("com.firemint.realracinggti", "Real Racing GTI"),
-            test_app("com.madfingergames.shadowgun", "ShadowGun"),
-            test_app("com.oniricgames.silentswordszero", "Silent Swords Zero"),
-            test_app("com.joystickgenerals.STActionPig", "S.T. ActionPig"),
-            test_app("com.craneballs.stuntman", "SUPERFALL"),
-            test_app("com.touchfoo.swordigo", "Swordigo"),
-            test_app("com.digitalchocolate.iHouse", "TowerBloxx"),
-            test_app("com.universomo.TrenchBuild", "Trench Run"),
-            test_app("com.konami-euope.wireway", "Wire Way"),
-            test_app("9X8UEF6RBG.com.GrumpyFace.Wispin", "Wispin"),
-            test_app("com.sega.zaxxonescape", "Zaxxon"),
-            test_app("com.popcap.ios.ZumaHD", "Zuma HD"),
+    fn dev_249_test_batch_is_first_in_exact_alphabetical_order() {
+        let campaign = [
+            ("com.tobiapps.hundred-rooms", "100 Floors"),
+            ("com.geekbeach.amonsteratemyhomework", "A Monster Ate My Homework"),
+            ("com.gamevil.airpenguin", "Air Penguin"),
+            ("com.krome.boomerangblast", "B'Blast"),
+            ("com.babyninja.babyninja", "Baby Ninja"),
+            ("net.skyvu.battlebearsneg1", "Battle Bears -1"),
+            ("com.majesticsoftware.blot", "Blot"),
+            ("com.turner.bringmesandwiches", "Bring Me Sandwiches"),
+            ("com.digitalprunes.bungeeball2pro", "Bungee Ball"),
+            ("com.xmgstudio.cannoncadets", "Cannon Cadets"),
+            ("com.continuitygame.continuity2", "Continuity 2"),
+            ("com.tinkerhousegames.current", "Current"),
+            ("com.phosphor.pactgame", "Dark Meadow"),
+            ("com.galcon.idynamitejack", "Dynamite Jack"),
+            ("fieldrunners2.iphone", "Fieldrunners 2"),
+            ("com.robtop.magegame", "Forlorn"),
+            ("com.miniclip.fragger", "Fragger"),
+            ("com.namconetworks.galarg", "Galaga Remix"),
+            ("com.batteryacid.highwayrider", "Highway Rider"),
+            ("com.mixelweb.hillbillygreen", "Hill Billy"),
+            ("com.iugo.Implode", "Implode!"),
+            ("com.profusionstudios.istuntpro", "iStunt Reloaded Pro"),
+            ("jp.co.capcom.monhunipus", "Monster Hunter"),
+            ("com.medusa.oddysmogfinal", "Oddy Smog"),
+            ("com.playerx.pang", "Pang"),
+            ("com.popcap.Peggle", "Peggle"),
+            ("com.chillingo.roguesky", "Rogue Sky"),
+            ("com.joystickgenerals.STActionPig", "S.T. ActionPig"),
+            ("com.sega.spinball", "Sonic Spinball"),
+            ("com.mtvn.spongebobdinerdash", "SpongeBob Diner Dash"),
+            ("com.chillingo.spoing", "Spoing"),
+            ("com.touchfoo.swordigo", "Swordigo"),
+            ("com.digitalchocolate.iHouse", "Tower Blocks"),
+            ("com.universomo.TrenchBuild", "Trench Run"),
+            ("com.sega.virtuafighter2", "Virtua Fighter 2"),
+            ("com.konami-euope.wireway", "Wire Way"),
+            ("9X8UEF6RBG.com.GrumpyFace.Wispin", "Wispin"),
+            ("com.iugo.zombies2", "ZA! 2ndWave"),
+            ("com.gamedrs.zs", "ZombieSmash"),
+            ("com.popcap.ios.ZumaHD", "Zuma HD"),
         ];
+        let mut apps: Vec<AppInfo> = campaign
+            .iter()
+            .map(|&(identifier, name)| test_app(identifier, name))
+            .collect();
+        apps.push(test_app("unrelated.bundle", "AAA unrelated"));
         sort_picker_apps(&mut apps, &mut LibraryTiming::default());
         let names: Vec<&str> = apps
             .iter()
-            .take(34)
+            .take(campaign.len())
             .map(|app| app.display_name.as_str())
             .collect();
-        assert_eq!(
-            names,
-            [
-                "100 Floors",
-                "A Monster Ate My Homework",
-                "AC Rearmed",
-                "Air Penguin",
-                "Cannon Cadets",
-                "Current",
-                "Dynamite Jack",
-                "Fieldrunners 2",
-                "Flip's Escape",
-                "Forlorn",
-                "Gun Bros",
-                "Highway Rider",
-                "Implode!",
-                "iShoot 2",
-                "iStunt Reloaded Pro",
-                "Jelly Invaders",
-                "JellyCar 1.5.4",
-                "Legendary Wars",
-                "Monster Hunter",
-                "Pang",
-                "QuickHook",
-                "Real Racing",
-                "Real Racing GTI",
-                "S.T. ActionPig",
-                "ShadowGun",
-                "Silent Swords Zero",
-                "SUPERFALL",
-                "Swordigo",
-                "TowerBloxx",
-                "Trench Run",
-                "Wire Way",
-                "Wispin",
-                "Zaxxon",
-                "Zuma HD",
-            ]
-        );
+        let expected: Vec<&str> = campaign.iter().map(|&(_, name)| name).collect();
+        assert_eq!(names, expected);
     }
 
     #[test]

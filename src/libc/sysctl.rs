@@ -87,7 +87,7 @@ enum SysCtlNamePath {
 // Clippy complains about the type.
 // Below values corresponds to the original iPhone.
 // Reference https://www.mail-archive.com/misc@openbsd.org/msg80988.html
-static SYSCTL_VALUES: [(SysCtlNamePath, &str, SysInfoType); 22] = [
+static SYSCTL_VALUES: [(SysCtlNamePath, &str, SysInfoType); 23] = [
     // Generic CPU, I/O
     (SysCtlNamePath::Length2(CTL_HW, HW_MACHINE), "hw.machine", SysInfoType::String(b"iPhone1,1")),
     (SysCtlNamePath::Length2(CTL_HW, HW_MODEL), "hw.model", SysInfoType::String(b"M68AP")),
@@ -96,6 +96,9 @@ static SYSCTL_VALUES: [(SysCtlNamePath, &str, SysInfoType); 22] = [
     // an int. The emulated single-core iPhone therefore reports the same value
     // as hw.ncpu.
     (SysCtlNamePath::Undefined, "hw.activecpu", SysInfoType::Int32(1)),
+    // Darwin reports this maximum as a 32-bit integer. The emulated
+    // single-core device has one physical CPU available.
+    (SysCtlNamePath::Undefined, "hw.physicalcpu_max", SysInfoType::Int32(1)),
     // ARM1176JZF-S, used by the original iPhone model reported above, has a
     // 32-byte L1 cache line. Darwin exposes this value as an int.
     (SysCtlNamePath::Undefined, "hw.cachelinesize", SysInfoType::Int32(32)),
@@ -587,6 +590,27 @@ mod tests {
     fn active_cpu_reports_one_32_bit_guest_cpu() {
         let mut env = Environment::new_fake_for_test();
         let name = env.mem.alloc_and_write_cstr(b"hw.activecpu");
+        let output = env.mem.alloc(guest_size_of::<i32>());
+        let output_len = env.mem.alloc_and_write(guest_size_of::<i32>());
+        assert_eq!(
+            sysctlbyname(
+                &mut env,
+                name.cast_const(),
+                output,
+                output_len,
+                Ptr::null(),
+                0,
+            ),
+            0
+        );
+        assert_eq!(env.mem.read(output_len), guest_size_of::<i32>());
+        assert_eq!(env.mem.read(output.cast::<i32>()), 1);
+    }
+
+    #[test]
+    fn physical_cpu_max_reports_one_32_bit_guest_cpu() {
+        let mut env = Environment::new_fake_for_test();
+        let name = env.mem.alloc_and_write_cstr(b"hw.physicalcpu_max");
         let output = env.mem.alloc(guest_size_of::<i32>());
         let output_len = env.mem.alloc_and_write(guest_size_of::<i32>());
         assert_eq!(

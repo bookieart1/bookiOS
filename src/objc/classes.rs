@@ -658,6 +658,30 @@ impl ObjC {
     /// class lookup. It must not be interpreted as UIDocument functionality.
     pub fn register_diagnostic_uidocument(&mut self, mem: &mut Mem) -> Class {
         if let Some(class) = self.get_class("UIDocument", false, mem) {
+            if !self.is_unimplemented_class(class) {
+                return class;
+            }
+
+            // dyld may already have bound a class relocation to the placeholder.
+            // Upgrade that exact class/metaclass pair in place so both direct
+            // relocations and later name lookups observe the intervention.
+            let metaclass = Self::read_isa(class, mem);
+            let superclass = self.get_known_class("NSObject", mem);
+            let superclass_meta = self.link_class("NSObject", true, mem);
+            let class_host_object = Box::new(ClassHostObject::from_template(
+                &DIAGNOSTIC_UIDOCUMENT_TEMPLATE,
+                false,
+                superclass,
+                self,
+            ));
+            let metaclass_host_object = Box::new(ClassHostObject::from_template(
+                &DIAGNOSTIC_UIDOCUMENT_TEMPLATE,
+                true,
+                superclass_meta,
+                self,
+            ));
+            self.replace_static_object_host(class, class_host_object);
+            self.replace_static_object_host(metaclass, metaclass_host_object);
             return class;
         }
 
@@ -1338,6 +1362,23 @@ mod dev_244_tests {
         assert_eq!(host.name, "UIDocument");
         assert_eq!(host.superclass, expected_superclass);
         assert!(host.methods.is_empty());
+    }
+
+    #[test]
+    fn swordigo_uidocument_intervention_upgrades_an_existing_placeholder_in_place() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let placeholder = env.objc.link_class("UIDocument", false, &mut env.mem);
+        let metaclass = ObjC::read_isa(placeholder, &env.mem);
+        assert!(env.objc.is_unimplemented_class(placeholder));
+        assert!(env.objc.is_unimplemented_class(metaclass));
+
+        let upgraded = env.objc.register_diagnostic_uidocument(&mut env.mem);
+        assert_eq!(upgraded, placeholder);
+        assert!(!env.objc.is_unimplemented_class(upgraded));
+        assert!(!env.objc.is_unimplemented_class(metaclass));
+        let superclass = env.objc.borrow::<ClassHostObject>(upgraded).superclass;
+        let expected_superclass = env.objc.get_known_class("NSObject", &mut env.mem);
+        assert_eq!(superclass, expected_superclass);
     }
 }
 

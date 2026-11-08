@@ -7,7 +7,8 @@
 
 use super::cg_affine_transform::{CGAffineTransform, CGAffineTransformIdentity};
 use super::cg_color_space::{
-    kCGColorSpaceGenericGray, kCGColorSpaceGenericRGB, CGColorSpaceHostObject, CGColorSpaceRef,
+    get_static_color_space, kCGColorSpaceGenericGray, kCGColorSpaceGenericRGB,
+    CGColorSpaceHostObject, CGColorSpaceRef,
 };
 use super::cg_context::{
     blend_mode_name, kCGBlendModeClear, kCGBlendModeCopy, kCGBlendModeDarken, kCGBlendModeLighten,
@@ -183,6 +184,12 @@ fn CGBitmapContextGetBytesPerRow(env: &mut Environment, context: CGContextRef) -
 }
 
 pub fn CGBitmapContextCreateImage(env: &mut Environment, context: CGContextRef) -> CGImageRef {
+    // Core Graphics treats a NULL context as an invalid input and returns
+    // NULL. This is especially important after a rejected bitmap creation:
+    // callers must not turn that earlier validation result into a host panic.
+    if context.is_null() {
+        return Ptr::null();
+    }
     // TODO: Image::from_pixel_vec() should not exist, and this function should
     // support any bitmap format.
     let host_obj = env.objc.borrow::<CGContextHostObject>(context);
@@ -202,6 +209,26 @@ pub fn CGBitmapContextCreateImage(env: &mut Environment, context: CGContextRef) 
         {
             for &alpha in &row[..bitmap_data.width as usize] {
                 pixels.extend([0, 0, 0, alpha]);
+            }
+        }
+        return cg_image::from_image(
+            env,
+            Image::from_pixel_vec(pixels, (bitmap_data.width, bitmap_data.height)),
+        );
+    }
+    if bitmap_data.bits_per_component == 8
+        && bitmap_data.color_space == kCGColorSpaceGenericGray
+        && bitmap_data.alpha_info == kCGImageAlphaNone
+    {
+        let row_bytes = env.mem.bytes_at(
+            bitmap_data.data.cast(),
+            bitmap_data.bytes_per_row * bitmap_data.height,
+        );
+        let mut pixels =
+            Vec::with_capacity((bitmap_data.width * bitmap_data.height * 4) as usize);
+        for row in row_bytes.chunks(bitmap_data.bytes_per_row as usize) {
+            for &gray in &row[..bitmap_data.width as usize] {
+                pixels.extend([gray, gray, gray, 255]);
             }
         }
         return cg_image::from_image(
@@ -989,5 +1016,34 @@ mod blend_mode_tests {
             kCGImageAlphaOnly,
         );
         assert!(context.is_null());
+    }
+
+    #[test]
+    fn dev_249_create_image_returns_null_for_null_context() {
+        let mut env = Environment::new_fake_for_test();
+        assert!(CGBitmapContextCreateImage(&mut env, Ptr::null()).is_null());
+    }
+
+    #[test]
+    fn dev_249_opaque_generic_gray_snapshot_expands_to_rgba() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let data = env.mem.alloc(2);
+        env.mem.bytes_at_mut(data.cast(), 2).copy_from_slice(&[0x20, 0xe0]);
+        let gray = get_static_color_space(&mut env, kCGColorSpaceGenericGray);
+        let context = CGBitmapContextCreate(
+            &mut env,
+            data,
+            2,
+            1,
+            8,
+            2,
+            gray,
+            kCGImageAlphaNone,
+        );
+        let image = CGBitmapContextCreateImage(&mut env, context);
+        assert_eq!(
+            cg_image::borrow_image(&env.objc, image).pixels(),
+            [0x20, 0x20, 0x20, 0xff, 0xe0, 0xe0, 0xe0, 0xff]
+        );
     }
 }

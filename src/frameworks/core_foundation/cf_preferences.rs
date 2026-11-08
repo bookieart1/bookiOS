@@ -17,6 +17,17 @@ use crate::Environment;
 
 type CFPropertyListRef = CFTypeRef;
 
+fn is_current_application(env: &mut Environment, app_id: CFStringRef) -> bool {
+    if app_id == nil {
+        return false;
+    }
+    let current_app = ns_string::get_static_str(env, kCFPreferencesCurrentApplication);
+    if msg![env; app_id isEqualToString:current_app] {
+        return true;
+    }
+    ns_string::to_rust_string(env, app_id) == env.bundle.bundle_identifier()
+}
+
 fn copy_domain_keys(env: &mut Environment, domain: id) -> CFTypeRef {
     let keys: id = if domain == nil {
         msg_class![env; NSArray array]
@@ -31,11 +42,28 @@ fn CFPreferencesCopyAppValue(
     key: CFStringRef,
     app_id: CFStringRef,
 ) -> CFPropertyListRef {
-    let current_app = ns_string::get_static_str(env, kCFPreferencesCurrentApplication);
-    // TODO: handle other ids
-    assert!(msg![env; app_id isEqualToString:current_app]);
     let user_defaults: id = msg_class![env; NSUserDefaults standardUserDefaults];
-    let value: id = msg![env; user_defaults objectForKey:key];
+    let value: id = if is_current_application(env, app_id) {
+        msg![env; user_defaults objectForKey:key]
+    } else {
+        let domain: id = msg![env; user_defaults persistentDomainForName:app_id];
+        msg![env; domain objectForKey:key]
+    };
+    let current = is_current_application(env, app_id);
+    env.diagnostic_campaign_event(
+        "preferences",
+        "CFPreferencesCopyAppValue key,app,value,current",
+        [
+            key.to_bits(),
+            app_id.to_bits(),
+            value.to_bits(),
+            u32::from(current),
+            0,
+            0,
+            0,
+            0,
+        ],
+    );
     msg![env; value copy]
 }
 
@@ -46,17 +74,13 @@ fn CFPreferencesSetAppValue(
     app_id: CFStringRef,
 ) {
     assert!(!value.is_null()); // TODO
-    let current_app = ns_string::get_static_str(env, kCFPreferencesCurrentApplication);
-    // TODO: handle other ids
-    assert!(msg![env; app_id isEqualToString:current_app]);
+    assert!(is_current_application(env, app_id));
     let user_defaults: id = msg_class![env; NSUserDefaults standardUserDefaults];
     msg![env; user_defaults setObject:value forKey:key]
 }
 
 fn CFPreferencesAppSynchronize(env: &mut Environment, app_id: CFStringRef) -> bool {
-    let current_app = ns_string::get_static_str(env, kCFPreferencesCurrentApplication);
-    // TODO: handle other ids
-    assert!(msg![env; app_id isEqualToString:current_app]);
+    assert!(is_current_application(env, app_id));
     let user_defaults: id = msg_class![env; NSUserDefaults standardUserDefaults];
     msg![env; user_defaults synchronize]
 }
@@ -151,5 +175,15 @@ mod tests {
         assert!(msg![env; keys containsObject:key]);
         release(env, keys);
         release(env, domain);
+    }
+
+    #[test]
+    fn dev_249_bundle_identifier_is_the_current_preferences_domain() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        env.bundle.set_fake_identity_for_test();
+        let env = &mut env;
+        let bundle_identifier = env.bundle.bundle_identifier().to_owned();
+        let app_id = ns_string::from_rust_string(env, bundle_identifier);
+        assert!(is_current_application(env, app_id));
     }
 }

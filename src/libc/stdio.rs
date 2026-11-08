@@ -314,7 +314,11 @@ fn __srget(env: &mut Environment, file_ptr: MutPtr<FILE>) -> i32 {
 }
 
 fn ungetc(env: &mut Environment, c: i32, file_ptr: MutPtr<FILE>) -> i32 {
-    assert!(c != EOF); // TODO
+    // ISO C requires ungetc(EOF, stream) to fail and leave the stream
+    // unchanged. It is not a programming error and must not abort the host.
+    if c == EOF {
+        return EOF;
+    }
     _touchHLE_check_file_object_lock(env, file_ptr);
     let FILE { fd } = env.mem.read(file_ptr);
     let curr_offset = posix_io::lseek(env, fd, 0, SEEK_CUR);
@@ -868,6 +872,12 @@ mod tests {
         assert_eq!(setvbuf(&mut env, stream, Ptr::null(), _IONBF, 0), 0);
         assert_eq!(setvbuf(&mut env, stream, Ptr::null(), 99, 0), -1);
         assert_eq!(get_errno(&mut env), EINVAL);
+    }
+
+    #[test]
+    fn ungetc_eof_fails_without_touching_the_stream() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        assert_eq!(ungetc(&mut env, EOF, Ptr::null()), EOF);
     }
 
     #[test]

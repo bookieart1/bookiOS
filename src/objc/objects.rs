@@ -295,6 +295,24 @@ impl super::ObjC {
         );
     }
 
+    /// Replace only the host-side implementation of an existing static
+    /// object while preserving its guest address and `isa`. This is used by a
+    /// narrowly scoped diagnostic intervention after dyld has already bound a
+    /// class relocation to an unimplemented placeholder.
+    pub(super) fn replace_static_object_host(
+        &mut self,
+        guest_object: id,
+        host_object: Box<dyn AnyHostObject>,
+    ) {
+        let entry = self
+            .objects
+            .get_mut(&guest_object)
+            .expect("static object replacement requires an existing object");
+        assert!(entry.static_lifetime);
+        assert!(entry.refcount.is_none());
+        entry.host_object = host_object;
+    }
+
     /// Get a reference to a host object, if the object exists.
     pub fn get_host_object(&self, object: id) -> Option<&dyn AnyHostObject> {
         self.objects.get(&object).map(|entry| &*entry.host_object)

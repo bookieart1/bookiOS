@@ -131,7 +131,7 @@ impl Default for Options {
             // Keep the bounded survey recorder for every app. An explicit
             // --diagnostics=off remains available for controlled comparisons.
             diagnostics: true,
-            // Dev 2.48 is a combined compatibility/diagnostic revision. The
+            // Dev 2.49 is a combined compatibility/diagnostic revision. The
             // campaign recorder is passive and bounded; users can still pick
             // Off for a controlled comparison or the separate Swordigo
             // intervention explicitly.

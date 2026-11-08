@@ -64,6 +64,10 @@ pub(super) struct CALayerHostObject {
     /// The part of `contents` to show, in unit co-ordinates.
     pub(super) contents_rect: CGRect,
     pub(super) contents_gravity: ContentsGravity,
+    /// Optional media object retained by AVPlayerLayer. Core Animation owns
+    /// the storage so AVFoundation subclasses keep the exact CALayer host
+    /// representation required by inherited layer behavior.
+    media_player: id,
     /// For CAEAGLLayer only
     pub(super) drawable_properties: id,
     /// For CAEAGLLayer only (internal state for compositor)
@@ -212,6 +216,7 @@ pub const CLASSES: ClassExports = objc_classes! {
             size: CGSize { width: 1.0, height: 1.0 }
         },
         contents_gravity: ContentsGravity::Resize,
+        media_player: nil,
         drawable_properties: nil,
         presented_pixels: None,
         cg_context: None,
@@ -233,6 +238,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     let &mut CALayerHostObject {
         drawable_properties,
         contents,
+        media_player,
         superlayer,
         cg_context,
         ref mut sublayers,
@@ -246,6 +252,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     if contents != nil {
         release(env, contents);
+    }
+
+    if media_player != nil {
+        release(env, media_player);
     }
 
     if let Some(cg_context) = cg_context {
@@ -812,6 +822,20 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+pub(crate) fn media_player(env: &Environment, layer: id) -> id {
+    env.objc.borrow::<CALayerHostObject>(layer).media_player
+}
+
+pub(crate) fn set_media_player(env: &mut Environment, layer: id, player: id) {
+    let previous = env.objc.borrow::<CALayerHostObject>(layer).media_player;
+    if previous == player {
+        return;
+    }
+    retain(env, player);
+    env.objc.borrow_mut::<CALayerHostObject>(layer).media_player = player;
+    release(env, previous);
+}
 
 pub fn remove_anonymous_animation(env: &mut Environment, layer: id, animation: id) {
     let removed = env
