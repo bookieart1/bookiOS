@@ -1,0 +1,238 @@
+name: Process method pilot (disposable)
+
+on:
+  push:
+    branches:
+      - experiment/process-method-pilot-20261109
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: process-method-pilot-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  K1_BASE_COMMIT: 7fb8b64684af513cd2b341bbac0c4b3d2de9fe23
+  PILOT_CACHE_NAMESPACE: process-pilot-20261109-v1
+
+jobs:
+  library-tests:
+    name: Pilot library gates on remote macOS
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact source and recursive submodules
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Verify pilot scope and write preflight manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$GITHUB_REF_NAME" = "experiment/process-method-pilot-20261109"
+          git diff --exit-code "$K1_BASE_COMMIT" -- . \
+            ':(exclude).github/**' \
+            ':(exclude)src/frameworks/security/sec_item.rs'
+          git diff --unified=0 "$K1_BASE_COMMIT" -- src/frameworks/security/sec_item.rs > /tmp/sec-item-pilot.diff
+          if grep -E '^[+-]' /tmp/sec-item-pilot.diff \
+            | grep -Ev '^(---|\+\+\+)' \
+            | grep -Ev '^[+-][[:space:]]*// PROCESS-PILOT-[AB][[:space:]]*$' \
+            | grep -q .; then
+            echo "Non-comment K1 source change is outside pilot scope." >&2
+            cat /tmp/sec-item-pilot.diff >&2
+            exit 1
+          fi
+          mkdir -p build/process-pilot-evidence
+          {
+            echo "pilot=PILOT-01-WORKFLOW-CORE-20261109"
+            echo "commit=$GITHUB_SHA"
+            echo "run_id=$GITHUB_RUN_ID"
+            echo "run_attempt=$GITHUB_RUN_ATTEMPT"
+            echo "runner_os=$RUNNER_OS"
+            echo "runner_arch=$RUNNER_ARCH"
+            echo "cache_namespace=$PILOT_CACHE_NAMESPACE"
+            echo "k1_base=$K1_BASE_COMMIT"
+            echo "workflow_ref=$GITHUB_WORKFLOW_REF"
+            echo "submodules_begin"
+            git submodule status --recursive
+            echo "submodules_end"
+            echo "sec_item_sha256=$(shasum -a 256 src/frameworks/security/sec_item.rs | awk '{print $1}')"
+            echo "cargo_lock_sha256=$(shasum -a 256 Cargo.lock | awk '{print $1}')"
+          } > build/process-pilot-evidence/manifest-macos.txt
+          cp /tmp/sec-item-pilot.diff build/process-pilot-evidence/sec-item-allowlist.diff
+
+      - name: Restore CMake 3.31.6
+        id: cache-cmake
+        uses: actions/cache@v4
+        with:
+          path: vendor/cmake
+          key: cmake_3_31_6_macos
+
+      - name: Download CMake 3.31.6
+        if: ${{ steps.cache-cmake.outputs.cache-hit != 'true' }}
+        run: curl -L -O "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-macos-universal.tar.gz"
+
+      - name: Extract CMake 3.31.6
+        if: ${{ steps.cache-cmake.outputs.cache-hit != 'true' }}
+        run: tar xzvf "cmake-3.31.6-macos-universal.tar.gz" -C vendor && mv "vendor/cmake-3.31.6-macos-universal/CMake.app/Contents/" vendor/cmake && rm -rf vendor/cmake-3.31.6-macos-universal
+
+      - name: Install x86_64 Apple test target
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Restore pilot macOS dependency target
+        id: restore-pilot-cache
+        if: ${{ github.run_attempt != 1 || !contains(github.event.head_commit.message, '[pilot-cold]') }}
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ env.PILOT_CACHE_NAMESPACE }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Record cache disposition
+        shell: bash
+        run: |
+          {
+            echo "cold_control=${{ github.run_attempt == 1 && contains(github.event.head_commit.message, '[pilot-cold]') }}"
+            echo "pilot_cache_hit=${{ steps.restore-pilot-cache.outputs.cache-hit }}"
+            echo "cmake_cache_hit=${{ steps.cache-cmake.outputs.cache-hit }}"
+          } >> build/process-pilot-evidence/manifest-macos.txt
+
+      - name: Run focused K1 contract tests
+        run: cargo test --lib --target x86_64-apple-darwin frameworks::security::sec_item::tests:: -- --nocapture
+        env:
+          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+
+      - name: Run complete required library suite
+        run: cargo test --lib --target x86_64-apple-darwin
+        env:
+          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+
+      - name: Save cold-control macOS dependency target
+        if: ${{ success() && github.run_attempt == 1 && contains(github.event.head_commit.message, '[pilot-cold]') }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ env.PILOT_CACHE_NAMESPACE }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Upload macOS gate evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: process-pilot-macos-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: build/process-pilot-evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-experimental-executable:
+    name: Pilot gated Windows artifact
+    needs: library-tests
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - name: Check out exact source and recursive submodules
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Verify pilot scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --exit-code "$K1_BASE_COMMIT" -- . \
+            ':(exclude).github/**' \
+            ':(exclude)src/frameworks/security/sec_item.rs'
+          git diff --unified=0 "$K1_BASE_COMMIT" -- src/frameworks/security/sec_item.rs > "$RUNNER_TEMP/sec-item-pilot.diff"
+          if grep -E '^[+-]' "$RUNNER_TEMP/sec-item-pilot.diff" \
+            | grep -Ev '^(---|\+\+\+)' \
+            | grep -Ev '^[+-][[:space:]]*// PROCESS-PILOT-[AB][[:space:]]*$' \
+            | grep -q .; then
+            echo "Non-comment K1 source change is outside pilot scope." >&2
+            exit 1
+          fi
+
+      - name: Restore CMake 3.31.6
+        id: cache-cmake
+        uses: actions/cache@v4
+        with:
+          path: vendor/cmake
+          key: cmake_3_31_6_windows
+
+      - name: Download CMake 3.31.6
+        if: ${{ steps.cache-cmake.outputs.cache-hit != 'true' }}
+        run: curl -L -O "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip"
+
+      - name: Extract CMake 3.31.6
+        if: ${{ steps.cache-cmake.outputs.cache-hit != 'true' }}
+        run: 7z -ovendor x "cmake-3.31.6-windows-x86_64.zip" && ren vendor\cmake-3.31.6-windows-x86_64 cmake
+
+      - name: Restore pilot Windows dependency target
+        id: restore-pilot-cache
+        if: ${{ github.run_attempt != 1 || !contains(github.event.head_commit.message, '[pilot-cold]') }}
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ env.PILOT_CACHE_NAMESPACE }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Build disposable release executable
+        run: cargo build --release
+        env:
+          CMAKE: ${{ github.workspace }}\vendor\cmake\bin\cmake
+
+      - name: Write immutable artifact identity
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path build\process-pilot-windows -Force | Out-Null
+          Copy-Item target\release\touchHLE.exe build\process-pilot-windows\touchHLE-openfeint-k1-pilot.exe
+          @"
+          pilot=PILOT-01-WORKFLOW-CORE-20261109
+          commit=$env:GITHUB_SHA
+          run_id=$env:GITHUB_RUN_ID
+          run_attempt=$env:GITHUB_RUN_ATTEMPT
+          k1_base=$env:K1_BASE_COMMIT
+          cache_namespace=$env:PILOT_CACHE_NAMESPACE
+          pilot_cache_hit=${{ steps.restore-pilot-cache.outputs.cache-hit }}
+          cmake_cache_hit=${{ steps.cache-cmake.outputs.cache-hit }}
+          profile=guest-local-init-v1
+          security_contract=keychain-k1-internet-password
+          network_default=disabled
+          local_compilation=none
+          "@ | Set-Content -Encoding utf8 build\process-pilot-windows\MANIFEST.txt
+          Get-FileHash -Algorithm SHA256 build\process-pilot-windows\touchHLE-openfeint-k1-pilot.exe |
+            ForEach-Object { "$($_.Hash.ToLowerInvariant())  touchHLE-openfeint-k1-pilot.exe" } |
+            Set-Content -Encoding ascii build\process-pilot-windows\SHA256.txt
+
+      - name: Save cold-control Windows dependency target
+        if: ${{ success() && github.run_attempt == 1 && contains(github.event.head_commit.message, '[pilot-cold]') }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ env.PILOT_CACHE_NAMESPACE }}-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Upload immutable disposable Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: process-pilot-windows-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: build/process-pilot-windows/
+          if-no-files-found: error
+          retention-days: 14
+
