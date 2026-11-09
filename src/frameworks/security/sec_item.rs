@@ -286,6 +286,9 @@ fn load_store(env: &Environment) -> StoreFile {
 
 fn save_store(env: &mut Environment, store: &mut StoreFile) -> Result<(), OSStatus> {
     let directory = store_directory(env);
+    env.fs
+        .create_dir_all(&directory)
+        .map_err(|_| ERR_SEC_PARAM)?;
     let old_generation = store.generation;
     store.generation = old_generation.checked_add(1).ok_or(ERR_SEC_PARAM)?;
     let mut bytes = Vec::new();
