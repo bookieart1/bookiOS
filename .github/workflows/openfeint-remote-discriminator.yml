@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - experiment/openfeint-local-init-20261109
+      - experiment/openfeint-keychain-k1-20261109
 
 permissions:
   contents: read
@@ -97,6 +98,7 @@ jobs:
           @"
           commit=$env:GITHUB_SHA
           profile=guest-local-init-v1
+          security_contract=keychain-k1-internet-password
           network_default=disabled
           exact_packages=com.rocketcat.HookWorld,com.fireflame.DungeonRaid,com.turner.RobotUnicorn
           local_compilation=none
