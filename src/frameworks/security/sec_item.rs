@@ -138,7 +138,7 @@ fn optional_string(
     if !is_instance_of(env, object, "NSString") {
         return Err(ERR_SEC_PARAM);
     }
-    Ok(Some(ns_string::to_rust_string(env, object)))
+    Ok(Some(ns_string::to_rust_string(env, object).into_owned()))
 }
 
 fn optional_data(
@@ -320,7 +320,7 @@ fn k1_enabled(env: &Environment) -> bool {
     {
         enabled
             || (env.options.openfeint_compatibility_profile
-                == OpenFeintCompatibilityProfile::GuestLocalInitV1
+                == crate::options::OpenFeintCompatibilityProfile::GuestLocalInitV1
                 && env.bundle.bundle_identifier() == "com.touchhle.test")
     }
     #[cfg(not(test))]
@@ -547,7 +547,7 @@ mod tests {
         assert_ne!(returned, nil);
         assert_eq!(copied_bytes(&mut env, returned), b"token-1");
         release(&mut env, returned);
-        env.mem.free(result);
+        env.mem.free(result.cast());
 
         let delete = query(&mut env, "player", "api.openfeint.com", None);
         assert_eq!(SecItemDelete(&mut env, delete), ERR_SEC_SUCCESS);
@@ -558,7 +558,7 @@ mod tests {
             ERR_SEC_ITEM_NOT_FOUND
         );
         assert_eq!(env.mem.read(result), nil);
-        env.mem.free(result);
+        env.mem.free(result.cast());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -583,7 +583,7 @@ mod tests {
             let returned = env.mem.read(result);
             assert_eq!(copied_bytes(&mut env, returned), b"saved");
             release(&mut env, returned);
-            env.mem.free(result);
+            env.mem.free(result.cast());
         }
         {
             let mut env = env_for(&root_b);
@@ -595,7 +595,7 @@ mod tests {
                 ERR_SEC_ITEM_NOT_FOUND
             );
             assert_eq!(env.mem.read(result), nil);
-            env.mem.free(result);
+            env.mem.free(result.cast());
         }
         std::fs::remove_dir_all(root_a).unwrap();
         std::fs::remove_dir_all(root_b).unwrap();
@@ -606,10 +606,10 @@ mod tests {
         let root = test_root("invalid");
         let mut env = env_for(&root);
         assert_eq!(SecItemAdd(&mut env, nil, MutPtr::null()), ERR_SEC_PARAM);
-        let dictionary: id = msg_class![env; NSMutableDictionary new];
+        let dictionary: id = msg_class![&mut env; NSMutableDictionary new];
         let class_key = k(&mut env, K_SEC_CLASS);
         let unsupported = ns_string::from_rust_string(&mut env, "genp".to_owned());
-        () = msg![env; dictionary setObject:unsupported forKey:class_key];
+        () = msg![&mut env; dictionary setObject:unsupported forKey:class_key];
         assert_eq!(
             SecItemAdd(&mut env, dictionary, MutPtr::null()),
             ERR_SEC_UNIMPLEMENTED
