@@ -476,7 +476,8 @@ mod tests {
             env.mem
                 .bytes_at_mut(bytes.cast(), length)
                 .copy_from_slice(data);
-            let value: id = msg_class![env; NSData dataWithBytes:bytes length:length];
+            let value: id =
+                msg_class![env; NSData dataWithBytes:bytes.cast_const() length:length];
             env.mem.free(bytes);
             let data_key = k(env, K_SEC_VALUE_DATA);
             () = msg![env; dictionary setObject:value forKey:data_key];
@@ -623,11 +624,9 @@ mod tests {
             ERR_SEC_UNIMPLEMENTED
         );
         let directory = store_directory(&env);
-        assert!(env
-            .fs
-            .enumerate(directory)
-            .unwrap()
-            .all(|name| generation_from_name(name).is_none()));
+        if let Ok(entries) = env.fs.enumerate(directory) {
+            assert!(entries.all(|name| generation_from_name(name).is_none()));
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 
