@@ -624,7 +624,7 @@ mod tests {
             ERR_SEC_UNIMPLEMENTED
         );
         let directory = store_directory(&env);
-        if let Ok(entries) = env.fs.enumerate(directory) {
+        if let Ok(mut entries) = env.fs.enumerate(directory) {
             assert!(entries.all(|name| generation_from_name(name).is_none()));
         }
         std::fs::remove_dir_all(root).unwrap();
