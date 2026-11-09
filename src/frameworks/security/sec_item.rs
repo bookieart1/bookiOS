@@ -493,6 +493,14 @@ mod tests {
         () = msg![env; dictionary setObject:limit_one forKey:limit_key];
     }
 
+    fn empty_dictionary(env: &mut Environment) -> id {
+        msg_class![env; NSMutableDictionary new]
+    }
+
+    fn set_object(env: &mut Environment, dictionary: id, object: id, key: id) {
+        () = msg![env; dictionary setObject:object forKey:key];
+    }
+
     fn copied_bytes(env: &mut Environment, data: id) -> Vec<u8> {
         let length: NSUInteger = msg![env; data length];
         if length == 0 {
@@ -606,10 +614,10 @@ mod tests {
         let root = test_root("invalid");
         let mut env = env_for(&root);
         assert_eq!(SecItemAdd(&mut env, nil, MutPtr::null()), ERR_SEC_PARAM);
-        let dictionary: id = msg_class![&mut env; NSMutableDictionary new];
+        let dictionary = empty_dictionary(&mut env);
         let class_key = k(&mut env, K_SEC_CLASS);
         let unsupported = ns_string::from_rust_string(&mut env, "genp".to_owned());
-        () = msg![&mut env; dictionary setObject:unsupported forKey:class_key];
+        set_object(&mut env, dictionary, unsupported, class_key);
         assert_eq!(
             SecItemAdd(&mut env, dictionary, MutPtr::null()),
             ERR_SEC_UNIMPLEMENTED
