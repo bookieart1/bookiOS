@@ -14,7 +14,7 @@ use crate::frameworks::foundation::ns_run_loop::{
 };
 use crate::libc::sys::socket::sockaddr;
 use crate::mem::{ConstPtr, MutPtr, MutVoidPtr, Ptr, SafeRead};
-use crate::objc::{msg, nil, objc_classes, Class, ClassExports, HostObject, SEL};
+use crate::objc::{id, msg, nil, objc_classes, Class, ClassExports, HostObject, SEL};
 use crate::Environment;
 use std::net::SocketAddrV4;
 
