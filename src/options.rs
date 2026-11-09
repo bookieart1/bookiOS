@@ -71,6 +71,37 @@ pub enum UserDefaultsCompatibilityProfile {
     Rfq10B500OldLinkedV1,
 }
 
+/// Selects an explicitly bounded OpenFeint class-loading experiment.
+///
+/// Dev 2.47 normally replaces guest classes whose names start with
+/// `OpenFeint` with nil-like fakes. The experimental profile permits the
+/// original guest classes to load, but only for the exact package identities
+/// named here. Network access remains controlled independently and is off by
+/// default.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub enum OpenFeintCompatibilityProfile {
+    #[default]
+    Baseline,
+    GuestLocalInitV1,
+}
+
+impl OpenFeintCompatibilityProfile {
+    pub fn guest_local_init_for_bundle(self, bundle_identifier: &str) -> bool {
+        self == Self::GuestLocalInitV1
+            && matches!(
+                bundle_identifier,
+                "com.rocketcat.HookWorld" | "com.fireflame.DungeonRaid" | "com.turner.RobotUnicorn"
+            )
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Baseline => "baseline",
+            Self::GuestLocalInitV1 => "guest-local-init-v1",
+        }
+    }
+}
+
 impl UserDefaultsCompatibilityProfile {
     pub fn rfq_snapshot_and_mutable_reload(self) -> bool {
         self == Self::Rfq10B500OldLinkedV1
@@ -91,6 +122,7 @@ pub struct Options {
     pub diagnostic_campaign: DiagnosticCampaign,
     pub diagnostic_watch_addresses: Vec<u32>,
     pub user_defaults_compatibility_profile: UserDefaultsCompatibilityProfile,
+    pub openfeint_compatibility_profile: OpenFeintCompatibilityProfile,
     pub fullscreen: bool,
     pub device_family: Option<DeviceFamily>,
     pub initial_orientation: DeviceOrientation,
@@ -158,6 +190,7 @@ impl Default for Options {
             diagnostic_campaign: DiagnosticCampaign::Off,
             diagnostic_watch_addresses: Vec::new(),
             user_defaults_compatibility_profile: UserDefaultsCompatibilityProfile::Baseline,
+            openfeint_compatibility_profile: OpenFeintCompatibilityProfile::Baseline,
         }
     }
 }
@@ -323,6 +356,16 @@ impl Options {
                             .into(),
                     ),
                 };
+        } else if let Some(value) = arg.strip_prefix("--openfeint-profile=") {
+            self.openfeint_compatibility_profile = match value {
+                "baseline" => OpenFeintCompatibilityProfile::Baseline,
+                "guest-local-init-v1" => OpenFeintCompatibilityProfile::GuestLocalInitV1,
+                _ => {
+                    return Err(
+                        "Expected --openfeint-profile=baseline or guest-local-init-v1".into(),
+                    )
+                }
+            };
         } else if let Some(address) = arg.strip_prefix("--gdb=") {
             let addrs = address
                 .to_socket_addrs()
@@ -530,6 +573,54 @@ mod tests {
         assert_eq!(
             untouched_other_app.user_defaults_compatibility_profile,
             UserDefaultsCompatibilityProfile::Baseline
+        );
+    }
+
+    #[test]
+    fn openfeint_profile_is_explicit_default_off_and_exact_package_scoped() {
+        let mut options = Options::default();
+        assert_eq!(
+            options.openfeint_compatibility_profile,
+            OpenFeintCompatibilityProfile::Baseline
+        );
+        assert!(!options
+            .openfeint_compatibility_profile
+            .guest_local_init_for_bundle("com.rocketcat.HookWorld"));
+
+        assert_eq!(
+            options.parse_argument("--openfeint-profile=guest-local-init-v1"),
+            Ok(true)
+        );
+        assert_eq!(
+            options.openfeint_compatibility_profile.as_str(),
+            "guest-local-init-v1"
+        );
+        assert!(options
+            .openfeint_compatibility_profile
+            .guest_local_init_for_bundle("com.rocketcat.HookWorld"));
+        assert!(options
+            .openfeint_compatibility_profile
+            .guest_local_init_for_bundle("com.fireflame.DungeonRaid"));
+        assert!(options
+            .openfeint_compatibility_profile
+            .guest_local_init_for_bundle("com.turner.RobotUnicorn"));
+        assert!(!options
+            .openfeint_compatibility_profile
+            .guest_local_init_for_bundle("com.example.Unrelated"));
+        assert!(!options
+            .openfeint_compatibility_profile
+            .guest_local_init_for_bundle("com.rocketcat.HookWorld.copy"));
+
+        assert!(options
+            .parse_argument("--openfeint-profile=unknown")
+            .is_err());
+        assert_eq!(
+            options.parse_argument("--openfeint-profile=baseline"),
+            Ok(true)
+        );
+        assert_eq!(
+            options.openfeint_compatibility_profile,
+            OpenFeintCompatibilityProfile::Baseline
         );
     }
 }

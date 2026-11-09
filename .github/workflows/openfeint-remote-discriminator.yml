@@ -1,0 +1,114 @@
+name: OpenFeint remote discriminator
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment/openfeint-local-init-20261109
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openfeint-remote-discriminator-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  library-tests:
+    name: Library tests on remote macOS
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - name: Check out the exact source and submodules
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Verify exact candidate commit
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Restore CMake 3.31.6
+        id: cache-cmake
+        uses: actions/cache@v4
+        with:
+          path: vendor/cmake
+          key: cmake_3_31_6_macos
+
+      - name: Download CMake 3.31.6
+        if: ${{ steps.cache-cmake.outputs.cache-hit != 'true' }}
+        run: curl -L -O "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-macos-universal.tar.gz"
+
+      - name: Extract CMake 3.31.6
+        if: ${{ steps.cache-cmake.outputs.cache-hit != 'true' }}
+        run: tar xzvf "cmake-3.31.6-macos-universal.tar.gz" -C vendor && mv "vendor/cmake-3.31.6-macos-universal/CMake.app/Contents/" vendor/cmake && rm -rf vendor/cmake-3.31.6-macos-universal
+
+      - name: Install the x86_64 test target
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Run the complete library test suite
+        run: cargo test --lib --target x86_64-apple-darwin
+        env:
+          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+
+  windows-experimental-executable:
+    name: Build disposable Windows executable remotely
+    needs: library-tests
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - name: Check out the exact source and submodules
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Verify exact candidate commit
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Restore CMake 3.31.6
+        id: cache-cmake
+        uses: actions/cache@v4
+        with:
+          path: vendor/cmake
+          key: cmake_3_31_6_windows
+
+      - name: Download CMake 3.31.6
+        if: ${{ steps.cache-cmake.outputs.cache-hit != 'true' }}
+        run: curl -L -O "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip"
+
+      - name: Extract CMake 3.31.6
+        if: ${{ steps.cache-cmake.outputs.cache-hit != 'true' }}
+        run: 7z -ovendor x "cmake-3.31.6-windows-x86_64.zip" && ren vendor\cmake-3.31.6-windows-x86_64 cmake
+
+      - name: Build the disposable release executable
+        run: cargo build --release
+        env:
+          CMAKE: ${{ github.workspace }}\vendor\cmake\bin\cmake
+
+      - name: Write experiment identity
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path build\openfeint-experiment -Force | Out-Null
+          Copy-Item target\release\touchHLE.exe build\openfeint-experiment\touchHLE-openfeint-experiment.exe
+          @"
+          commit=$env:GITHUB_SHA
+          profile=guest-local-init-v1
+          network_default=disabled
+          exact_packages=com.rocketcat.HookWorld,com.fireflame.DungeonRaid,com.turner.RobotUnicorn
+          local_compilation=none
+          "@ | Set-Content -Encoding utf8 build\openfeint-experiment\EXPERIMENT.txt
+          Get-FileHash -Algorithm SHA256 build\openfeint-experiment\touchHLE-openfeint-experiment.exe |
+            ForEach-Object { "$($_.Hash.ToLowerInvariant())  touchHLE-openfeint-experiment.exe" } |
+            Set-Content -Encoding ascii build\openfeint-experiment\SHA256.txt
+
+      - name: Upload the disposable executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: openfeint-discriminator-windows-${{ github.sha }}
+          path: build/openfeint-experiment/
+          if-no-files-found: error
+          retention-days: 7

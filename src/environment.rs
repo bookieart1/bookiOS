@@ -636,7 +636,23 @@ impl Environment {
         }
         mem.configure_guest_write_watches(&options.diagnostic_watch_addresses);
         let mut dyld = dyld::Dyld::new();
-        dyld.do_initial_linking(&bins, &mut mem, &mut objc, diagnostics.as_deref_mut())?;
+        let allow_guest_openfeint = options
+            .openfeint_compatibility_profile
+            .guest_local_init_for_bundle(bundle.bundle_identifier());
+        if allow_guest_openfeint {
+            echo!(
+                "OpenFeint experiment: loading guest OpenFeint classes for exact package {} with network access {}",
+                bundle.bundle_identifier(),
+                if options.network_access { "enabled" } else { "disabled" }
+            );
+        }
+        dyld.do_initial_linking(
+            &bins,
+            &mut mem,
+            &mut objc,
+            diagnostics.as_deref_mut(),
+            allow_guest_openfeint,
+        )?;
 
         let use_direct_memory_access =
             options.direct_memory_access && options.diagnostic_watch_addresses.is_empty();
@@ -3118,7 +3134,8 @@ mod dylib_sorting_tests {
             let mut objc = ObjC::new();
             let mut dyld = crate::dyld::Dyld::new();
             let bins = [libgcc, libstdcxx];
-            dyld.do_initial_linking(&bins, &mut mem, &mut objc, None).unwrap();
+            dyld.do_initial_linking(&bins, &mut mem, &mut objc, None, false)
+                .unwrap();
 
             let mut cpu = Cpu::new(None);
             cpu.regs_mut()[Cpu::SP] = 0xFFFFF000;
