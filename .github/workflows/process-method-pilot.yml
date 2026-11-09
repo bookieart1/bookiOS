@@ -87,7 +87,6 @@ jobs:
 
       - name: Restore pilot macOS dependency target
         id: restore-pilot-cache
-        if: ${{ github.run_attempt != 1 || !contains(github.event.head_commit.message, '[pilot-cold]') }}
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -100,7 +99,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo "cold_control=${{ github.run_attempt == 1 && contains(github.event.head_commit.message, '[pilot-cold]') }}"
+            echo "cold_control=${{ steps.restore-pilot-cache.outputs.cache-hit != 'true' && contains(github.event.head_commit.message, '[pilot-cold]') }}"
             echo "pilot_cache_hit=${{ steps.restore-pilot-cache.outputs.cache-hit }}"
             echo "cmake_cache_hit=${{ steps.cache-cmake.outputs.cache-hit }}"
           } >> build/process-pilot-evidence/manifest-macos.txt
@@ -117,7 +116,7 @@ jobs:
           CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
 
       - name: Save cold-control macOS dependency target
-        if: ${{ success() && github.run_attempt == 1 && contains(github.event.head_commit.message, '[pilot-cold]') }}
+        if: ${{ success() && steps.restore-pilot-cache.outputs.cache-hit != 'true' && contains(github.event.head_commit.message, '[pilot-cold]') }}
         uses: actions/cache/save@v4
         with:
           path: |
@@ -182,7 +181,6 @@ jobs:
 
       - name: Restore pilot Windows dependency target
         id: restore-pilot-cache
-        if: ${{ github.run_attempt != 1 || !contains(github.event.head_commit.message, '[pilot-cold]') }}
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -220,7 +218,7 @@ jobs:
             Set-Content -Encoding ascii build\process-pilot-windows\SHA256.txt
 
       - name: Save cold-control Windows dependency target
-        if: ${{ success() && github.run_attempt == 1 && contains(github.event.head_commit.message, '[pilot-cold]') }}
+        if: ${{ success() && steps.restore-pilot-cache.outputs.cache-hit != 'true' && contains(github.event.head_commit.message, '[pilot-cold]') }}
         uses: actions/cache/save@v4
         with:
           path: |
