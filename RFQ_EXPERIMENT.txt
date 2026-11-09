@@ -1,11 +1,13 @@
 Historical iOS Compatibility Laboratory
-RFQ A1+A2 experimental iDared build
+RFQ A1+A2 Pang-forced successor experimental build
 
 Baseline: Dev 2.47
 Baseline commit: bd899be66e3c1ba2859108057f39ebd277e44879
 Profile: rfq-10b500-old-linked-v1
 Profile default: off
-Automatic activation: org.historicalioslab.rfq01r and com.rocketcat.QuickHook only
+Automatic activation: org.historicalioslab.rfq01r, com.rocketcat.QuickHook, and com.playerx.pang only
 Production status: experimental; not approved for merge or release
-Build branch: experiment/rfq-a1a2-20261109
+Experiment: SD-019 Pang forced-profile save/relaunch discriminator
+Predecessor commit: 24ac353f6b573419d46540d5a31a92be78e05c1b
+Build branch: experiment/rfq-pang-forced-20261109
 Packaging date: 2026-11-09

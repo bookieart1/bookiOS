@@ -67,7 +67,10 @@ com.naughtybits.iShoot2: --diagnostic-campaign=level3-provenance
 pl.idreams.jellyinvaders: --diagnostic-campaign=level3-provenance
 com.liv-games.legendarywars: --diagnostic-campaign=level3-provenance
 jp.co.capcom.monhunipus: --diagnostic-campaign=level3-provenance --diagnostic-watch-addresses=0x00334f8c
-com.playerx.pang: --diagnostic-campaign=level3-provenance
+# SD-019 bounded generalization discriminator: keep the existing passive
+# diagnostics and deliberately enable A1/A2 for Pang only in this successor
+# experimental build. No other control bundle is added to the profile.
+com.playerx.pang: --diagnostic-campaign=level3-provenance --ns-user-defaults-profile=rfq-10b500-old-linked-v1
 com.madfingergames.shadowgun: --diagnostic-campaign=level3-provenance
 com.oniricgames.silentswordszero: --diagnostic-campaign=level3-provenance
 com.rocketcat.QuickHook: --diagnostic-campaign=level3-provenance --ns-user-defaults-profile=rfq-10b500-old-linked-v1

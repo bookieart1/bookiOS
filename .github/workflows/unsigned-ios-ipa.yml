@@ -6,7 +6,7 @@ name: Build unsigned development IPA
 on:
   push:
     branches:
-      - experiment/rfq-a1a2-20261109
+      - experiment/rfq-pang-forced-20261109
   # Ordinary development pushes reach this workflow only after the caller's
   # fast macOS preflight succeeds. Manual runs remain available for preserved
   # milestone/recovery builds.
@@ -220,17 +220,17 @@ jobs:
 
           (
             cd build
-            /usr/bin/zip -qry iDared-RFQ-A1A2-unsigned.ipa Payload
+            /usr/bin/zip -qry iDared-RFQ-PangForced-unsigned.ipa Payload
           )
 
-          test -s build/iDared-RFQ-A1A2-unsigned.ipa
-          shasum -a 256 build/iDared-RFQ-A1A2-unsigned.ipa
+          test -s build/iDared-RFQ-PangForced-unsigned.ipa
+          shasum -a 256 build/iDared-RFQ-PangForced-unsigned.ipa
 
       - name: Upload the separate unsigned IPA
         uses: actions/upload-artifact@v7
         with:
-          name: iDared-RFQ-A1A2-unsigned-${{ github.sha }}
-          path: build/iDared-RFQ-A1A2-unsigned.ipa
+          name: iDared-RFQ-PangForced-unsigned-${{ github.sha }}
+          path: build/iDared-RFQ-PangForced-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
 
