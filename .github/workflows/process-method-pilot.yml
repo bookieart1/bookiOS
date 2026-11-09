@@ -106,7 +106,8 @@ jobs:
           } >> build/process-pilot-evidence/manifest-macos.txt
 
       - name: Run focused K1 contract tests
-        run: cargo test --lib --target x86_64-apple-darwin frameworks::security::sec_item::tests:: -- --nocapture
+        run: |
+          cargo test --lib --target x86_64-apple-darwin frameworks::security::sec_item::tests:: -- --nocapture
         env:
           CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
 
