@@ -476,8 +476,8 @@ mod tests {
             env.mem
                 .bytes_at_mut(bytes.cast(), length)
                 .copy_from_slice(data);
-            let value: id =
-                msg_class![env; NSData dataWithBytes:bytes.cast_const() length:length];
+            let const_bytes = bytes.cast_const();
+            let value: id = msg_class![env; NSData dataWithBytes:const_bytes length:length];
             env.mem.free(bytes);
             let data_key = k(env, K_SEC_VALUE_DATA);
             () = msg![env; dictionary setObject:value forKey:data_key];
