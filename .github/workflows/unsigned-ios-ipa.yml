@@ -4,6 +4,9 @@ name: Build unsigned development IPA
 # development branch below and install beside the App Store application.
 
 on:
+  push:
+    branches:
+      - experiment/rfq-a1a2-20261109
   # Ordinary development pushes reach this workflow only after the caller's
   # fast macOS preflight succeeds. Manual runs remain available for preserved
   # milestone/recovery builds.
@@ -35,8 +38,8 @@ env:
   DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
   # These are command-line build overrides only. The Xcode project keeps its
   # original App Store identity, while this development IPA installs beside it.
-  DEV_BUNDLE_ID: com.bookieart1.idared32bit.dev
-  DEV_DISPLAY_NAME: iDared Dev
+  DEV_BUNDLE_ID: com.bookieart1.idared32bit.rfqexp
+  DEV_DISPLAY_NAME: iDared RFQ Exp
 
 jobs:
   build-unsigned-ipa:
@@ -196,12 +199,14 @@ jobs:
           set -euo pipefail
 
           APP_PATH="$RUNNER_TEMP/iDared32bit.xcarchive/Products/Applications/iDared 32bit.app"
+          cp RFQ_EXPERIMENT.txt "$APP_PATH/RFQ_EXPERIMENT.txt"
           ACTUAL_BUNDLE_ID="$(plutil -extract CFBundleIdentifier raw "$APP_PATH/Info.plist")"
           ACTUAL_DISPLAY_NAME="$(plutil -extract CFBundleDisplayName raw "$APP_PATH/Info.plist")"
 
           test -d "$APP_PATH"
           test "$ACTUAL_BUNDLE_ID" = "$DEV_BUNDLE_ID"
           test "$ACTUAL_DISPLAY_NAME" = "$DEV_DISPLAY_NAME"
+          cmp RFQ_EXPERIMENT.txt "$APP_PATH/RFQ_EXPERIMENT.txt"
           test ! -e "$APP_PATH/embedded.mobileprovision"
 
           if codesign -dv "$APP_PATH" >/dev/null 2>&1; then
@@ -215,17 +220,17 @@ jobs:
 
           (
             cd build
-            /usr/bin/zip -qry iDared32bit-dev-unsigned.ipa Payload
+            /usr/bin/zip -qry iDared-RFQ-A1A2-unsigned.ipa Payload
           )
 
-          test -s build/iDared32bit-dev-unsigned.ipa
-          shasum -a 256 build/iDared32bit-dev-unsigned.ipa
+          test -s build/iDared-RFQ-A1A2-unsigned.ipa
+          shasum -a 256 build/iDared-RFQ-A1A2-unsigned.ipa
 
       - name: Upload the separate unsigned IPA
         uses: actions/upload-artifact@v7
         with:
-          name: iDared32bit-dev-unsigned-${{ github.sha }}
-          path: build/iDared32bit-dev-unsigned.ipa
+          name: iDared-RFQ-A1A2-unsigned-${{ github.sha }}
+          path: build/iDared-RFQ-A1A2-unsigned.ipa
           if-no-files-found: error
           retention-days: 14
 

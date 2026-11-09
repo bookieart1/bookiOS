@@ -1,0 +1,11 @@
+Historical iOS Compatibility Laboratory
+RFQ A1+A2 experimental iDared build
+
+Baseline: Dev 2.47
+Baseline commit: bd899be66e3c1ba2859108057f39ebd277e44879
+Profile: rfq-10b500-old-linked-v1
+Profile default: off
+Automatic activation: org.historicalioslab.rfq01r and com.rocketcat.QuickHook only
+Production status: experimental; not approved for merge or release
+Build branch: experiment/rfq-a1a2-20261109
+Packaging date: 2026-11-09

@@ -61,12 +61,36 @@ impl DiagnosticCampaign {
     }
 }
 
+/// Selects an explicitly bounded `NSUserDefaults` compatibility experiment.
+/// The default preserves Dev 2.47 behavior byte-for-byte at the decision
+/// boundary; the RFQ profile is opt-in and may be assigned per application.
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+pub enum UserDefaultsCompatibilityProfile {
+    #[default]
+    Baseline,
+    Rfq10B500OldLinkedV1,
+}
+
+impl UserDefaultsCompatibilityProfile {
+    pub fn rfq_snapshot_and_mutable_reload(self) -> bool {
+        self == Self::Rfq10B500OldLinkedV1
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Baseline => "baseline",
+            Self::Rfq10B500OldLinkedV1 => "rfq-10b500-old-linked-v1",
+        }
+    }
+}
+
 /// Struct containing all user-configurable options.
 #[derive(Clone)]
 pub struct Options {
     pub diagnostics: bool,
     pub diagnostic_campaign: DiagnosticCampaign,
     pub diagnostic_watch_addresses: Vec<u32>,
+    pub user_defaults_compatibility_profile: UserDefaultsCompatibilityProfile,
     pub fullscreen: bool,
     pub device_family: Option<DeviceFamily>,
     pub initial_orientation: DeviceOrientation,
@@ -133,6 +157,7 @@ impl Default for Options {
             diagnostics: true,
             diagnostic_campaign: DiagnosticCampaign::Off,
             diagnostic_watch_addresses: Vec::new(),
+            user_defaults_compatibility_profile: UserDefaultsCompatibilityProfile::Baseline,
         }
     }
 }
@@ -286,6 +311,18 @@ impl Options {
                 return Err("Expected one to eight nonzero diagnostic addresses".into());
             }
             self.diagnostic_watch_addresses = addresses;
+        } else if let Some(value) = arg.strip_prefix("--ns-user-defaults-profile=") {
+            self.user_defaults_compatibility_profile =
+                match value {
+                    "baseline" => UserDefaultsCompatibilityProfile::Baseline,
+                    "rfq-10b500-old-linked-v1" => {
+                        UserDefaultsCompatibilityProfile::Rfq10B500OldLinkedV1
+                    }
+                    _ => return Err(
+                        "Expected --ns-user-defaults-profile=baseline or rfq-10b500-old-linked-v1"
+                            .into(),
+                    ),
+                };
         } else if let Some(address) = arg.strip_prefix("--gdb=") {
             let addrs = address
                 .to_socket_addrs()
@@ -447,5 +484,52 @@ mod tests {
         assert!(options
             .parse_argument("--diagnostic-campaign=not-a-campaign")
             .is_err());
+    }
+
+    #[test]
+    fn user_defaults_compatibility_profile_is_explicit_and_default_off() {
+        let mut options = Options::default();
+        assert_eq!(
+            options.user_defaults_compatibility_profile,
+            UserDefaultsCompatibilityProfile::Baseline
+        );
+        assert!(!options
+            .user_defaults_compatibility_profile
+            .rfq_snapshot_and_mutable_reload());
+
+        assert_eq!(
+            options.parse_argument("--ns-user-defaults-profile=rfq-10b500-old-linked-v1"),
+            Ok(true)
+        );
+        assert_eq!(
+            options.user_defaults_compatibility_profile,
+            UserDefaultsCompatibilityProfile::Rfq10B500OldLinkedV1
+        );
+        assert_eq!(
+            options.user_defaults_compatibility_profile.as_str(),
+            "rfq-10b500-old-linked-v1"
+        );
+
+        assert!(options
+            .parse_argument("--ns-user-defaults-profile=not-a-profile")
+            .is_err());
+        assert_eq!(
+            options.user_defaults_compatibility_profile,
+            UserDefaultsCompatibilityProfile::Rfq10B500OldLinkedV1
+        );
+        assert_eq!(
+            options.parse_argument("--ns-user-defaults-profile=baseline"),
+            Ok(true)
+        );
+        assert_eq!(
+            options.user_defaults_compatibility_profile,
+            UserDefaultsCompatibilityProfile::Baseline
+        );
+
+        let untouched_other_app = Options::default();
+        assert_eq!(
+            untouched_other_app.user_defaults_compatibility_profile,
+            UserDefaultsCompatibilityProfile::Baseline
+        );
     }
 }

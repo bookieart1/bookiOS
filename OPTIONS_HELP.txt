@@ -331,3 +331,11 @@ Other options:
         These share a 64-address cap with automatic resource-name watches.
         Addresses can move between launches/builds; a missing record does not
         rule out a lifetime bug. Has no effect with --diagnostics=off.
+
+    --ns-user-defaults-profile=baseline|rfq-10b500-old-linked-v1
+        Selects an experimental, per-application NSUserDefaults compatibility
+        profile. baseline is the default and preserves Dev 2.47 behavior.
+        rfq-10b500-old-linked-v1 snapshots property-list values when stored and
+        reconstructs persisted collection containers as mutable after relaunch.
+        This profile is bounded to the RFQ-01R experiment and is not a global
+        claim about every historical iOS version.
