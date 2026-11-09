@@ -417,7 +417,7 @@ fn add_perform_request_with_order(
 /// Cancels a selector that was previously requested by [add_perform_request].
 /// The argument arg is compared via isEqual, [as documented by Apple]
 /// (<https://developer.apple.com/documentation/objectivec/nsobject/1410849-cancelpreviousperformrequestswit?language=objc>)
-pub(super) fn cancel_perform_requests(
+pub(crate) fn cancel_perform_requests(
     env: &mut Environment,
     run_loop: id,
     target: id,
@@ -461,6 +461,21 @@ pub(super) fn cancel_perform_requests(
     env.objc
         .borrow_mut::<NSRunLoopHostObject>(run_loop)
         .selector_objects = new_selector_objects;
+}
+
+#[cfg(test)]
+pub(crate) fn pending_perform_request_count(
+    env: &Environment,
+    run_loop: id,
+    target: id,
+    selector: SEL,
+) -> usize {
+    env.objc
+        .borrow::<NSRunLoopHostObject>(run_loop)
+        .selector_objects
+        .iter()
+        .filter(|request| request.target == target && request.selector == selector)
+        .count()
 }
 
 /// Cancels every pending perform request for a target on this run loop. This
