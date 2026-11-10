@@ -442,6 +442,8 @@ mod tests {
     use crate::options::OpenFeintCompatibilityProfile;
     use std::path::Path;
 
+    const OPENFEINT_ITEM_TYPE_OAUT: u32 = 0x6f61_7574;
+
     fn test_root(label: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "idared-keychain-k1-{label}-{}-{:?}",
@@ -497,6 +499,78 @@ mod tests {
         () = msg![env; dictionary setObject:limit_one forKey:limit_key];
     }
 
+    fn exact_wrapper_query(
+        env: &mut Environment,
+        account: &str,
+        data: Option<&[u8]>,
+    ) -> id {
+        let dictionary: id = msg_class![env; NSMutableDictionary new];
+        let entries = [
+            (K_SEC_CLASS, k(env, K_SEC_CLASS_INTERNET_PASSWORD)),
+            (
+                K_SEC_ATTR_ACCOUNT,
+                ns_string::from_rust_string(env, account.to_owned()),
+            ),
+            (
+                K_SEC_ATTR_SECURITY_DOMAIN,
+                ns_string::from_rust_string(env, "api.openfeint.com".to_owned()),
+            ),
+            (
+                K_SEC_ATTR_SERVER,
+                ns_string::from_rust_string(env, "openfeint.com".to_owned()),
+            ),
+            (
+                K_SEC_ATTR_AUTHENTICATION_TYPE,
+                k(env, K_SEC_ATTR_AUTHENTICATION_TYPE_DEFAULT),
+            ),
+        ];
+        for (key, value) in entries {
+            let key = k(env, key);
+            () = msg![env; dictionary setObject:value forKey:key];
+        }
+        let item_type_key = k(env, K_SEC_ATTR_TYPE);
+        let item_type: id =
+            msg_class![env; NSNumber numberWithUnsignedInt:OPENFEINT_ITEM_TYPE_OAUT];
+        () = msg![env; dictionary setObject:item_type forKey:item_type_key];
+        if let Some(data) = data {
+            let length: NSUInteger = data.len().try_into().unwrap();
+            let bytes = env.mem.alloc(length);
+            env.mem
+                .bytes_at_mut(bytes.cast(), length)
+                .copy_from_slice(data);
+            let const_bytes = bytes.cast_const();
+            let value: id = msg_class![env; NSData dataWithBytes:const_bytes length:length];
+            env.mem.free(bytes);
+            let data_key = k(env, K_SEC_VALUE_DATA);
+            () = msg![env; dictionary setObject:value forKey:data_key];
+        }
+        dictionary
+    }
+
+    fn exact_wrapper_delete_query(env: &mut Environment, account: &str) -> id {
+        let dictionary: id = msg_class![env; NSMutableDictionary new];
+        let entries = [
+            (K_SEC_CLASS, k(env, K_SEC_CLASS_INTERNET_PASSWORD)),
+            (
+                K_SEC_ATTR_ACCOUNT,
+                ns_string::from_rust_string(env, account.to_owned()),
+            ),
+            (
+                K_SEC_ATTR_SECURITY_DOMAIN,
+                ns_string::from_rust_string(env, "api.openfeint.com".to_owned()),
+            ),
+            (
+                K_SEC_ATTR_SERVER,
+                ns_string::from_rust_string(env, "openfeint.com".to_owned()),
+            ),
+        ];
+        for (key, value) in entries {
+            let key = k(env, key);
+            () = msg![env; dictionary setObject:value forKey:key];
+        }
+        dictionary
+    }
+
     fn empty_dictionary(env: &mut Environment) -> id {
         msg_class![env; NSMutableDictionary new]
     }
@@ -535,6 +609,44 @@ mod tests {
             assert!(names.contains(&required));
         }
         assert_eq!(FUNCTIONS.len(), 3);
+    }
+
+    #[test]
+    fn exact_mpoauth_wrapper_shape_contract() {
+        let root = test_root("exact-wrapper-red-green");
+        let mut env = env_for(&root);
+        let add = exact_wrapper_query(&mut env, "oauth-token", Some(b"value-1"));
+        let add_status = SecItemAdd(&mut env, add, MutPtr::null());
+        println!("K1_CQ2_EXACT_ADD_STATUS={add_status}");
+        assert_eq!(add_status, ERR_SEC_SUCCESS);
+        assert_eq!(
+            SecItemAdd(&mut env, add, MutPtr::null()),
+            ERR_SEC_DUPLICATE_ITEM
+        );
+
+        let find = exact_wrapper_query(&mut env, "oauth-token", None);
+        request_data(&mut env, find);
+        let result = env.mem.alloc_and_write(nil);
+        assert_eq!(
+            SecItemCopyMatching(&mut env, find, result),
+            ERR_SEC_SUCCESS
+        );
+        let returned = env.mem.read(result);
+        assert_ne!(returned, nil);
+        assert_eq!(copied_bytes(&mut env, returned), b"value-1");
+        release(&mut env, returned);
+        env.mem.free(result.cast());
+
+        let delete = exact_wrapper_delete_query(&mut env, "oauth-token");
+        assert_eq!(SecItemDelete(&mut env, delete), ERR_SEC_SUCCESS);
+        let result = env.mem.alloc_and_write(nil);
+        assert_eq!(
+            SecItemCopyMatching(&mut env, find, result),
+            ERR_SEC_ITEM_NOT_FOUND
+        );
+        assert_eq!(env.mem.read(result), nil);
+        env.mem.free(result.cast());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

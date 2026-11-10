@@ -1,0 +1,84 @@
+name: K1 CQ2 exact-shape red and green qualification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k1-cq2-exact-shape-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  red-green-qualification:
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - name: Check out the exact green candidate and history
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          fetch-depth: 2
+
+      - name: Install the x86_64 test target
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Restore existing CMake 3.31.6 cache without saving
+        id: cache-cmake
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/cmake
+          key: cmake_3_31_6_macos
+
+      - name: Acquire recorded CMake 3.31.6 input on cache miss
+        if: ${{ steps.cache-cmake.outputs.cache-hit != 'true' }}
+        run: |
+          curl -L -O "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-macos-universal.tar.gz"
+          tar xzf "cmake-3.31.6-macos-universal.tar.gz" -C vendor
+          mv "vendor/cmake-3.31.6-macos-universal/CMake.app/Contents/" vendor/cmake
+          rm -rf vendor/cmake-3.31.6-macos-universal
+
+      - name: Qualify the preserved red parent
+        shell: bash
+        env:
+          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+        run: |
+          set -o pipefail
+          green_sha="$(git rev-parse HEAD)"
+          red_sha="$(git rev-parse HEAD^)"
+          git checkout --detach "$red_sha"
+          set +e
+          cargo test --lib frameworks::security::sec_item::tests::exact_mpoauth_wrapper_shape_contract --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee "$RUNNER_TEMP/k1-cq2-red.log"
+          red_exit=${PIPESTATUS[0]}
+          set -e
+          test "$red_exit" -ne 0
+          grep -F "K1_CQ2_EXACT_ADD_STATUS=-50" "$RUNNER_TEMP/k1-cq2-red.log"
+          git checkout --detach "$green_sha"
+
+      - name: Run focused Security qualification
+        run: cargo test --lib frameworks::security::sec_item::tests --target x86_64-apple-darwin -- --nocapture
+        env:
+          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+
+      - name: Run complete library regression suite
+        run: cargo test --lib --target x86_64-apple-darwin
+        env:
+          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+
+      - name: Print bounded run manifest
+        if: always()
+        shell: bash
+        run: |
+          echo "K1_CQ2_MANIFEST_BEGIN"
+          echo "green_sha=$(git rev-parse HEAD)"
+          echo "red_sha=$(git rev-parse HEAD^)"
+          echo "workflow=${GITHUB_WORKFLOW}"
+          echo "run_id=${GITHUB_RUN_ID}"
+          echo "job=${GITHUB_JOB}"
+          echo "runner=${RUNNER_OS}/${RUNNER_ARCH}"
+          echo "cache_policy=restore-only"
+          echo "cmake_cache_hit=${{ steps.cache-cmake.outputs.cache-hit }}"
+          echo "artifact_upload=none"
+          echo "K1_CQ2_MANIFEST_END"
