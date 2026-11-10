@@ -6,6 +6,9 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+
+static INTEGRATION_ENVIRONMENT_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, PartialEq, Eq)]
 enum StubBinaryPath<'a> {
@@ -399,8 +402,7 @@ fn copy_dir_all(source: PathBuf, destination: PathBuf) -> std::io::Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_app() -> Result<(), Box<dyn Error>> {
+fn prepare_integration_environment() -> Result<(PathBuf, Vec<String>), Box<dyn Error>> {
     let tests_dir = current_dir()?.join("tests");
     let stubs_dir = tests_dir.join("stubs");
     let stubs_src_dir = stubs_dir.join("src");
@@ -417,18 +419,18 @@ fn test_app() -> Result<(), Box<dyn Error>> {
     let stubs_frameworks_search_arg = "-F".to_owned() + stubs_frameworks_dir.to_str().unwrap();
     let mut extra_linker_args = Vec::<String>::new();
     let mut extra_compile_args = vec![
-        "-mlinker-version=253",
-        "-Wno-expansion-to-defined",
-        "-Wno-literal-range",
-        bundled_libs_search_arg.as_str(),
-        stubs_lib_search_arg.as_str(),
-        stubs_frameworks_search_arg.as_str(),
-        "-ObjC",
-        "-fblocks",
-        "-fno-objc-exceptions",
+        "-mlinker-version=253".to_string(),
+        "-Wno-expansion-to-defined".to_string(),
+        "-Wno-literal-range".to_string(),
+        bundled_libs_search_arg.clone(),
+        stubs_lib_search_arg.clone(),
+        stubs_frameworks_search_arg,
+        "-ObjC".to_string(),
+        "-fblocks".to_string(),
+        "-fno-objc-exceptions".to_string(),
         // ARC is not available until IOS 5, so it can't be used.
-        "-fno-objc-arc",
-        "-fno-objc-arc-exceptions",
+        "-fno-objc-arc".to_string(),
+        "-fno-objc-arc-exceptions".to_string(),
     ];
 
     // Generate symbol stubs.
@@ -548,14 +550,31 @@ fn test_app() -> Result<(), Box<dyn Error>> {
     // Link against libstdc++ to support C++ test sources (virtual inheritance
     // tests etc). The bundled libstdc++ dylib path is already in the search
     // path via bundled_libs_search_arg.
-    extra_compile_args.push("-lstdc++.6.0.9");
+    extra_compile_args.push("-lstdc++.6.0.9".to_string());
+    extra_compile_args.extend(extra_linker_args);
 
-    // Vec<String> -> &[&str] ownership shenanigans
-    for arg in &extra_linker_args {
-        extra_compile_args.push(&arg);
-    }
+    Ok((tests_dir, extra_compile_args))
+}
+
+fn borrowed_args(args: &[String]) -> Vec<&str> {
+    args.iter().map(String::as_str).collect()
+}
+
+#[test]
+fn test_app() -> Result<(), Box<dyn Error>> {
+    let _lock = INTEGRATION_ENVIRONMENT_LOCK.lock().unwrap();
+    let (tests_dir, owned_compile_args) = prepare_integration_environment()?;
+    let extra_compile_args = borrowed_args(&owned_compile_args);
 
     // Finally, build and run TestApp plus the bounded selector-mutation fixture.
     run_test_app(&tests_dir, "TestApp", &extra_compile_args, &[])?;
+    run_trenches_selector_mutation_app(&tests_dir, &extra_compile_args)
+}
+
+#[test]
+fn trenches_selector_mutation_contract() -> Result<(), Box<dyn Error>> {
+    let _lock = INTEGRATION_ENVIRONMENT_LOCK.lock().unwrap();
+    let (tests_dir, owned_compile_args) = prepare_integration_environment()?;
+    let extra_compile_args = borrowed_args(&owned_compile_args);
     run_trenches_selector_mutation_app(&tests_dir, &extra_compile_args)
 }

@@ -15,7 +15,7 @@ concurrency:
 jobs:
   guest-contract:
     runs-on: macos-15-intel
-    timeout-minutes: 30
+    timeout-minutes: 20
     env:
       CARGO_TERM_COLOR: always
       CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target/host
@@ -26,19 +26,16 @@ jobs:
           submodules: recursive
           fetch-depth: 2
 
-      - name: Verify exact candidate and classify red or green
-        id: scope
+      - name: Verify exact decoupled red candidate
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
-          if git diff --quiet HEAD^ HEAD -- src/frameworks/foundation/ns_array.rs; then
-            echo "source_changed=false" | tee -a "$GITHUB_OUTPUT"
-            echo "PILOT_STATE=RED" | tee -a "$GITHUB_ENV"
-          else
-            echo "source_changed=true" | tee -a "$GITHUB_OUTPUT"
-            echo "PILOT_STATE=GREEN" | tee -a "$GITHUB_ENV"
-          fi
+          test "$(git hash-object src/frameworks/foundation/ns_array.rs)" = "b9ab13a49c8d5352e5a071fb265ff8dfc83000b2"
+          test "$(git hash-object tests/TrenchesSelectorMutation_source/main.m)" = "c5c0406a36843f2682cac6434444c42d68c382c7"
+          test "$(git hash-object tests/TrenchesSelectorMutation.app/Info.plist)" = "dfc75ff756efc3252b1f8986872c584e4f6adf64"
+          test "$(git hash-object tests/TrenchesSelectorMutation.app/PkgInfo)" = "6f749b0f376443ea266383322cc2d934f791bbee"
+          echo "PILOT_STATE=RED" | tee -a "$GITHUB_ENV"
 
       - name: Restore CMake 3.31.6
         id: cache-cmake
@@ -84,30 +81,12 @@ jobs:
       - name: Install the existing x86_64 macOS Rust target
         run: rustup target add x86_64-apple-darwin
 
-      - name: Run stub path classification regression
-        id: harness-classifier
-        shell: bash
-        run: |
-          set -o pipefail
-          cargo test --test integration classify_stub_binary_path_table --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee trenches-harness-classifier.log
-        env:
-          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
-
       - name: Run exact guest Objective-C contract
         id: guest-contract
         shell: bash
         run: |
           set -o pipefail
-          cargo test --test integration test_app --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee trenches-guest-contract.log
-        env:
-          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
-
-      - name: Run green library regression
-        if: steps.scope.outputs.source_changed == 'true'
-        shell: bash
-        run: |
-          set -o pipefail
-          cargo test --lib --target x86_64-apple-darwin 2>&1 | tee trenches-library-regression.log
+          cargo test --test integration trenches_selector_mutation_contract --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee trenches-guest-contract.log
         env:
           CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
 
@@ -119,8 +98,9 @@ jobs:
             echo "commit=$GITHUB_SHA"
             echo "ref=$GITHUB_REF"
             echo "pilot_state=${PILOT_STATE:-UNKNOWN}"
-            echo "source_changed=${{ steps.scope.outputs.source_changed }}"
-            echo "harness_classifier_outcome=${{ steps.harness-classifier.outcome }}"
+            echo "source_changed=false"
+            echo "harness_classifier_outcome=not_run_established_tr_hr1"
+            echo "full_testapp_outcome=not_run_decoupled_route"
             echo "guest_contract_outcome=${{ steps.guest-contract.outcome }}"
             echo "runner_os=$RUNNER_OS"
             echo "runner_arch=$RUNNER_ARCH"
@@ -136,8 +116,6 @@ jobs:
           name: trenches-pilot-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             trenches-run-manifest.txt
-            trenches-harness-classifier.log
             trenches-guest-contract.log
-            trenches-library-regression.log
           if-no-files-found: ignore
           retention-days: 14
