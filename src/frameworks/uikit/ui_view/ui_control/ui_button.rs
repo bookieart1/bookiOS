@@ -10,6 +10,7 @@ use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect, CGSize};
 use crate::frameworks::foundation::ns_string::{from_rust_string, get_static_str, to_rust_string};
 use crate::frameworks::foundation::{NSInteger, NSUInteger};
 use crate::frameworks::uikit::ui_font::UITextAlignmentCenter;
+use crate::frameworks::uikit::ui_geometry::UIEdgeInsets;
 use crate::objc::{
     autorelease, id, impl_HostObject_with_superclass, msg, msg_class, msg_super, nil, objc_classes,
     release, retain, todo_objc_setter, ClassExports, HostObject, NSZonePtr,
@@ -47,6 +48,7 @@ impl HostObject for UIButtonContentHostObject {}
 pub struct UIButtonHostObject {
     superclass: super::UIControlHostObject,
     type_: UIButtonType,
+    content_edge_insets: UIEdgeInsets,
     /// `UILabel*`
     title_label: id,
     /// `UIImageView*`
@@ -71,6 +73,7 @@ impl Default for UIButtonHostObject {
         UIButtonHostObject {
             superclass: Default::default(),
             type_: UIButtonTypeCustom,
+            content_edge_insets: UIEdgeInsets::default(),
             title_label: nil,
             image_view: nil,
             background_image_view: nil,
@@ -250,6 +253,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     let UIButtonHostObject {
         superclass: _,
         type_: _,
+        content_edge_insets: _,
         title_label,
         image_view,
         background_image_view,
@@ -296,6 +300,13 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (UIButtonType)buttonType {
     env.objc.borrow_mut::<UIButtonHostObject>(this).type_
+}
+
+- (UIEdgeInsets)contentEdgeInsets {
+    env.objc.borrow::<UIButtonHostObject>(this).content_edge_insets
+}
+- (())setContentEdgeInsets:(UIEdgeInsets)content_edge_insets {
+    env.objc.borrow_mut::<UIButtonHostObject>(this).content_edge_insets = content_edge_insets;
 }
 
 - (id)titleLabel {
@@ -580,7 +591,6 @@ pub const CLASSES: ClassExports = objc_classes! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frameworks::uikit::ui_geometry::UIEdgeInsets;
     use crate::{msg_class, Environment};
 
     #[test]
