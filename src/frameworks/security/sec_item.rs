@@ -860,7 +860,7 @@ mod tests {
         assert_eq!(SecItemCopyMatching(&mut env, query, output), ERR_SEC_SUCCESS);
         let returned = env.mem.read(output);
         release(&mut env, returned);
-        env.mem.free(output);
+        env.mem.free(output.cast());
         std::fs::remove_dir_all(root).unwrap();
     }
 }
