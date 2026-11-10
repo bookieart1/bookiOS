@@ -463,6 +463,21 @@ pub(crate) fn cancel_perform_requests(
         .selector_objects = new_selector_objects;
 }
 
+#[cfg(test)]
+pub(crate) fn pending_perform_request_count(
+    env: &Environment,
+    run_loop: id,
+    target: id,
+    selector: SEL,
+) -> usize {
+    env.objc
+        .borrow::<NSRunLoopHostObject>(run_loop)
+        .selector_objects
+        .iter()
+        .filter(|request| request.target == target && request.selector == selector)
+        .count()
+}
+
 /// Cancels every pending perform request for a target on this run loop. This
 /// is the contract behind `-[NSRunLoop cancelPerformSelectorsWithTarget:]`.
 /// Target matching is by object identity; retained targets and arguments are
