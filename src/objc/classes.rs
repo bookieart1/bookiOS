@@ -558,6 +558,7 @@ fn substitute_classes(
     mem: &Mem,
     class: Class,
     metaclass: Class,
+    allow_guest_openfeint: bool,
 ) -> Option<(Box<FakeClass>, Box<FakeClass>)> {
     let class_t { data, .. } = mem.read(class.cast());
     let class_rw_t { name, .. } = mem.read(data);
@@ -568,17 +569,7 @@ fn substitute_classes(
     // Naturally it makes a lot of use of UIKit and networking in ways we
     // don't support yet. This isn't "ad blocking" because ads no longer work
     // on real devices anyway :)
-    if !(name.starts_with("AdMob")
-        || name.starts_with("GAD") // Google Mobile Ads
-        || name.starts_with("AdWhirl")
-        || name.starts_with("AltAds")
-        || name.starts_with("FB") // Facebook
-        || name.starts_with("Flurry")
-        || name.starts_with("Mobclix")
-        || name.starts_with("OpenFeint")
-        || name.starts_with("FLStat")
-        || name.starts_with("Tapjoy"))
-    {
+    if !should_substitute_class(name, allow_guest_openfeint) {
         return None;
     }
 
@@ -606,6 +597,19 @@ fn substitute_classes(
         is_metaclass: true,
     });
     Some((class_host_object, metaclass_host_object))
+}
+
+fn should_substitute_class(name: &str, allow_guest_openfeint: bool) -> bool {
+    name.starts_with("AdMob")
+        || name.starts_with("GAD") // Google Mobile Ads
+        || name.starts_with("AdWhirl")
+        || name.starts_with("AltAds")
+        || name.starts_with("FB") // Facebook
+        || name.starts_with("Flurry")
+        || name.starts_with("Mobclix")
+        || (name.starts_with("OpenFeint") && !allow_guest_openfeint)
+        || name.starts_with("FLStat")
+        || name.starts_with("Tapjoy")
 }
 
 impl ObjC {
@@ -808,7 +812,12 @@ impl ObjC {
 
     /// For use by [crate::dyld]: register all the classes from the application
     /// binary.
-    pub fn register_bin_classes(&mut self, bin: &MachO, mem: &mut Mem) {
+    pub fn register_bin_classes(
+        &mut self,
+        bin: &MachO,
+        mem: &mut Mem,
+        allow_guest_openfeint: bool,
+    ) {
         let Some(list) = bin.get_section("__objc_classlist") else {
             return;
         };
@@ -819,7 +828,9 @@ impl ObjC {
             let class = mem.read(base + i);
             let metaclass = Self::read_isa(class, mem);
 
-            let name = if let Some(fakes) = substitute_classes(mem, class, metaclass) {
+            let name = if let Some(fakes) =
+                substitute_classes(mem, class, metaclass, allow_guest_openfeint)
+            {
                 let (class_host_object, metaclass_host_object) = fakes;
 
                 assert!(class_host_object.name == metaclass_host_object.name);
@@ -1288,6 +1299,20 @@ fn shift_ivar_offset_words(ivars: &HashMap<String, IVar>, diff: GuestUSize, mem:
 #[cfg(test)]
 mod dev_244_tests {
     use super::*;
+
+    #[test]
+    fn openfeint_substitution_can_be_bypassed_without_affecting_other_sdk_fakes() {
+        assert!(should_substitute_class("OpenFeint", false));
+        assert!(should_substitute_class("OpenFeintGameCenter", false));
+        assert!(!should_substitute_class("OpenFeint", true));
+        assert!(!should_substitute_class("OpenFeintGameCenter", true));
+
+        assert!(should_substitute_class("AdMobView", true));
+        assert!(should_substitute_class("FBSession", true));
+        assert!(should_substitute_class("TapjoyConnect", true));
+        assert!(!should_substitute_class("OFAchievementService", false));
+        assert!(!should_substitute_class("OFSettings", true));
+    }
 
     #[test]
     fn nonfragile_ivar_reconciliation_changes_the_offset_word_not_its_address() {
