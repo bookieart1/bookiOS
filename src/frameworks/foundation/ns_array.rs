@@ -306,80 +306,28 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())makeObjectsPerformSelector:(SEL)sel {
     let count: NSUInteger = msg![env; this count];
     env.diagnostic_array_event("perform-begin", this.to_bits(), 0, 0, count, count);
-
-    // Foundation walks the receiver's original object set even when a callback
-    // mutates the receiver. Retain each original position independently so
-    // duplicate identities remain duplicate callbacks and removed objects stay
-    // alive until their callback has completed.
-    let mut objects = Vec::with_capacity(count as usize);
-    let capture_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        for idx in 0..count {
-            let obj: id = msg![env; this objectAtIndex:idx];
-            retain(env, obj);
-            objects.push(obj);
-        }
-    }));
-    if let Err(original_failure) = capture_result {
-        // Attempt every cleanup without allowing a cleanup failure to replace
-        // the failure that interrupted capture.
-        for obj in objects.drain(..).rev() {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                release(env, obj)
-            }));
-        }
-        std::panic::resume_unwind(original_failure);
+    for idx in 0..count {
+        let obj: id = msg![env; this objectAtIndex:idx];
+        let before: NSUInteger = msg![env; this count];
+        env.diagnostic_array_event(
+            "perform-callback",
+            this.to_bits(),
+            idx,
+            obj.to_bits(),
+            before,
+            before,
+        );
+        let _: id = msg![env; obj performSelector:sel];
+        let after: NSUInteger = msg![env; this count];
+        env.diagnostic_array_event(
+            "perform-return",
+            this.to_bits(),
+            idx,
+            obj.to_bits(),
+            before,
+            after,
+        );
     }
-
-    let callback_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        for (idx, &obj) in objects.iter().enumerate() {
-            let before: NSUInteger = msg![env; this count];
-            env.diagnostic_array_event(
-                "perform-callback",
-                this.to_bits(),
-                idx as NSUInteger,
-                obj.to_bits(),
-                before,
-                before,
-            );
-            let _: id = msg![env; obj performSelector:sel];
-            let after: NSUInteger = msg![env; this count];
-            env.diagnostic_array_event(
-                "perform-return",
-                this.to_bits(),
-                idx as NSUInteger,
-                obj.to_bits(),
-                before,
-                after,
-            );
-        }
-    }));
-    if let Err(original_failure) = callback_result {
-        // A failing callback has no perform-return event, and resuming here
-        // prevents a false perform-end event.
-        for obj in objects.drain(..).rev() {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                release(env, obj)
-            }));
-        }
-        std::panic::resume_unwind(original_failure);
-    }
-
-    // Attempt every balanced release. If a release itself fails, preserve the
-    // first failure and resume it only after the remaining identities have had
-    // their matching release attempted.
-    let mut cleanup_failure = None;
-    for obj in objects.drain(..).rev() {
-        let release_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            release(env, obj)
-        }));
-        if cleanup_failure.is_none() {
-            cleanup_failure = release_result.err();
-        }
-    }
-    if let Some(cleanup_failure) = cleanup_failure {
-        std::panic::resume_unwind(cleanup_failure);
-    }
-
     let after: NSUInteger = msg![env; this count];
     env.diagnostic_array_event("perform-end", this.to_bits(), count, 0, count, after);
 }
