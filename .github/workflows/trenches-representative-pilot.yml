@@ -39,7 +39,7 @@ jobs:
 
       - name: Restore CMake 3.31.6
         id: cache-cmake
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: vendor/cmake
           key: cmake_3_31_6_macos
@@ -52,7 +52,7 @@ jobs:
 
       - name: Restore LLVM 12
         id: cache-llvm
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: tests/llvm
           key: llvm_12_0_0_macOS_x64
@@ -65,7 +65,7 @@ jobs:
 
       - name: Restore host Cargo cache
         id: cargo-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ~/.cargo/registry
@@ -108,14 +108,4 @@ jobs:
             echo "llvm_cache_hit=${{ steps.cache-llvm.outputs.cache-hit }}"
             echo "cargo_cache_hit=${{ steps.cargo-cache.outputs.cache-hit }}"
           } > trenches-run-manifest.txt
-
-      - name: Preserve bounded logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: trenches-pilot-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            trenches-run-manifest.txt
-            trenches-guest-contract.log
-          if-no-files-found: ignore
-          retention-days: 14
+          cat trenches-run-manifest.txt
