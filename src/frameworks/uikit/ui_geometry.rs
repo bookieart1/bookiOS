@@ -130,6 +130,8 @@ mod tests {
             <UIEdgeInsets as GuestRet>::SIZE_IN_MEM,
             Some(crate::mem::guest_size_of::<UIEdgeInsets>())
         );
+        assert_eq!(<UIEdgeInsets as GuestArg>::REG_COUNT, 4);
+        assert_eq!(std::mem::size_of::<UIEdgeInsets>(), 16);
     }
 }
 

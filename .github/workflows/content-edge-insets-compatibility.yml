@@ -1,0 +1,196 @@
+name: UIButton contentEdgeInsets compatibility
+
+on:
+  push:
+    branches:
+      - compatibility/uibutton-content-edge-insets
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: content-edge-insets-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    runs-on: macos-15-intel
+    timeout-minutes: 35
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target/host
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Verify exact authoritative descent and bounded scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git merge-base --is-ancestor 0488343218639febbf2f26a3f745e2a14df7a5dd HEAD
+          git diff --check 0488343218639febbf2f26a3f745e2a14df7a5dd..HEAD
+
+      - name: Restore CMake 3.31.6
+        id: cmake
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/cmake
+          key: cmake_3_31_6_macos
+      - name: Acquire CMake on cache miss
+        if: steps.cmake.outputs.cache-hit != 'true'
+        run: |
+          curl --fail --location --output "$RUNNER_TEMP/cmake.tgz" "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-macos-universal.tar.gz"
+          tar xzf "$RUNNER_TEMP/cmake.tgz" -C vendor
+          mv vendor/cmake-3.31.6-macos-universal/CMake.app/Contents vendor/cmake
+
+      - name: Restore LLVM 12
+        id: llvm
+        uses: actions/cache/restore@v4
+        with:
+          path: tests/llvm
+          key: llvm_12_0_0_macOS_x64
+      - name: Acquire LLVM on cache miss
+        if: steps.llvm.outputs.cache-hit != 'true'
+        run: |
+          curl --fail --location --output "$RUNNER_TEMP/llvm.tar.xz" "https://github.com/llvm/llvm-project/releases/download/llvmorg-12.0.0/clang+llvm-12.0.0-x86_64-apple-darwin.tar.xz"
+          tar xf "$RUNNER_TEMP/llvm.tar.xz" -C "$RUNNER_TEMP"
+          mkdir tests/llvm
+          mv "$RUNNER_TEMP"/clang+llvm-12.0.0-x86_64-apple-darwin/* tests/llvm
+
+      - name: Restore host Cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .cargo-target/host
+          key: edge-insets-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'src/**/Cargo.toml', '.cargo/config.toml') }}-${{ github.sha }}
+          restore-keys: |
+            ofgreen-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'src/**/Cargo.toml', '.cargo/config.toml') }}-
+            authoritative-consolidation-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'src/**/Cargo.toml', '.cargo/config.toml') }}-
+            cargo-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Acquire established iPhone OS 3 SDK fixture
+        run: cd tests && curl --fail --location https://github.com/touchHLE/common-3.0-sdk/releases/latest/download/common-3.0.sdk-macOS-universal.tar.gz | tar xz
+      - name: Install x86_64 macOS Rust target
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Run exact guest inheritance, owner, ABI and lifetime contract
+        id: focused-contract
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --test integration ui_button_content_edge_insets_contract --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee edge-focused-contract.log
+        env:
+          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+
+      - name: Run directly affected UIKit and unrelated-control tests
+        id: uikit-controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --lib ui_button_content_edge_insets_defaults_and_round_trips --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee edge-uikit-controls.log
+          cargo test --lib malformed_edge_insets_return_zero_and_use_struct_return_abi --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee -a edge-uikit-controls.log
+          cargo test --lib ui_control_alignment_defaults_and_round_trips --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee -a edge-uikit-controls.log
+          cargo test --lib slider_state_and_standard_subviews_are_functional --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee -a edge-uikit-controls.log
+        env:
+          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+
+      - name: Run complete library regression suite
+        id: library-regressions
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --lib --target x86_64-apple-darwin 2>&1 | tee edge-library-regressions.log
+        env:
+          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+
+      - name: Preserve qualification manifest
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "commit=$GITHUB_SHA"
+            echo "authoritative_base=0488343218639febbf2f26a3f745e2a14df7a5dd"
+            echo "focused_contract=${{ steps.focused-contract.outcome }}"
+            echo "uikit_controls=${{ steps.uikit-controls.outcome }}"
+            echo "library_regressions=${{ steps.library-regressions.outcome }}"
+            echo "cmake_cache_hit=${{ steps.cmake.outputs.cache-hit }}"
+            echo "llvm_cache_hit=${{ steps.llvm.outputs.cache-hit }}"
+            echo "cargo_cache_hit=${{ steps.cargo-cache.outputs.cache-hit }}"
+          } > edge-qualification-manifest.txt
+          cat edge-qualification-manifest.txt
+
+      - name: Upload raw qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-qualification-${{ github.sha }}
+          path: |
+            edge-*.log
+            edge-qualification-manifest.txt
+          if-no-files-found: warn
+          retention-days: 30
+
+  windows-candidate:
+    needs: qualify
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          fetch-depth: 1
+      - name: Verify exact build input
+        shell: pwsh
+        run: if ((git rev-parse HEAD) -ne '${{ github.sha }}') { throw 'Checkout identity mismatch.' }
+      - name: Restore CMake 3.31.6
+        id: cmake
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/cmake
+          key: cmake_3_31_6_windows
+      - name: Acquire CMake on cache miss
+        if: steps.cmake.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri 'https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip' -OutFile "$env:RUNNER_TEMP\cmake.zip"
+          7z -ovendor x "$env:RUNNER_TEMP\cmake.zip"
+          Rename-Item -LiteralPath 'vendor\cmake-3.31.6-windows-x86_64' -NewName 'cmake'
+      - name: Build exact Windows discriminator
+        shell: pwsh
+        env:
+          CMAKE: ${{ github.workspace }}\vendor\cmake\bin\cmake
+        run: cargo build --release
+      - name: Package runtime and identity
+        shell: pwsh
+        run: |
+          $out = 'edge-windows-candidate'
+          New-Item -ItemType Directory -Path $out | Out-Null
+          Copy-Item -LiteralPath 'target\release\touchHLE.exe' -Destination "$out\iDared32bit.exe"
+          Copy-Item -LiteralPath 'dylibs' -Destination "$out\dylibs" -Recurse
+          Copy-Item -LiteralPath 'touchHLE_fonts' -Destination "$out\touchHLE_fonts" -Recurse
+          Copy-Item -LiteralPath 'touchHLE_default_options.txt' -Destination "$out\touchHLE_default_options.txt"
+          New-Item -ItemType Directory -Path "$out\Games" | Out-Null
+          $hash = (Get-FileHash -LiteralPath "$out\iDared32bit.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          @(
+            'commit=${{ github.sha }}'
+            "exe_sha256=$hash"
+            "exe_size=$((Get-Item -LiteralPath "$out\iDared32bit.exe").Length)"
+            'runner=windows-2022'
+          ) | Set-Content -LiteralPath "$out\identity.txt" -Encoding ascii
+          Get-Content -LiteralPath "$out\identity.txt"
+      - name: Upload Windows discriminator
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-windows-candidate-${{ github.sha }}
+          path: edge-windows-candidate/
+          if-no-files-found: error
+          retention-days: 14

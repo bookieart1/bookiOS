@@ -436,6 +436,51 @@ fn run_ui_control_alignment_app(
     Ok(())
 }
 
+fn run_ui_button_content_edge_insets_app(
+    tests_dir: &Path,
+    extra_compile_args: &[&str],
+) -> Result<(), Box<dyn Error>> {
+    const APP_NAME: &str = "UIButtonContentEdgeInsets";
+    const EXPECTED: &str =
+        "CONTENT_EDGE_INSETS ancestry=UIButton owner=UIButton unrelated=UIControl default=0,0,0,0 value=1.25,-2.5,3.75,4.5 release=1 result=PASS";
+
+    let source = tests_dir.join(format!("{}_source/main.m", APP_NAME));
+    let header_root = tests_dir.join(format!("{}_headers", APP_NAME));
+    let header_search_arg = format!("-I{}", header_root.display());
+    let mut fixture_compile_args = Vec::with_capacity(extra_compile_args.len() + 1);
+    fixture_compile_args.push(header_search_arg.as_str());
+    fixture_compile_args.extend_from_slice(extra_compile_args);
+    let app_path = tests_dir.join(format!("{}.app", APP_NAME));
+    let output_path = app_path.join(APP_NAME);
+    build_object(
+        tests_dir,
+        &output_path,
+        [source.as_path()].into_iter(),
+        &fixture_compile_args,
+    )?;
+
+    let binary_path = target_dir().join(format!("touchHLE{}", env::consts::EXE_SUFFIX));
+    let output = Command::new(&binary_path)
+        .arg(&app_path)
+        .arg("--headless")
+        .output()
+        .expect("failed to execute touchHLE process");
+    std::io::stdout().write_all(&output.stdout).unwrap();
+    std::io::stderr().write_all(&output.stderr).unwrap();
+
+    let emulation_started =
+        find_subsequence(&output.stderr, b"CPU emulation begins now.").is_some();
+    let expected_marker = find_subsequence(&output.stdout, EXPECTED.as_bytes()).is_some();
+    assert!(
+        output.status.success() && emulation_started && expected_marker,
+        "UIButton contentEdgeInsets contract failed: status={} emulation_started={} expected_marker={}",
+        output.status,
+        emulation_started,
+        expected_marker
+    );
+    Ok(())
+}
+
 /// Recursively copy a directory's content to a destination skipping symlinks
 fn copy_dir_all(source: PathBuf, destination: PathBuf) -> std::io::Result<()> {
     std::fs::create_dir_all(&destination)?;
@@ -635,4 +680,12 @@ fn ofgreen_button_alignment_contract() -> Result<(), Box<dyn Error>> {
     let (tests_dir, owned_compile_args) = prepare_integration_environment()?;
     let extra_compile_args = borrowed_args(&owned_compile_args);
     run_ui_control_alignment_app(&tests_dir, &extra_compile_args)
+}
+
+#[test]
+fn ui_button_content_edge_insets_contract() -> Result<(), Box<dyn Error>> {
+    let _lock = INTEGRATION_ENVIRONMENT_LOCK.lock().unwrap();
+    let (tests_dir, owned_compile_args) = prepare_integration_environment()?;
+    let extra_compile_args = borrowed_args(&owned_compile_args);
+    run_ui_button_content_edge_insets_app(&tests_dir, &extra_compile_args)
 }

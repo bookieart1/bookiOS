@@ -576,3 +576,36 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::frameworks::uikit::ui_geometry::UIEdgeInsets;
+    use crate::{msg_class, Environment};
+
+    #[test]
+    fn ui_button_content_edge_insets_defaults_and_round_trips() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+
+        let button: id = msg_class![env; UIButton new];
+        let default: UIEdgeInsets = msg![env; button contentEdgeInsets];
+        assert_eq!(default, UIEdgeInsets::default());
+
+        let value = UIEdgeInsets {
+            top: 1.25,
+            left: -2.5,
+            bottom: 3.75,
+            right: 4.5,
+        };
+        () = msg![env; button setContentEdgeInsets:value];
+        let stored: UIEdgeInsets = msg![env; button contentEdgeInsets];
+        assert_eq!(stored, value);
+
+        release(env, button);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
+}
