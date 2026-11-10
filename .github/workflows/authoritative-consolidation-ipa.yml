@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  statuses: write
 
 concurrency:
   group: development-251-ipa-${{ github.ref }}
@@ -27,6 +28,7 @@ jobs:
     timeout-minutes: 60
     env:
       IOS_CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target/ios
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -229,6 +231,25 @@ jobs:
           echo "IPA_URL=$IPA_URL"
           echo "SYMBOLS_URL=$SYMBOLS_URL"
           echo "MANIFEST_URL=$MANIFEST_URL"
+          publish_status() {
+            local context="$1" url="$2" description="$3" state="${4:-pending}"
+            jq -n \
+              --arg state "$state" \
+              --arg target_url "$url" \
+              --arg description "$description" \
+              --arg context "$context" \
+              '{state:$state,target_url:$target_url,description:$description,context:$context}' \
+              | curl --fail --silent --show-error \
+                  -X POST \
+                  -H "Authorization: Bearer $GITHUB_TOKEN" \
+                  -H "Accept: application/vnd.github+json" \
+                  -H "X-GitHub-Api-Version: 2022-11-28" \
+                  "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/statuses/$GITHUB_SHA" \
+                  --data-binary @- >/dev/null
+          }
+          publish_status "development-2.51-transfer/ipa" "$IPA_URL" "sha256=$IPA_SHA size=$IPA_SIZE"
+          publish_status "development-2.51-transfer/symbols" "$SYMBOLS_URL" "sha256=$SYMBOLS_SHA size=$SYMBOLS_SIZE"
+          publish_status "development-2.51-transfer/manifest" "$MANIFEST_URL" "sha256=$MANIFEST_SHA size=$MANIFEST_SIZE"
           echo "::notice title=Development 2.51 transfer::IPA_URL=$IPA_URL%0ASYMBOLS_URL=$SYMBOLS_URL%0AMANIFEST_URL=$MANIFEST_URL%0AIPA_SHA256=$IPA_SHA%0AIPA_SIZE=$IPA_SIZE%0ASYMBOLS_SHA256=$SYMBOLS_SHA%0ASYMBOLS_SIZE=$SYMBOLS_SIZE%0AMANIFEST_SHA256=$MANIFEST_SHA%0AMANIFEST_SIZE=$MANIFEST_SIZE%0ASOURCE_COMMIT=$SOURCE_COMMIT%0AWORKFLOW_COMMIT=$GITHUB_SHA"
           echo "CONSOLIDATED_IPA_TRANSFER_END"
           deadline=$((SECONDS+600))
@@ -239,6 +260,9 @@ jobs:
           kill "$TUNNEL_PID" "$SERVER_PID" 2>/dev/null || true
           wait "$TUNNEL_PID" 2>/dev/null || true
           wait "$SERVER_PID" 2>/dev/null || true
+          publish_status "development-2.51-transfer/ipa" "$IPA_URL" "transfer complete; sha256=$IPA_SHA" success
+          publish_status "development-2.51-transfer/symbols" "$SYMBOLS_URL" "transfer complete; sha256=$SYMBOLS_SHA" success
+          publish_status "development-2.51-transfer/manifest" "$MANIFEST_URL" "transfer complete; sha256=$MANIFEST_SHA" success
           echo "tunnel_stopped=true"
           echo "server_stopped=true"
 
