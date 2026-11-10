@@ -20,7 +20,7 @@
 
 use crate::abi::GuestFunction;
 use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant, HostDylib};
-use crate::objc::messages::ThreadInitializer;
+use crate::objc::messages::{maybe_initialize_class, ThreadInitializer};
 use crate::MutexId;
 use std::collections::HashMap;
 
@@ -45,7 +45,7 @@ pub use objects::{
 pub use properties::todo_objc_setter;
 pub use selectors::{selector, SEL};
 
-use crate::mem::{ConstPtr, ConstVoidPtr, MutPtr, Ptr};
+use crate::mem::{ConstPtr, ConstVoidPtr, GuestUSize, MutPtr, Ptr};
 use crate::Environment;
 use classes::{
     class_addMethod, class_conformsToProtocol, class_copyPropertyList, class_getClassMethod,
@@ -291,7 +291,26 @@ fn object_getClassName(env: &mut Environment, object: id) -> ConstPtr<u8> {
     class_getName(env, class)
 }
 
+/// Allocate an instance of `class` with optional indexed bytes.
+///
+/// This is the low-level Objective-C runtime counterpart of the allocation
+/// path already used by `NSAllocateObject`. A direct runtime allocation must
+/// still initialize the class before creating its first instance.
+fn class_createInstance(env: &mut Environment, class: Class, extra_bytes: GuestUSize) -> id {
+    if class == nil {
+        return nil;
+    }
+    maybe_initialize_class(env, class);
+    env.objc.alloc_object_with_extra_bytes(
+        class,
+        extra_bytes,
+        Box::new(TrivialHostObject),
+        &mut env.mem,
+    )
+}
+
 const FUNCTIONS: FunctionExports = &[
+    export_c_func!(class_createInstance(_, _)),
     export_c_func!(class_copyPropertyList(_, _)),
     export_c_func!(class_getInstanceSize(_)),
     export_c_func!(class_getInstanceVariable(_, _)),
@@ -341,6 +360,8 @@ const FUNCTIONS: FunctionExports = &[
 #[cfg(test)]
 mod dev_239_tests {
     use super::*;
+    use crate::objc::classes::InitializationStatus;
+    use crate::objc::release;
 
     #[test]
     fn dev_239_class_is_meta_class_distinguishes_class_objects_and_nil() {
@@ -366,5 +387,41 @@ mod dev_239_tests {
         assert!(class_isMetaClass(&mut env, metaclass));
         assert_eq!(objc_getMetaClass(&mut env, unknown), nil);
         assert_eq!(objc_getMetaClass(&mut env, Ptr::null()), nil);
+    }
+
+    #[test]
+    fn class_create_instance_handles_nil_and_initializes_the_requested_class() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        assert_eq!(class_createInstance(&mut env, nil, 0), nil);
+
+        let class = env.objc.get_known_class("NSObject", &mut env.mem);
+        assert!(matches!(
+            env.objc.borrow::<ClassHostObject>(class).is_initialized,
+            InitializationStatus::NotInitialized
+        ));
+
+        let object = class_createInstance(&mut env, class, 0);
+        assert_ne!(object, nil);
+        assert_eq!(object_getClass(&mut env, object), class);
+        assert!(matches!(
+            env.objc.borrow::<ClassHostObject>(class).is_initialized,
+            InitializationStatus::Initialized
+        ));
+        release(&mut env, object);
+    }
+
+    #[test]
+    fn class_create_instance_allocates_zeroed_indexed_bytes() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let class = env.objc.get_known_class("NSObject", &mut env.mem);
+        let instance_size = class_getInstanceSize(&mut env, class);
+        let extra_bytes = 32;
+
+        let object = class_createInstance(&mut env, class, extra_bytes);
+        let indexed_bytes = env
+            .mem
+            .bytes_at(object.cast::<u8>() + instance_size, extra_bytes);
+        assert_eq!(indexed_bytes, &[0; 32]);
+        release(&mut env, object);
     }
 }
