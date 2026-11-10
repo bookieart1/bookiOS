@@ -342,13 +342,18 @@ fn run_trenches_selector_mutation_app(
     ];
 
     let source = tests_dir.join(format!("{}_source/main.m", APP_NAME));
+    let header_root = tests_dir.join(format!("{}_headers", APP_NAME));
+    let header_search_arg = format!("-I{}", header_root.display());
+    let mut fixture_compile_args = Vec::with_capacity(extra_compile_args.len() + 1);
+    fixture_compile_args.push(header_search_arg.as_str());
+    fixture_compile_args.extend_from_slice(extra_compile_args);
     let app_path = tests_dir.join(format!("{}.app", APP_NAME));
     let output_path = app_path.join(APP_NAME);
     build_object(
         tests_dir,
         &output_path,
         [source.as_path()].into_iter(),
-        extra_compile_args,
+        &fixture_compile_args,
     )?;
 
     let binary_path = target_dir().join(format!("touchHLE{}", env::consts::EXE_SUFFIX));
