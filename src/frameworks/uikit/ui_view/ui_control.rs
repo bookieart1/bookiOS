@@ -41,11 +41,16 @@ pub const UIControlEventEditingDidEndOnExit: UIControlEvents = 1 << 19;
 pub type UIControlContentVerticalAlignment = NSInteger;
 const UIControlContentVerticalAlignmentCenter: UIControlContentVerticalAlignment = 0;
 
+// TODO: Add the other UIControlContentHorizontalAlignment enums
+pub type UIControlContentHorizontalAlignment = NSInteger;
+const UIControlContentHorizontalAlignmentCenter: UIControlContentHorizontalAlignment = 0;
+
 pub(super) struct UIControlHostObject {
     superclass: super::UIViewHostObject,
     enabled: bool,
     selected: bool,
     highlighted: bool,
+    contentHorizontalAlignment: UIControlContentHorizontalAlignment,
     contentVerticalAlignment: UIControlContentVerticalAlignment,
     /// `UITouch*` of the touch currently being tracked, [nil] if none
     tracked_touch: id,
@@ -62,6 +67,7 @@ impl Default for UIControlHostObject {
             enabled: true,
             selected: false,
             highlighted: false,
+            contentHorizontalAlignment: UIControlContentHorizontalAlignmentCenter,
             contentVerticalAlignment: UIControlContentVerticalAlignmentCenter,
             tracked_touch: nil,
             tracking: false,
@@ -124,6 +130,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         enabled: _,
         selected: _,
         highlighted: _,
+        contentHorizontalAlignment: _,
         contentVerticalAlignment: _,
         tracking: _,
         action_targets: _, // targets are weak references, nothing to do
@@ -175,6 +182,14 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (())setHighlighted:(bool)highlighted {
     env.objc.borrow_mut::<UIControlHostObject>(this).highlighted = highlighted;
+}
+
+- (NSInteger)contentHorizontalAlignment {
+    env.objc.borrow::<UIControlHostObject>(this).contentHorizontalAlignment
+}
+
+- (())setContentHorizontalAlignment:(UIControlContentHorizontalAlignment)contentHorizontalAlignment {
+    env.objc.borrow_mut::<UIControlHostObject>(this).contentHorizontalAlignment = contentHorizontalAlignment;
 }
 
 - (NSInteger)contentVerticalAlignment {
@@ -394,3 +409,35 @@ forControlEvents:(UIControlEvents)events {
 @end
 
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{msg_class, Environment};
+
+    #[test]
+    fn ui_control_alignment_defaults_and_round_trips() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+
+        let control: id = msg_class![env; UIControl new];
+        let horizontal: NSInteger = msg![env; control contentHorizontalAlignment];
+        let vertical: NSInteger = msg![env; control contentVerticalAlignment];
+        assert_eq!(horizontal, UIControlContentHorizontalAlignmentCenter);
+        assert_eq!(vertical, UIControlContentVerticalAlignmentCenter);
+
+        for value in 1..=3 {
+            () = msg![env; control setContentHorizontalAlignment:value];
+            let stored: NSInteger = msg![env; control contentHorizontalAlignment];
+            assert_eq!(stored, value);
+        }
+        let vertical: NSInteger = msg![env; control contentVerticalAlignment];
+        assert_eq!(vertical, UIControlContentVerticalAlignmentCenter);
+
+        release(env, control);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
+}
