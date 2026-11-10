@@ -2,9 +2,6 @@ name: K1 CQ2R exact-shape green qualification
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - experiment/k1-cq2-exact-shape-20261110
 
 permissions:
   contents: read

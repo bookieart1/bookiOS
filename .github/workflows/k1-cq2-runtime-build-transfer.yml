@@ -1,0 +1,204 @@
+name: K1 CQ2 zero-storage Windows build and live transfer
+
+on:
+  push:
+    branches:
+      - experiment/k1-cq2-exact-shape-20261110
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k1-cq2-runtime-transfer-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-build-live-transfer:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact qualified lineage
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Verify candidate lineage and source identities
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((git rev-parse HEAD) -ne $env:GITHUB_SHA) { throw 'HEAD does not equal GITHUB_SHA.' }
+          git merge-base --is-ancestor 3af05c1d63573e4817c7e55b1484bb6cf5fd7b4b HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Typed candidate is not an ancestor.' }
+          $securityBlob = git show HEAD:src/frameworks/security/sec_item.rs | git hash-object --stdin
+          if ($securityBlob -ne 'd136015d9c302709c6c0a9b495a226c8e1a146d9') {
+            throw "Unexpected Security source blob: $securityBlob"
+          }
+          Write-Output 'K1_SOURCE_IDENTITY_OK'
+          Write-Output "workflow_commit=$env:GITHUB_SHA"
+          Write-Output 'qualified_green_commit=c4a12b10b50d6262b43dd945c2baf3cd85d9351e'
+          Write-Output 'typed_candidate_commit=3af05c1d63573e4817c7e55b1484bb6cf5fd7b4b'
+          Write-Output "security_blob=$securityBlob"
+
+      - name: Restore existing CMake 3.31.6 cache without saving
+        id: cache-cmake
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/cmake
+          key: cmake_3_31_6_windows
+
+      - name: Acquire recorded CMake 3.31.6 input on cache miss
+        if: ${{ steps.cache-cmake.outputs.cache-hit != 'true' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-WebRequest -Uri 'https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip' -OutFile 'cmake-3.31.6-windows-x86_64.zip'
+          7z -ovendor x 'cmake-3.31.6-windows-x86_64.zip'
+          if ($LASTEXITCODE -ne 0) { throw 'CMake extraction failed.' }
+          Rename-Item -LiteralPath 'vendor/cmake-3.31.6-windows-x86_64' -NewName 'cmake'
+
+      - name: Build exact Windows release candidate
+        shell: pwsh
+        env:
+          CMAKE: ${{ github.workspace }}\vendor\cmake\bin\cmake
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release
+          if ($LASTEXITCODE -ne 0) { throw 'Release build failed.' }
+
+      - name: Serve exact executable through one ephemeral HTTPS route
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          $transferRoot = Join-Path $env:RUNNER_TEMP 'k1-live-transfer'
+          New-Item -ItemType Directory -Path $transferRoot -Force | Out-Null
+          $candidate = Join-Path $transferRoot 'touchHLE-k1-cq2.exe'
+          Copy-Item -LiteralPath 'target\release\touchHLE.exe' -Destination $candidate
+          $candidateHash = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant()
+          $candidateSize = (Get-Item -LiteralPath $candidate).Length
+          $routeToken = ([guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N'))
+          $routePath = "/$routeToken/touchHLE-k1-cq2.exe"
+          $port = Get-Random -Minimum 22000 -Maximum 42000
+          $downloadSentinel = Join-Path $transferRoot 'download-complete.txt'
+          $serverScript = Join-Path $transferRoot 'serve-one.ps1'
+          $serverStdout = Join-Path $transferRoot 'server.stdout.log'
+          $serverStderr = Join-Path $transferRoot 'server.stderr.log'
+          $tunnelStdout = Join-Path $transferRoot 'tunnel.stdout.log'
+          $tunnelStderr = Join-Path $transferRoot 'tunnel.stderr.log'
+
+          @'
+          param([int]$Port,[string]$Route,[string]$File,[string]$Sentinel)
+          $ErrorActionPreference = 'Stop'
+          $listener = [System.Net.HttpListener]::new()
+          $listener.Prefixes.Add("http://127.0.0.1:$Port/")
+          $listener.Start()
+          try {
+            while ($listener.IsListening) {
+              $context = $listener.GetContext()
+              $response = $context.Response
+              $response.Headers['Cache-Control'] = 'no-store, max-age=0'
+              $response.Headers['Pragma'] = 'no-cache'
+              $response.Headers['X-Content-Type-Options'] = 'nosniff'
+              if ($context.Request.HttpMethod -ne 'GET' -or $context.Request.Url.AbsolutePath -ne $Route) {
+                $response.StatusCode = 404
+                $response.ContentLength64 = 0
+                $response.Close()
+                continue
+              }
+              $item = Get-Item -LiteralPath $File
+              $response.StatusCode = 200
+              $response.ContentType = 'application/octet-stream'
+              $response.Headers['Content-Disposition'] = 'attachment; filename="touchHLE-k1-cq2.exe"'
+              $response.ContentLength64 = $item.Length
+              $stream = [System.IO.File]::OpenRead($File)
+              try { $stream.CopyTo($response.OutputStream) }
+              finally { $stream.Dispose(); $response.OutputStream.Dispose(); $response.Close() }
+              [DateTime]::UtcNow.ToString('o') | Set-Content -LiteralPath $Sentinel -Encoding ascii
+              break
+            }
+          } finally {
+            if ($listener.IsListening) { $listener.Stop() }
+            $listener.Close()
+          }
+          '@ | Set-Content -LiteralPath $serverScript -Encoding utf8
+
+          $server = Start-Process -FilePath 'pwsh' -ArgumentList @('-NoLogo','-NoProfile','-File',$serverScript,'-Port',$port,'-Route',$routePath,'-File',$candidate,'-Sentinel',$downloadSentinel) -RedirectStandardOutput $serverStdout -RedirectStandardError $serverStderr -PassThru -WindowStyle Hidden
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 30; $i++) {
+              if (Test-NetConnection -ComputerName 127.0.0.1 -Port $port -InformationLevel Quiet -WarningAction SilentlyContinue) { $ready = $true; break }
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw 'Loopback server did not become ready.' }
+
+            $cloudflared = Join-Path $transferRoot 'cloudflared-windows-amd64.exe'
+            $cloudflaredUrl = 'https://github.com/cloudflare/cloudflared/releases/download/2026.10.7/cloudflared-windows-amd64.exe'
+            $cloudflaredExpected = '2493dbc168923bb3e59e5e7716f71deced92992eea9acd6e9d74f84ac7751343'
+            Invoke-WebRequest -Uri $cloudflaredUrl -OutFile $cloudflared
+            $cloudflaredActual = (Get-FileHash -LiteralPath $cloudflared -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($cloudflaredActual -ne $cloudflaredExpected) { throw "cloudflared digest mismatch: $cloudflaredActual" }
+
+            $tunnel = Start-Process -FilePath $cloudflared -ArgumentList @('tunnel','--no-autoupdate','--url',"http://127.0.0.1:$port") -RedirectStandardOutput $tunnelStdout -RedirectStandardError $tunnelStderr -PassThru -WindowStyle Hidden
+            try {
+              $origin = $null
+              for ($i = 0; $i -lt 90; $i++) {
+                $combined = @()
+                if (Test-Path -LiteralPath $tunnelStdout) { $combined += Get-Content -LiteralPath $tunnelStdout -Raw }
+                if (Test-Path -LiteralPath $tunnelStderr) { $combined += Get-Content -LiteralPath $tunnelStderr -Raw }
+                $match = [regex]::Match(($combined -join "`n"), 'https://[a-z0-9-]+\.trycloudflare\.com')
+                if ($match.Success) { $origin = $match.Value; break }
+                if ($tunnel.HasExited) { throw 'cloudflared exited before publishing a route.' }
+                Start-Sleep -Seconds 1
+              }
+              if (-not $origin) { throw 'Quick Tunnel URL was not observed.' }
+
+              Write-Output 'K1_TRANSFER_MANIFEST_BEGIN'
+              Write-Output "source_commit=$env:GITHUB_SHA"
+              Write-Output 'qualified_green_commit=c4a12b10b50d6262b43dd945c2baf3cd85d9351e'
+              Write-Output 'typed_candidate_commit=3af05c1d63573e4817c7e55b1484bb6cf5fd7b4b'
+              Write-Output "candidate_sha256=$candidateHash"
+              Write-Output "candidate_size=$candidateSize"
+              Write-Output 'runner=windows-2022'
+              Write-Output 'cloudflared_version=2026.10.7'
+              Write-Output "cloudflared_sha256=$cloudflaredActual"
+              Write-Output 'server_bind=127.0.0.1'
+              Write-Output 'cache_control=no-store'
+              Write-Output 'persistent_binary_storage=none'
+              Write-Output "K1_TRANSFER_URL=$origin$routePath"
+              Write-Output 'K1_TRANSFER_MANIFEST_END'
+
+              $deadline = [DateTime]::UtcNow.AddMinutes(10)
+              while ([DateTime]::UtcNow -lt $deadline -and -not (Test-Path -LiteralPath $downloadSentinel)) {
+                if ($server.HasExited) { throw 'Loopback server exited before verified transfer.' }
+                if ($tunnel.HasExited) { throw 'Quick Tunnel exited before verified transfer.' }
+                Start-Sleep -Seconds 2
+              }
+              if (-not (Test-Path -LiteralPath $downloadSentinel)) { throw 'No complete download was observed before the transfer deadline.' }
+              Write-Output "K1_TRANSFER_COMPLETE=$(Get-Content -LiteralPath $downloadSentinel -Raw)"
+            } finally {
+              if ($tunnel -and -not $tunnel.HasExited) { Stop-Process -Id $tunnel.Id -Force }
+              if ($tunnel) { Wait-Process -Id $tunnel.Id -Timeout 10 -ErrorAction SilentlyContinue }
+              Write-Output "tunnel_process_present=$([bool](Get-Process -Id $tunnel.Id -ErrorAction SilentlyContinue))"
+            }
+          } finally {
+            if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
+            if ($server) { Wait-Process -Id $server.Id -Timeout 10 -ErrorAction SilentlyContinue }
+            Write-Output "server_process_present=$([bool](Get-Process -Id $server.Id -ErrorAction SilentlyContinue))"
+          }
+
+      - name: Print zero-storage completion boundary
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Output 'K1_BUILD_BOUNDARY_BEGIN'
+          Write-Output "commit=$env:GITHUB_SHA"
+          Write-Output "run_id=$env:GITHUB_RUN_ID"
+          Write-Output "job=$env:GITHUB_JOB"
+          Write-Output "cmake_cache_hit=${{ steps.cache-cmake.outputs.cache-hit }}"
+          Write-Output 'cache_save=none'
+          Write-Output 'artifact_upload=none'
+          Write-Output 'release_upload=none'
+          Write-Output 'K1_BUILD_BOUNDARY_END'
