@@ -184,14 +184,10 @@ impl Default for Options {
             dumping_file: crate::paths::user_data_base_path().join("DUMP.txt"),
             ignore_gl_errors: false,
             zero_stack_after_guest_to_host_call: None,
-            // Keep the bounded survey recorder for every app. An explicit
-            // --diagnostics=off remains available for controlled comparisons.
-            diagnostics: true,
-            // Dev 2.49 is a combined compatibility/diagnostic revision. The
-            // campaign recorder is passive and bounded; users can still pick
-            // Off for a controlled comparison or the separate Swordigo
-            // intervention explicitly.
-            diagnostic_campaign: DiagnosticCampaign::Level3Provenance,
+            // Consolidated Development keeps diagnostic capability available
+            // but does not record an ordinary launch unless explicitly enabled.
+            diagnostics: false,
+            diagnostic_campaign: DiagnosticCampaign::Off,
             diagnostic_watch_addresses: Vec::new(),
             user_defaults_compatibility_profile: UserDefaultsCompatibilityProfile::Baseline,
             openfeint_compatibility_profile: OpenFeintCompatibilityProfile::Baseline,
@@ -495,9 +491,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recorder_defaults_to_flight_but_allows_explicit_override() {
+    fn recorder_defaults_off_but_allows_explicit_override() {
         let mut options = Options::default();
-        assert!(options.diagnostics);
+        assert!(!options.diagnostics);
+        assert_eq!(options.diagnostic_campaign, DiagnosticCampaign::Off);
         assert_eq!(options.parse_argument("--diagnostics=off"), Ok(true));
         assert!(!options.diagnostics);
         assert_eq!(options.parse_argument("--diagnostics=flight"), Ok(true));
@@ -513,10 +510,7 @@ mod tests {
                 .is_err());
         }
         assert_eq!(options.diagnostic_watch_addresses, [0x1230, 0x4560]);
-        assert_eq!(
-            options.diagnostic_campaign,
-            DiagnosticCampaign::Level3Provenance
-        );
+        assert_eq!(options.diagnostic_campaign, DiagnosticCampaign::Off);
         assert_eq!(
             options.parse_argument("--diagnostic-campaign=level3-provenance"),
             Ok(true)

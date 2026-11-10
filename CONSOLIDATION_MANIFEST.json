@@ -1,0 +1,30 @@
+{
+  "schema": "idared-authoritative-consolidation-v1",
+  "manifest_id": "IDARED-CONSOLIDATED-20261110",
+  "historical_accounting_base": "a950ac43aca0a2c14dd198e9e03955abb8092705",
+  "source_commit_binding": "__SOURCE_COMMIT__",
+  "component_evidence": {
+    "rfq_preferences": "24ac353f6b573419d46540d5a31a92be78e05c1b",
+    "openfeint_initialization": "31b8d73db018de4481a744bf09265fd3a2628665",
+    "class_create_instance": "14aa45a9d09d557fd893546801cbe9b5b26d0ddf",
+    "deferred_reachability": [
+      "cd0f5c37cf1c26e7fc812f2e476b5bfd641ca1d0",
+      "a47bdc6ecdf358a10a7865610a4b4d2c088f0d6d"
+    ],
+    "k1_typed_item": "3af05c1d63573e4817c7e55b1484bb6cf5fd7b4b",
+    "k1_final_tests": "c4a12b10b50d6262b43dd945c2baf3cd85d9351e",
+    "trenches_shared_selector": "a12d83a0eff3b2d6c9b57bb4c6918339fdacc70c"
+  },
+  "profile_defaults": {
+    "diagnostics": "off",
+    "rfq_preferences": "off_except_exact_package_routing",
+    "openfeint_k1": "off_except_exact_package_routing",
+    "networking": "off"
+  },
+  "excluded_claims": [
+    "complete Hook World playability",
+    "all Foundation enumeration methods",
+    "host Keychain integration",
+    "hosted cache or cancellation qualification"
+  ]
+}
