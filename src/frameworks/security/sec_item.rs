@@ -341,28 +341,7 @@ fn save_store(env: &mut Environment, store: &mut StoreFile) -> Result<(), OSStat
     Ok(())
 }
 
-fn k1_enabled(env: &Environment) -> bool {
-    let enabled = env
-        .options
-        .openfeint_compatibility_profile
-        .guest_local_init_for_bundle(env.bundle.bundle_identifier());
-    #[cfg(test)]
-    {
-        enabled
-            || (env.options.openfeint_compatibility_profile
-                == crate::options::OpenFeintCompatibilityProfile::GuestLocalInitV1
-                && env.bundle.bundle_identifier() == "com.touchhle.test")
-    }
-    #[cfg(not(test))]
-    {
-        enabled
-    }
-}
-
 fn SecItemAdd(env: &mut Environment, attributes: id, result: MutPtr<id>) -> OSStatus {
-    if !k1_enabled(env) {
-        return ERR_SEC_UNIMPLEMENTED;
-    }
     if !result.is_null() {
         env.mem.write(result, nil);
         return ERR_SEC_PARAM;
@@ -402,9 +381,6 @@ fn SecItemCopyMatching(
     query_dictionary: id,
     result: MutPtr<id>,
 ) -> OSStatus {
-    if !k1_enabled(env) {
-        return ERR_SEC_UNIMPLEMENTED;
-    }
     if !result.is_null() {
         env.mem.write(result, nil);
     }
@@ -439,9 +415,6 @@ fn SecItemCopyMatching(
 }
 
 fn SecItemDelete(env: &mut Environment, query_dictionary: id) -> OSStatus {
-    if !k1_enabled(env) {
-        return ERR_SEC_UNIMPLEMENTED;
-    }
     let query = match parse_query(env, query_dictionary) {
         Ok(query) => query,
         Err(status) => return status,
@@ -466,7 +439,6 @@ mod tests {
     use super::*;
     use crate::fs::Fs;
     use crate::objc::{msg, msg_class, release};
-    use crate::options::OpenFeintCompatibilityProfile;
     use std::path::Path;
 
     const OPENFEINT_ITEM_TYPE_OAUT: u32 = 0x6f61_7574;
@@ -484,8 +456,6 @@ mod tests {
         let mut env = Environment::new_fake_for_test_with_thread();
         *env.fs = Fs::new_fake_fs_with_writable_host_root(root);
         env.bundle.set_fake_identity_for_test();
-        env.options.openfeint_compatibility_profile =
-            OpenFeintCompatibilityProfile::GuestLocalInitV1;
         let stack = env.mem.alloc(0x1000);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         env
@@ -874,15 +844,23 @@ mod tests {
     }
 
     #[test]
-    fn baseline_profile_does_not_activate_k1() {
+    fn bounded_internet_password_contract_is_independent_of_openfeint_rollback() {
         let root = test_root("reversal");
         let mut env = env_for(&root);
-        env.options.openfeint_compatibility_profile = OpenFeintCompatibilityProfile::Baseline;
+        env.options.openfeint_compatibility_profile =
+            crate::options::OpenFeintCompatibilityProfile::Baseline;
         let add = exact_wrapper_query(&mut env, "profile-off", Some(b"secret"));
         assert_eq!(
             SecItemAdd(&mut env, add, MutPtr::null()),
-            ERR_SEC_UNIMPLEMENTED
+            ERR_SEC_SUCCESS
         );
+        let query = exact_wrapper_query(&mut env, "profile-off", None);
+        request_data(&mut env, query);
+        let output = env.mem.alloc_and_write(nil);
+        assert_eq!(SecItemCopyMatching(&mut env, query, output), ERR_SEC_SUCCESS);
+        let returned = env.mem.read(output);
+        release(&mut env, returned);
+        env.mem.free(output);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

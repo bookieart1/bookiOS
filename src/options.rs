@@ -61,37 +61,34 @@ impl DiagnosticCampaign {
     }
 }
 
-/// Selects an explicitly bounded `NSUserDefaults` compatibility experiment.
-/// The default preserves Dev 2.47 behavior byte-for-byte at the decision
-/// boundary; the RFQ profile is opt-in and may be assigned per application.
+/// Selects the ordinary `NSUserDefaults` property-list contract or its
+/// explicit diagnostic rollback. The native-qualified snapshot/mutable-reload
+/// behavior is the default for every application; `Baseline` remains only for
+/// controlled reversal and regression diagnosis.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub enum UserDefaultsCompatibilityProfile {
-    #[default]
     Baseline,
+    #[default]
     Rfq10B500OldLinkedV1,
 }
 
-/// Selects an explicitly bounded OpenFeint class-loading experiment.
+/// Selects ordinary guest OpenFeint class loading or its explicit diagnostic
+/// rollback.
 ///
-/// Dev 2.47 normally replaces guest classes whose names start with
-/// `OpenFeint` with nil-like fakes. The experimental profile permits the
-/// original guest classes to load, but only for the exact package identities
-/// named here. Network access remains controlled independently and is off by
-/// default.
+/// The default permits original guest OpenFeint classes for every application
+/// that contains them. `Baseline` retains the old fake-class path solely for
+/// controlled reversal. Network access remains controlled independently and
+/// is off by default.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub enum OpenFeintCompatibilityProfile {
-    #[default]
     Baseline,
+    #[default]
     GuestLocalInitV1,
 }
 
 impl OpenFeintCompatibilityProfile {
-    pub fn guest_local_init_for_bundle(self, bundle_identifier: &str) -> bool {
+    pub fn guest_local_init(self) -> bool {
         self == Self::GuestLocalInitV1
-            && matches!(
-                bundle_identifier,
-                "com.rocketcat.HookWorld" | "com.fireflame.DungeonRaid" | "com.turner.RobotUnicorn"
-            )
     }
 
     pub fn as_str(self) -> &'static str {
@@ -189,8 +186,12 @@ impl Default for Options {
             diagnostics: false,
             diagnostic_campaign: DiagnosticCampaign::Off,
             diagnostic_watch_addresses: Vec::new(),
-            user_defaults_compatibility_profile: UserDefaultsCompatibilityProfile::Baseline,
-            openfeint_compatibility_profile: OpenFeintCompatibilityProfile::Baseline,
+            // These are ordinary shared contracts in Development 2.51. The
+            // baseline values remain parseable only as explicit diagnostic
+            // reversals; no bundle identity activates the corrected behavior.
+            user_defaults_compatibility_profile:
+                UserDefaultsCompatibilityProfile::Rfq10B500OldLinkedV1,
+            openfeint_compatibility_profile: OpenFeintCompatibilityProfile::GuestLocalInitV1,
         }
     }
 }
@@ -531,13 +532,13 @@ mod tests {
     }
 
     #[test]
-    fn user_defaults_compatibility_profile_is_explicit_and_default_off() {
+    fn user_defaults_shared_contract_is_default_with_explicit_rollback() {
         let mut options = Options::default();
         assert_eq!(
             options.user_defaults_compatibility_profile,
-            UserDefaultsCompatibilityProfile::Baseline
+            UserDefaultsCompatibilityProfile::Rfq10B500OldLinkedV1
         );
-        assert!(!options
+        assert!(options
             .user_defaults_compatibility_profile
             .rfq_snapshot_and_mutable_reload());
 
@@ -570,23 +571,21 @@ mod tests {
             UserDefaultsCompatibilityProfile::Baseline
         );
 
-        let untouched_other_app = Options::default();
+        let unrelated_app = Options::default();
         assert_eq!(
-            untouched_other_app.user_defaults_compatibility_profile,
-            UserDefaultsCompatibilityProfile::Baseline
+            unrelated_app.user_defaults_compatibility_profile,
+            UserDefaultsCompatibilityProfile::Rfq10B500OldLinkedV1
         );
     }
 
     #[test]
-    fn openfeint_profile_is_explicit_default_off_and_exact_package_scoped() {
+    fn openfeint_guest_contract_is_default_and_not_bundle_scoped() {
         let mut options = Options::default();
         assert_eq!(
             options.openfeint_compatibility_profile,
-            OpenFeintCompatibilityProfile::Baseline
+            OpenFeintCompatibilityProfile::GuestLocalInitV1
         );
-        assert!(!options
-            .openfeint_compatibility_profile
-            .guest_local_init_for_bundle("com.rocketcat.HookWorld"));
+        assert!(options.openfeint_compatibility_profile.guest_local_init());
 
         assert_eq!(
             options.parse_argument("--openfeint-profile=guest-local-init-v1"),
@@ -596,21 +595,7 @@ mod tests {
             options.openfeint_compatibility_profile.as_str(),
             "guest-local-init-v1"
         );
-        assert!(options
-            .openfeint_compatibility_profile
-            .guest_local_init_for_bundle("com.rocketcat.HookWorld"));
-        assert!(options
-            .openfeint_compatibility_profile
-            .guest_local_init_for_bundle("com.fireflame.DungeonRaid"));
-        assert!(options
-            .openfeint_compatibility_profile
-            .guest_local_init_for_bundle("com.turner.RobotUnicorn"));
-        assert!(!options
-            .openfeint_compatibility_profile
-            .guest_local_init_for_bundle("com.example.Unrelated"));
-        assert!(!options
-            .openfeint_compatibility_profile
-            .guest_local_init_for_bundle("com.rocketcat.HookWorld.copy"));
+        assert!(options.openfeint_compatibility_profile.guest_local_init());
 
         assert!(options
             .parse_argument("--openfeint-profile=unknown")
@@ -623,5 +608,6 @@ mod tests {
             options.openfeint_compatibility_profile,
             OpenFeintCompatibilityProfile::Baseline
         );
+        assert!(!options.openfeint_compatibility_profile.guest_local_init());
     }
 }

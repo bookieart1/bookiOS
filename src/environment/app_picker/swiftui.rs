@@ -203,7 +203,7 @@ pub fn app_picker(
         }),
         json_string(branding),
         json_string(crate::DISPLAY_VERSION),
-        json_string("Consolidated 2026.11.10"),
+        json_string("Development 2.51 · Universal Contracts"),
         json_string(&crate::licenses::get_text()),
         optional(paths::url_for_opening_user_data_dir().ok()),
         json_string("https://iDared32bit-emu.com/"),

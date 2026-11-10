@@ -1,6 +1,6 @@
 {
-  "schema": "idared-authoritative-consolidation-v1",
-  "manifest_id": "IDARED-CONSOLIDATED-20261110",
+  "schema": "idared-development-2.51-v1",
+  "manifest_id": "IDARED-DEVELOPMENT-2.51-UNIVERSAL-CONTRACTS-20261110",
   "historical_accounting_base": "a950ac43aca0a2c14dd198e9e03955abb8092705",
   "source_commit_binding": "__SOURCE_COMMIT__",
   "component_evidence": {
@@ -17,9 +17,14 @@
   },
   "profile_defaults": {
     "diagnostics": "off",
-    "rfq_preferences": "off_except_exact_package_routing",
-    "openfeint_k1": "off_except_exact_package_routing",
+    "nsuserdefaults_snapshot_mutable_reload": "on_for_all_applications",
+    "guest_openfeint_classes": "on_for_all_applications_containing_them",
+    "internet_password_keychain_subset": "on_for_all_applications_using_supported_shapes",
     "networking": "off"
+  },
+  "explicit_diagnostic_rollbacks": {
+    "nsuserdefaults": "--ns-user-defaults-profile=baseline",
+    "guest_openfeint_classes": "--openfeint-profile=baseline"
   },
   "excluded_claims": [
     "complete Hook World playability",

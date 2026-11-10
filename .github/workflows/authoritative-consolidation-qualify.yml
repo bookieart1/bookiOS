@@ -1,16 +1,16 @@
-name: Authoritative consolidation qualification
+name: Development 2.51 universal-contract qualification
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - integration/dev249-qualified-consolidation-20261110
+      - development/2.51-universal-contracts-20261110
 
 permissions:
   contents: read
 
 concurrency:
-  group: authoritative-consolidation-qualification-${{ github.ref }}
+  group: development-251-universal-contract-qualification-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -27,7 +27,7 @@ jobs:
           submodules: recursive
           fetch-depth: 2
 
-      - name: Verify exact consolidated candidate
+      - name: Verify exact Development 2.51 candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -39,7 +39,13 @@ jobs:
           test "$(git hash-object tests/TrenchesSelectorMutation.app/PkgInfo)" = "6f749b0f376443ea266383322cc2d934f791bbee"
           test "$(jq -r .historical_accounting_base CONSOLIDATION_MANIFEST.json)" = "a950ac43aca0a2c14dd198e9e03955abb8092705"
           test "$(jq -r .source_commit_binding CONSOLIDATION_MANIFEST.json)" = "__SOURCE_COMMIT__"
-          echo "QUALIFICATION_STATE=CONSOLIDATED_CANDIDATE" | tee -a "$GITHUB_ENV"
+          test "$(jq -r .manifest_id CONSOLIDATION_MANIFEST.json)" = "IDARED-DEVELOPMENT-2.51-UNIVERSAL-CONTRACTS-20261110"
+          test "$(jq -r .profile_defaults.nsuserdefaults_snapshot_mutable_reload CONSOLIDATION_MANIFEST.json)" = "on_for_all_applications"
+          test "$(jq -r .profile_defaults.guest_openfeint_classes CONSOLIDATION_MANIFEST.json)" = "on_for_all_applications_containing_them"
+          test "$(jq -r .profile_defaults.internet_password_keychain_subset CONSOLIDATION_MANIFEST.json)" = "on_for_all_applications_using_supported_shapes"
+          ! grep -q -- '--ns-user-defaults-profile=' touchHLE_default_options.txt
+          ! grep -q -- '--openfeint-profile=' touchHLE_default_options.txt
+          echo "QUALIFICATION_STATE=DEVELOPMENT_251_UNIVERSAL_CONTRACTS" | tee -a "$GITHUB_ENV"
 
       - name: Restore CMake 3.31.6
         id: cache-cmake
@@ -84,6 +90,14 @@ jobs:
         run: cd "$GITHUB_WORKSPACE/tests" && curl -L https://github.com/touchHLE/common-3.0-sdk/releases/latest/download/common-3.0.sdk-macOS-universal.tar.gz | tar xz
       - name: Install the existing x86_64 macOS Rust target
         run: rustup target add x86_64-apple-darwin
+
+      - name: Verify formatting and universal activation boundaries
+        run: |
+          set -euo pipefail
+          cargo fmt --all -- --check
+          ! grep -R "guest_local_init_for_bundle" -n src
+          ! grep -q -- '--ns-user-defaults-profile=' touchHLE_default_options.txt
+          ! grep -q -- '--openfeint-profile=' touchHLE_default_options.txt
 
       - name: Run focused selector ownership and unwind controls
         id: focused-controls
@@ -147,7 +161,7 @@ jobs:
           } > trenches-run-manifest.txt
           cat trenches-run-manifest.txt
 
-      - name: Adjudicate bounded green candidate
+      - name: Adjudicate Development 2.51 green candidate
         if: always()
         shell: bash
         run: |
@@ -155,7 +169,3 @@ jobs:
           test "${{ steps.focused-controls.outcome }}" = "success"
           test "${{ steps.guest-contract.outcome }}" = "success"
           test "${{ steps.library-regressions.outcome }}" = "success"
-
-  windows-artifact:
-    needs: qualification
-    uses: ./.github/workflows/authoritative-consolidation-windows.yml

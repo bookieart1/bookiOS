@@ -5,10 +5,10 @@
  */
 //! Bounded Security framework support.
 //!
-//! The first implemented slice is deliberately limited to the local Internet
-//! password CRUD contract used by the OpenFeint experiment. It is not a host
-//! keychain bridge and does not implement certificates, trust, access groups,
-//! authentication UI, or online identity.
+//! The implemented slice is deliberately limited to a guest-local Internet
+//! password CRUD contract and is available to every application using that
+//! supported contract. It is not a host keychain bridge and does not implement
+//! certificates, trust, access groups, authentication UI, or online identity.
 
 mod sec_item;
 

@@ -645,10 +645,10 @@ impl Environment {
         let mut dyld = dyld::Dyld::new();
         let allow_guest_openfeint = options
             .openfeint_compatibility_profile
-            .guest_local_init_for_bundle(bundle.bundle_identifier());
+            .guest_local_init();
         if allow_guest_openfeint {
             echo!(
-                "OpenFeint experiment: loading guest OpenFeint classes for exact package {} with network access {}",
+                "OpenFeint shared contract: loading guest OpenFeint classes for package {} with network access {}",
                 bundle.bundle_identifier(),
                 if options.network_access { "enabled" } else { "disabled" }
             );

@@ -70,15 +70,10 @@ jp.co.capcom.monhunipus: --diagnostic-campaign=level3-provenance --diagnostic-wa
 com.playerx.pang: --diagnostic-campaign=level3-provenance
 com.madfingergames.shadowgun: --diagnostic-campaign=level3-provenance
 com.oniricgames.silentswordszero: --diagnostic-campaign=level3-provenance
-com.rocketcat.QuickHook: --diagnostic-campaign=level3-provenance --ns-user-defaults-profile=rfq-10b500-old-linked-v1
-com.rocketcat.HookWorld: --ns-user-defaults-profile=rfq-10b500-old-linked-v1 --openfeint-profile=guest-local-init-v1
+com.rocketcat.QuickHook: --diagnostic-campaign=level3-provenance
 com.touchfoo.swordigo: --diagnostic-campaign=level3-provenance
 9X8UEF6RBG.com.GrumpyFace.Wispin: --diagnostic-campaign=level3-provenance
 com.popcap.ios.ZumaHD: --diagnostic-campaign=level3-provenance
-
-# RFQ A1/A2 experimental activation. The profile remains off for every other
-# application. This entry is restricted to the owned reference probe.
-org.historicalioslab.rfq01r: --ns-user-defaults-profile=rfq-10b500-old-linked-v1
 
 # Super Monkey Ball and Super Monkey Ball Lite
 # B = speed up level intro, Start = pause

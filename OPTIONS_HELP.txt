@@ -333,9 +333,15 @@ Other options:
         rule out a lifetime bug. Has no effect with --diagnostics=off.
 
     --ns-user-defaults-profile=baseline|rfq-10b500-old-linked-v1
-        Selects an experimental, per-application NSUserDefaults compatibility
-        profile. baseline is the default and preserves Dev 2.47 behavior.
-        rfq-10b500-old-linked-v1 snapshots property-list values when stored and
-        reconstructs persisted collection containers as mutable after relaunch.
-        This profile is bounded to the RFQ-01R experiment and is not a global
-        claim about every historical iOS version.
+        Selects the ordinary NSUserDefaults property-list contract or an
+        explicit diagnostic rollback. rfq-10b500-old-linked-v1 is the default
+        for every application: values are snapshotted when stored and persisted
+        collection containers are reconstructed as mutable after relaunch.
+        baseline is retained only for controlled reversal and diagnosis.
+
+    --openfeint-profile=baseline|guest-local-init-v1
+        Selects ordinary guest OpenFeint class loading or an explicit
+        diagnostic rollback. guest-local-init-v1 is the default for every
+        application containing OpenFeint classes. baseline restores the old
+        fake-class behavior for controlled reversal. Networking remains
+        independently disabled unless explicitly enabled.

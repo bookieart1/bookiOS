@@ -569,6 +569,8 @@ mod tests {
     fn baseline_profile_preserves_dev_247_live_object_aliasing() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        env.options.user_defaults_compatibility_profile =
+            UserDefaultsCompatibilityProfile::Baseline;
         let stack = env.mem.alloc(0x1000);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let pool: id = msg_class![env; NSAutoreleasePool new];

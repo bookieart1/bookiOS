@@ -1714,7 +1714,7 @@ fn app_picker_inner(
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
         let full_text = format!(
-            "iDared 32bit {}{}{} · Consolidated 2026.11.10",
+            "iDared 32bit {}{}{} · Development 2.51 · Universal Contracts",
             crate::branding(),
             if crate::branding().is_empty() {
                 ""
