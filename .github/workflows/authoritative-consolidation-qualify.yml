@@ -152,4 +152,3 @@ jobs:
           test "${{ steps.focused-controls.outcome }}" = "success"
           test "${{ steps.guest-contract.outcome }}" = "success"
           test "${{ steps.library-regressions.outcome }}" = "success"
-

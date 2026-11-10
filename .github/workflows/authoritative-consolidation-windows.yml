@@ -197,5 +197,3 @@ jobs:
           Write-Output 'artifact_upload=none'
           Write-Output 'release_upload=none'
           Write-Output 'CONSOLIDATED_BUILD_BOUNDARY_END'
-
-
