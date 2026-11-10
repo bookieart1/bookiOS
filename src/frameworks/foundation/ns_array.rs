@@ -306,28 +306,80 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())makeObjectsPerformSelector:(SEL)sel {
     let count: NSUInteger = msg![env; this count];
     env.diagnostic_array_event("perform-begin", this.to_bits(), 0, 0, count, count);
-    for idx in 0..count {
-        let obj: id = msg![env; this objectAtIndex:idx];
-        let before: NSUInteger = msg![env; this count];
-        env.diagnostic_array_event(
-            "perform-callback",
-            this.to_bits(),
-            idx,
-            obj.to_bits(),
-            before,
-            before,
-        );
-        let _: id = msg![env; obj performSelector:sel];
-        let after: NSUInteger = msg![env; this count];
-        env.diagnostic_array_event(
-            "perform-return",
-            this.to_bits(),
-            idx,
-            obj.to_bits(),
-            before,
-            after,
-        );
+
+    // Foundation walks the receiver's original object set even when a callback
+    // mutates the receiver. Retain each original position independently so
+    // duplicate identities remain duplicate callbacks and removed objects stay
+    // alive until their callback has completed.
+    let mut objects = Vec::with_capacity(count as usize);
+    let capture_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        for idx in 0..count {
+            let obj: id = msg![env; this objectAtIndex:idx];
+            retain(env, obj);
+            objects.push(obj);
+        }
+    }));
+    if let Err(original_failure) = capture_result {
+        // Attempt every cleanup without allowing a cleanup failure to replace
+        // the failure that interrupted capture.
+        for obj in objects.drain(..).rev() {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                release(env, obj)
+            }));
+        }
+        std::panic::resume_unwind(original_failure);
     }
+
+    let callback_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        for (idx, &obj) in objects.iter().enumerate() {
+            let before: NSUInteger = msg![env; this count];
+            env.diagnostic_array_event(
+                "perform-callback",
+                this.to_bits(),
+                idx as NSUInteger,
+                obj.to_bits(),
+                before,
+                before,
+            );
+            let _: id = msg![env; obj performSelector:sel];
+            let after: NSUInteger = msg![env; this count];
+            env.diagnostic_array_event(
+                "perform-return",
+                this.to_bits(),
+                idx as NSUInteger,
+                obj.to_bits(),
+                before,
+                after,
+            );
+        }
+    }));
+    if let Err(original_failure) = callback_result {
+        // A failing callback has no perform-return event, and resuming here
+        // prevents a false perform-end event.
+        for obj in objects.drain(..).rev() {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                release(env, obj)
+            }));
+        }
+        std::panic::resume_unwind(original_failure);
+    }
+
+    // Attempt every balanced release. If a release itself fails, preserve the
+    // first failure and resume it only after the remaining identities have had
+    // their matching release attempted.
+    let mut cleanup_failure = None;
+    for obj in objects.drain(..).rev() {
+        let release_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            release(env, obj)
+        }));
+        if cleanup_failure.is_none() {
+            cleanup_failure = release_result.err();
+        }
+    }
+    if let Some(cleanup_failure) = cleanup_failure {
+        std::panic::resume_unwind(cleanup_failure);
+    }
+
     let after: NSUInteger = msg![env; this count];
     env.diagnostic_array_event("perform-end", this.to_bits(), count, 0, count, after);
 }
@@ -1261,6 +1313,195 @@ fn init_with_objects_inner(env: &mut Environment, arr: id, first_obj: id, args: 
 mod tests {
     use super::*;
     use crate::frameworks::foundation::ns_string::to_rust_string;
+
+    fn panic_text(payload: &(dyn std::any::Any + Send)) -> &str {
+        payload
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| payload.downcast_ref::<&str>().copied())
+            .unwrap_or("<non-string panic>")
+    }
+
+    #[test]
+    fn trenches_selector_snapshot_handles_empty_singleton_and_nonmutating_arrays() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let empty = mutable_from_vec(env, vec![]);
+        let object: id = msg_class![env; NSObject new];
+        let immutable_owned = retain(env, object);
+        let immutable = from_vec(env, vec![immutable_owned]);
+        let mutable_owned = retain(env, object);
+        let mutable = mutable_from_vec(env, vec![mutable_owned]);
+        let retain_selector = env
+            .objc
+            .register_host_selector("retain".to_owned(), &mut env.mem);
+
+        () = msg![env; empty makeObjectsPerformSelector:retain_selector];
+        let baseline = env.objc.get_refcount(object).get();
+        () = msg![env; immutable makeObjectsPerformSelector:retain_selector];
+        () = msg![env; mutable makeObjectsPerformSelector:retain_selector];
+        assert_eq!(env.objc.get_refcount(object).get(), baseline + 2);
+
+        // Balance the two retains performed by the callback selector.
+        release(env, object);
+        release(env, object);
+        release(env, mutable);
+        release(env, immutable);
+        release(env, empty);
+        release(env, object);
+    }
+
+    #[test]
+    fn trenches_selector_snapshot_preserves_duplicate_positions_and_removed_targets() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let array: id = msg_class![env; NSMutableArray new];
+        for _ in 0..4 {
+            () = msg![env; array addObject:array];
+        }
+        assert_eq!(env.objc.get_refcount(array).get(), 5);
+        let remove_last_selector = env
+            .objc
+            .register_host_selector("removeLastObject".to_owned(), &mut env.mem);
+
+        () = msg![env; array makeObjectsPerformSelector:remove_last_selector];
+
+        let count: NSUInteger = msg![env; array count];
+        assert_eq!(count, 0);
+        assert_eq!(env.objc.get_refcount(array).get(), 1);
+        release(env, array);
+    }
+
+    #[test]
+    fn trenches_selector_snapshot_balances_remove_later_ownership() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let objects: Vec<id> = (0..3).map(|_| msg_class![env; NSObject new]).collect();
+        let first_owned = retain(env, objects[0]);
+        let first = mutable_from_vec(env, vec![first_owned]);
+        let third_owned = retain(env, objects[1]);
+        let third = mutable_from_vec(env, vec![third_owned]);
+        let fourth_owned = retain(env, objects[2]);
+        let fourth = mutable_from_vec(env, vec![fourth_owned]);
+        let receiver = mutable_from_vec(env, vec![]);
+        () = msg![env; receiver addObject:first];
+        () = msg![env; receiver addObject:receiver];
+        () = msg![env; receiver addObject:third];
+        () = msg![env; receiver addObject:fourth];
+        let remove_last_selector = env
+            .objc
+            .register_host_selector("removeLastObject".to_owned(), &mut env.mem);
+
+        // The second original callback is the receiver itself, so it removes
+        // the fourth callback target before that target's turn.
+        () = msg![env; receiver makeObjectsPerformSelector:remove_last_selector];
+
+        let count: NSUInteger = msg![env; receiver count];
+        assert_eq!(count, 3);
+        let first_after: id = msg![env; receiver objectAtIndex:0u32];
+        let second_after: id = msg![env; receiver objectAtIndex:1u32];
+        let third_after: id = msg![env; receiver objectAtIndex:2u32];
+        assert_eq!(
+            (first_after, second_after, third_after),
+            (first, receiver, third)
+        );
+        for &object in &objects {
+            assert_eq!(env.objc.get_refcount(object).get(), 1);
+        }
+        assert_eq!(env.objc.get_refcount(fourth).get(), 1);
+
+        () = msg![env; receiver removeAllObjects];
+        assert_eq!(env.objc.get_refcount(receiver).get(), 1);
+        assert_eq!(env.objc.get_refcount(first).get(), 1);
+        assert_eq!(env.objc.get_refcount(third).get(), 1);
+        release(env, receiver);
+        release(env, fourth);
+        release(env, third);
+        release(env, first);
+        for object in objects {
+            release(env, object);
+        }
+    }
+
+    #[test]
+    fn trenches_selector_snapshot_cleans_partial_capture_and_preserves_failure() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let object: id = msg_class![env; NSObject new];
+        let baseline = env.objc.get_refcount(object).get();
+        let invalid = id::from_bits(0xdead_bee0);
+        let object_owned = retain(env, object);
+        let array = from_vec(env, vec![object_owned, invalid]);
+        let retain_selector = env
+            .objc
+            .register_host_selector("retain".to_owned(), &mut env.mem);
+
+        let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            () = msg![env; array makeObjectsPerformSelector:retain_selector];
+        }))
+        .expect_err("invalid second identity must interrupt capture");
+
+        assert_ne!(panic_text(failure.as_ref()), "<non-string panic>");
+        assert_eq!(env.objc.get_refcount(object).get(), baseline + 1);
+        // The deliberately invalid array cannot be safely deallocated; the
+        // fake test environment is discarded after verifying capture cleanup.
+        release(env, object);
+    }
+
+    #[test]
+    fn trenches_selector_snapshot_cleans_callback_unwind_and_preserves_failure() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let first: id = msg_class![env; NSArray new];
+        let second: id = msg_class![env; NSObject new];
+        let first_owned = retain(env, first);
+        let second_owned = retain(env, second);
+        let array = from_vec(env, vec![first_owned, second_owned]);
+        let first_baseline = env.objc.get_refcount(first).get();
+        let second_baseline = env.objc.get_refcount(second).get();
+        let count_selector = env
+            .objc
+            .register_host_selector("count".to_owned(), &mut env.mem);
+
+        let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            () = msg![env; array makeObjectsPerformSelector:count_selector];
+        }))
+        .expect_err("NSObject must preserve its missing-selector failure");
+
+        assert!(panic_text(failure.as_ref()).contains("does not respond to selector \"count\""));
+        assert_eq!(env.objc.get_refcount(first).get(), first_baseline);
+        assert_eq!(env.objc.get_refcount(second).get(), second_baseline);
+        release(env, array);
+        release(env, first);
+        release(env, second);
+    }
+
+    #[test]
+    fn trenches_selector_snapshot_leaves_with_object_and_strict_bounds_unchanged() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let first: id = msg_class![env; NSObject new];
+        let second: id = msg_class![env; NSObject new];
+        let first_owned = retain(env, first);
+        let second_owned = retain(env, second);
+        let array = from_vec(env, vec![first_owned, second_owned]);
+        let is_equal_selector = env
+            .objc
+            .register_host_selector("isEqual:".to_owned(), &mut env.mem);
+
+        () = msg![env; array makeObjectsPerformSelector:is_equal_selector withObject:first];
+
+        let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _: id = msg![env; array objectAtIndex:2u32];
+        }));
+        assert!(
+            failure.is_err(),
+            "out-of-range access must remain a failure"
+        );
+        release(env, array);
+        release(env, first);
+        release(env, second);
+    }
 
     #[test]
     fn singleton_factories_preserve_mutability_and_element_ownership() {
