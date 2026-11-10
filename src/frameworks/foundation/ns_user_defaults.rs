@@ -466,7 +466,8 @@ mod tests {
         () = msg![env; defaults setObject:value forKey:key];
         () = msg![env; defaults setObject:value forKey:unrelated];
         let actual: id = msg![env; defaults objectForKey:key];
-        assert_eq!(actual, value);
+        let value_is_equal: bool = msg![env; actual isEqual:value];
+        assert!(value_is_equal);
         () = msg![env; defaults setObject:nil forKey:key];
         let actual: id = msg![env; app objectForKey:key];
         assert_eq!(actual, nil);
@@ -480,7 +481,8 @@ mod tests {
         let actual: id = msg![env; defaults objectForKey:missing];
         assert_eq!(actual, nil);
         let actual: id = msg![env; defaults objectForKey:unrelated];
-        assert_eq!(actual, value);
+        let value_is_equal: bool = msg![env; actual isEqual:value];
+        assert!(value_is_equal);
         // The same nil remains invalid in NSMutableDictionary itself.
         let failure = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             () = msg![env; app setObject:nil forKey:key];
