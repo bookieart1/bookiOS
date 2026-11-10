@@ -84,6 +84,15 @@ jobs:
       - name: Install the existing x86_64 macOS Rust target
         run: rustup target add x86_64-apple-darwin
 
+      - name: Run stub path classification regression
+        id: harness-classifier
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --test integration classify_stub_binary_path_table --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee trenches-harness-classifier.log
+        env:
+          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+
       - name: Run exact guest Objective-C contract
         id: guest-contract
         shell: bash
@@ -111,6 +120,7 @@ jobs:
             echo "ref=$GITHUB_REF"
             echo "pilot_state=${PILOT_STATE:-UNKNOWN}"
             echo "source_changed=${{ steps.scope.outputs.source_changed }}"
+            echo "harness_classifier_outcome=${{ steps.harness-classifier.outcome }}"
             echo "guest_contract_outcome=${{ steps.guest-contract.outcome }}"
             echo "runner_os=$RUNNER_OS"
             echo "runner_arch=$RUNNER_ARCH"
@@ -126,6 +136,7 @@ jobs:
           name: trenches-pilot-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             trenches-run-manifest.txt
+            trenches-harness-classifier.log
             trenches-guest-contract.log
             trenches-library-regression.log
           if-no-files-found: ignore
