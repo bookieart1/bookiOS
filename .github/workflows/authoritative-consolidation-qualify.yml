@@ -136,8 +136,18 @@ jobs:
         id: library-regressions
         shell: bash
         run: |
-          set -o pipefail
-          cargo test --lib --target x86_64-apple-darwin 2>&1 | tee trenches-library-regressions.log
+          set +e
+          cargo test --lib --target x86_64-apple-darwin > trenches-library-regressions.log 2>&1
+          status=$?
+          cat trenches-library-regressions.log
+          if [[ $status -ne 0 ]]; then
+            diagnostic="$(tail -n 35 trenches-library-regressions.log)"
+            diagnostic="${diagnostic//'%'/'%25'}"
+            diagnostic="${diagnostic//$'\r'/'%0D'}"
+            diagnostic="${diagnostic//$'\n'/'%0A'}"
+            echo "::error title=Development 2.51 library diagnostic::$diagnostic"
+          fi
+          exit "$status"
         env:
           CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
 
