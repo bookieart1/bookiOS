@@ -15,7 +15,7 @@
 //
 // Don't change them in Xcode's General tab: that writes them into the project
 // file, where they override these.
-MARKETING_VERSION = 1.5.0
-CURRENT_PROJECT_VERSION = 1
+MARKETING_VERSION = 2.52
+CURRENT_PROJECT_VERSION = 252
 
 #include? "../Local.xcconfig"

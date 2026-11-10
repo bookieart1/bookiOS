@@ -1,6 +1,6 @@
 {
-  "schema": "idared-development-2.51-v1",
-  "manifest_id": "IDARED-DEVELOPMENT-2.51-UNIVERSAL-CONTRACTS-20261110",
+  "schema": "idared-development-2.52-v1",
+  "manifest_id": "IDARED-DEVELOPMENT-2.52-UIBUTTON-CONTENT-EDGE-INSETS-20261110",
   "historical_accounting_base": "a950ac43aca0a2c14dd198e9e03955abb8092705",
   "source_commit_binding": "__SOURCE_COMMIT__",
   "component_evidence": {
@@ -13,7 +13,9 @@
     ],
     "k1_typed_item": "3af05c1d63573e4817c7e55b1484bb6cf5fd7b4b",
     "k1_final_tests": "c4a12b10b50d6262b43dd945c2baf3cd85d9351e",
-    "trenches_shared_selector": "a12d83a0eff3b2d6c9b57bb4c6918339fdacc70c"
+    "trenches_shared_selector": "a12d83a0eff3b2d6c9b57bb4c6918339fdacc70c",
+    "ui_control_content_horizontal_alignment": "0488343218639febbf2f26a3f745e2a14df7a5dd",
+    "ui_button_content_edge_insets": "b2749d30f3924748483b17b221b116e72f8be5bd"
   },
   "profile_defaults": {
     "diagnostics": "off",
