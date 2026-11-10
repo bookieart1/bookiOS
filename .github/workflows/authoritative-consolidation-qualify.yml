@@ -25,9 +25,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
           submodules: recursive
-          # Candidate source, workflow-only qualification corrections, and the
-          # exact 2.50 base are all required by the diff-integrity gate.
-          fetch-depth: 4
+          # The exact 2.50 base must remain available even when bounded
+          # workflow-only descendants are added during qualification.
+          fetch-depth: 0
 
       - name: Verify exact Development 2.51 candidate
         shell: bash
