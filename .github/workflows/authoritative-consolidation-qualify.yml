@@ -2,6 +2,9 @@ name: Authoritative consolidation qualification
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - integration/dev249-qualified-consolidation-20261110
 
 permissions:
   contents: read
@@ -152,3 +155,7 @@ jobs:
           test "${{ steps.focused-controls.outcome }}" = "success"
           test "${{ steps.guest-contract.outcome }}" = "success"
           test "${{ steps.library-regressions.outcome }}" = "success"
+
+  windows-artifact:
+    needs: qualification
+    uses: ./.github/workflows/authoritative-consolidation-windows.yml
