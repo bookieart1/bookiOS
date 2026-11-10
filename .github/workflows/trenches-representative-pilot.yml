@@ -1,0 +1,132 @@
+name: Trenches representative pilot
+
+on:
+  push:
+    branches:
+      - experiment/trenches-snapshot-pilot-20261109
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trenches-representative-pilot-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  guest-contract:
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target/host
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          fetch-depth: 2
+
+      - name: Verify exact candidate and classify red or green
+        id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          if git diff --quiet HEAD^ HEAD -- src/frameworks/foundation/ns_array.rs; then
+            echo "source_changed=false" | tee -a "$GITHUB_OUTPUT"
+            echo "PILOT_STATE=RED" | tee -a "$GITHUB_ENV"
+          else
+            echo "source_changed=true" | tee -a "$GITHUB_OUTPUT"
+            echo "PILOT_STATE=GREEN" | tee -a "$GITHUB_ENV"
+          fi
+
+      - name: Restore CMake 3.31.6
+        id: cache-cmake
+        uses: actions/cache@v4
+        with:
+          path: vendor/cmake
+          key: cmake_3_31_6_macos
+      - name: Download CMake 3.31.6 on cache miss
+        if: steps.cache-cmake.outputs.cache-hit != 'true'
+        run: curl -L -O "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-macos-universal.tar.gz"
+      - name: Extract CMake 3.31.6 on cache miss
+        if: steps.cache-cmake.outputs.cache-hit != 'true'
+        run: tar xzf cmake-3.31.6-macos-universal.tar.gz -C vendor && mv vendor/cmake-3.31.6-macos-universal/CMake.app/Contents vendor/cmake && rm -rf vendor/cmake-3.31.6-macos-universal
+
+      - name: Restore LLVM 12
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: tests/llvm
+          key: llvm_12_0_0_macOS_x64
+      - name: Download LLVM 12 on cache miss
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: curl -L -O "https://github.com/llvm/llvm-project/releases/download/llvmorg-12.0.0/clang+llvm-12.0.0-x86_64-apple-darwin.tar.xz"
+      - name: Extract LLVM 12 on cache miss
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        run: tar -xf clang+llvm-12.0.0-x86_64-apple-darwin.tar.xz && mkdir tests/llvm && mv clang+llvm-12.0.0-x86_64-apple-darwin/* tests/llvm
+
+      - name: Restore host Cargo cache
+        id: cargo-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .cargo-target/host
+          key: trenches-pilot-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'src/**/Cargo.toml', '.cargo/config.toml') }}-${{ github.sha }}
+          restore-keys: |
+            trenches-pilot-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'src/**/Cargo.toml', '.cargo/config.toml') }}-
+            cargo-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Get established common iPhone OS 3.0 SDK fixtures
+        run: cd "$GITHUB_WORKSPACE/tests" && curl -L https://github.com/touchHLE/common-3.0-sdk/releases/latest/download/common-3.0.sdk-macOS-universal.tar.gz | tar xz
+      - name: Install the existing x86_64 macOS Rust target
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Run exact guest Objective-C contract
+        id: guest-contract
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --test integration test_app --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee trenches-guest-contract.log
+        env:
+          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+
+      - name: Run green library regression
+        if: steps.scope.outputs.source_changed == 'true'
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --lib --target x86_64-apple-darwin 2>&1 | tee trenches-library-regression.log
+        env:
+          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+
+      - name: Write bounded run manifest
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "commit=$GITHUB_SHA"
+            echo "ref=$GITHUB_REF"
+            echo "pilot_state=${PILOT_STATE:-UNKNOWN}"
+            echo "source_changed=${{ steps.scope.outputs.source_changed }}"
+            echo "guest_contract_outcome=${{ steps.guest-contract.outcome }}"
+            echo "runner_os=$RUNNER_OS"
+            echo "runner_arch=$RUNNER_ARCH"
+            echo "cmake_cache_hit=${{ steps.cache-cmake.outputs.cache-hit }}"
+            echo "llvm_cache_hit=${{ steps.cache-llvm.outputs.cache-hit }}"
+            echo "cargo_cache_hit=${{ steps.cargo-cache.outputs.cache-hit }}"
+          } > trenches-run-manifest.txt
+
+      - name: Preserve bounded logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trenches-pilot-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            trenches-run-manifest.txt
+            trenches-guest-contract.log
+            trenches-library-regression.log
+          if-no-files-found: ignore
+          retention-days: 14

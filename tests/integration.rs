@@ -219,6 +219,71 @@ fn run_test_app(
     Ok(())
 }
 
+fn run_trenches_selector_mutation_app(
+    tests_dir: &Path,
+    extra_compile_args: &[&str],
+) -> Result<(), Box<dyn Error>> {
+    const APP_NAME: &str = "TrenchesSelectorMutation";
+    const CASES: [(&str, &str); 3] = [
+        (
+            "control",
+            "TRENCHESTEST case=control callbacks=ABCD membership=ABCD returned=1 overflow=0 result=PASS",
+        ),
+        (
+            "self-remove",
+            "TRENCHESTEST case=self-remove callbacks=ABCD membership=AC returned=1 overflow=0 result=PASS",
+        ),
+        (
+            "remove-later",
+            "TRENCHESTEST case=remove-later callbacks=ABCD membership=ABC returned=1 overflow=0 result=PASS",
+        ),
+    ];
+
+    let source = tests_dir.join(format!("{}_source/main.m", APP_NAME));
+    let app_path = tests_dir.join(format!("{}.app", APP_NAME));
+    let output_path = app_path.join(APP_NAME);
+    build_object(
+        tests_dir,
+        &output_path,
+        [source.as_path()].into_iter(),
+        extra_compile_args,
+    )?;
+
+    let binary_path = target_dir().join(format!("touchHLE{}", env::consts::EXE_SUFFIX));
+    let mut results = Vec::new();
+    for (case, expected) in CASES {
+        let output = Command::new(&binary_path)
+            .arg(&app_path)
+            .arg("--headless")
+            .arg("--args")
+            .arg(case)
+            .output()
+            .expect("failed to execute touchHLE process");
+        std::io::stdout().write_all(&output.stdout).unwrap();
+        std::io::stderr().write_all(&output.stderr).unwrap();
+        results.push((case, expected, output));
+    }
+
+    let mut failures = Vec::new();
+    for (case, expected, output) in results {
+        let emulation_started =
+            find_subsequence(&output.stderr, b"CPU emulation begins now.").is_some();
+        let expected_marker = find_subsequence(&output.stdout, expected.as_bytes()).is_some();
+        if !output.status.success() || !emulation_started || !expected_marker {
+            failures.push(format!(
+                "case={case} status={} emulation_started={emulation_started} expected_marker={expected_marker}",
+                output.status
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "Trenches selector-mutation contract failures:\n{}",
+        failures.join("\n")
+    );
+    Ok(())
+}
+
 /// Recursively copy a directory's content to a destination skipping symlinks
 fn copy_dir_all(source: PathBuf, destination: PathBuf) -> std::io::Result<()> {
     std::fs::create_dir_all(&destination)?;
@@ -379,6 +444,7 @@ fn test_app() -> Result<(), Box<dyn Error>> {
         extra_compile_args.push(&arg);
     }
 
-    // Finally, build TestApp itself.
-    run_test_app(&tests_dir, "TestApp", &extra_compile_args, &[])
+    // Finally, build and run TestApp plus the bounded selector-mutation fixture.
+    run_test_app(&tests_dir, "TestApp", &extra_compile_args, &[])?;
+    run_trenches_selector_mutation_app(&tests_dir, &extra_compile_args)
 }
