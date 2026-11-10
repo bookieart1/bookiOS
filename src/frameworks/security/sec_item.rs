@@ -76,12 +76,19 @@ pub const FUNCTIONS: FunctionExports = &[
 ];
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(untagged)]
+enum InternetPasswordItemType {
+    String(String),
+    UnsignedInt(u32),
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct InternetPasswordRecord {
     account: Option<String>,
     authentication_type: Option<String>,
     security_domain: Option<String>,
     server: Option<String>,
-    item_type: Option<String>,
+    item_type: Option<InternetPasswordItemType>,
     value_data: Vec<u8>,
 }
 
@@ -98,7 +105,7 @@ struct Query {
     authentication_type: Option<String>,
     security_domain: Option<String>,
     server: Option<String>,
-    item_type: Option<String>,
+    item_type: Option<InternetPasswordItemType>,
     value_data: Option<Vec<u8>>,
     return_data: bool,
 }
@@ -164,6 +171,26 @@ fn optional_data(
     Ok(Some(env.mem.bytes_at(bytes.cast(), length).to_vec()))
 }
 
+fn optional_item_type(
+    env: &mut Environment,
+    dictionary: id,
+) -> Result<Option<InternetPasswordItemType>, OSStatus> {
+    let object = get(env, dictionary, K_SEC_ATTR_TYPE);
+    if object == nil {
+        return Ok(None);
+    }
+    if is_instance_of(env, object, "NSString") {
+        return Ok(Some(InternetPasswordItemType::String(
+            ns_string::to_rust_string(env, object).into_owned(),
+        )));
+    }
+    if is_instance_of(env, object, "NSNumber") {
+        let value: u32 = msg![env; object unsignedIntValue];
+        return Ok(Some(InternetPasswordItemType::UnsignedInt(value)));
+    }
+    Err(ERR_SEC_PARAM)
+}
+
 fn parse_query(env: &mut Environment, dictionary: id) -> Result<Query, OSStatus> {
     if !is_instance_of(env, dictionary, "NSDictionary") {
         return Err(ERR_SEC_PARAM);
@@ -206,7 +233,7 @@ fn parse_query(env: &mut Environment, dictionary: id) -> Result<Query, OSStatus>
         authentication_type: optional_string(env, dictionary, K_SEC_ATTR_AUTHENTICATION_TYPE)?,
         security_domain: optional_string(env, dictionary, K_SEC_ATTR_SECURITY_DOMAIN)?,
         server: optional_string(env, dictionary, K_SEC_ATTR_SERVER)?,
-        item_type: optional_string(env, dictionary, K_SEC_ATTR_TYPE)?,
+        item_type: optional_item_type(env, dictionary)?,
         value_data: optional_data(env, dictionary, K_SEC_VALUE_DATA)?,
         return_data,
     })
@@ -692,12 +719,12 @@ mod tests {
         let root_b = test_root("persist-b");
         {
             let mut env = env_for(&root_a);
-            let add = query(&mut env, "player", "api.openfeint.com", Some(b"saved"));
+            let add = exact_wrapper_query(&mut env, "persistent-token", Some(b"saved"));
             assert_eq!(SecItemAdd(&mut env, add, MutPtr::null()), ERR_SEC_SUCCESS);
         }
         {
             let mut env = env_for(&root_a);
-            let find = query(&mut env, "player", "api.openfeint.com", None);
+            let find = exact_wrapper_query(&mut env, "persistent-token", None);
             request_data(&mut env, find);
             let result = env.mem.alloc_and_write(nil);
             assert_eq!(
@@ -711,7 +738,7 @@ mod tests {
         }
         {
             let mut env = env_for(&root_b);
-            let find = query(&mut env, "player", "api.openfeint.com", None);
+            let find = exact_wrapper_query(&mut env, "persistent-token", None);
             request_data(&mut env, find);
             let result = env.mem.alloc_and_write(nil);
             assert_eq!(
@@ -723,6 +750,103 @@ mod tests {
         }
         std::fs::remove_dir_all(root_a).unwrap();
         std::fs::remove_dir_all(root_b).unwrap();
+    }
+
+    #[test]
+    fn schema_one_string_item_type_remains_readable_while_numeric_stays_typed() {
+        #[derive(Serialize)]
+        struct LegacyInternetPasswordRecord {
+            account: Option<String>,
+            authentication_type: Option<String>,
+            security_domain: Option<String>,
+            server: Option<String>,
+            item_type: Option<String>,
+            value_data: Vec<u8>,
+        }
+
+        #[derive(Serialize)]
+        struct LegacyStoreFile {
+            schema: u32,
+            generation: u64,
+            records: Vec<LegacyInternetPasswordRecord>,
+        }
+
+        let legacy = LegacyStoreFile {
+            schema: STORE_SCHEMA,
+            generation: 1,
+            records: vec![LegacyInternetPasswordRecord {
+                account: Some("legacy".to_owned()),
+                authentication_type: None,
+                security_domain: None,
+                server: Some("openfeint.com".to_owned()),
+                item_type: Some("legacy-type".to_owned()),
+                value_data: b"legacy-value".to_vec(),
+            }],
+        };
+        let mut legacy_bytes = Vec::new();
+        plist::to_writer_binary(&mut legacy_bytes, &legacy).unwrap();
+        let decoded: StoreFile = plist::from_bytes(&legacy_bytes).unwrap();
+        assert_eq!(decoded.schema, STORE_SCHEMA);
+        assert_eq!(decoded.records.len(), 1);
+        assert_eq!(
+            decoded.records[0].item_type,
+            Some(InternetPasswordItemType::String(
+                "legacy-type".to_owned()
+            ))
+        );
+
+        let typed = StoreFile {
+            schema: STORE_SCHEMA,
+            generation: 2,
+            records: vec![InternetPasswordRecord {
+                account: Some("typed".to_owned()),
+                authentication_type: None,
+                security_domain: None,
+                server: Some("openfeint.com".to_owned()),
+                item_type: Some(InternetPasswordItemType::UnsignedInt(
+                    OPENFEINT_ITEM_TYPE_OAUT,
+                )),
+                value_data: b"typed-value".to_vec(),
+            }],
+        };
+        let mut typed_bytes = Vec::new();
+        plist::to_writer_binary(&mut typed_bytes, &typed).unwrap();
+        let typed_decoded: StoreFile = plist::from_bytes(&typed_bytes).unwrap();
+        assert_eq!(typed_decoded.records, typed.records);
+    }
+
+    #[test]
+    fn exact_wrapper_pointer_and_item_type_rejections_remain_bounded() {
+        let root = test_root("exact-pointer-type-rejections");
+        let mut env = env_for(&root);
+        let add = exact_wrapper_query(&mut env, "pointer-test", Some(b"value"));
+        let sentinel = k(&mut env, "sentinel");
+        let result = env.mem.alloc_and_write(sentinel);
+        assert_eq!(SecItemAdd(&mut env, add, result), ERR_SEC_PARAM);
+        assert_eq!(env.mem.read(result), nil);
+        env.mem.free(result.cast());
+
+        let wrong_type = exact_wrapper_query(&mut env, "wrong-type", Some(b"value"));
+        let item_type_key = k(&mut env, K_SEC_ATTR_TYPE);
+        let not_a_number: id =
+            msg_class![env; NSData dataWithBytes:ConstVoidPtr::null() length:0];
+        set_object(&mut env, wrong_type, not_a_number, item_type_key);
+        assert_eq!(
+            SecItemAdd(&mut env, wrong_type, MutPtr::null()),
+            ERR_SEC_PARAM
+        );
+
+        let find = exact_wrapper_query(&mut env, "pointer-test", None);
+        request_data(&mut env, find);
+        assert_eq!(
+            SecItemCopyMatching(&mut env, find, MutPtr::null()),
+            ERR_SEC_PARAM
+        );
+        let directory = store_directory(&env);
+        if let Ok(mut entries) = env.fs.enumerate(directory) {
+            assert!(entries.all(|name| generation_from_name(name).is_none()));
+        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -750,7 +874,7 @@ mod tests {
         let root = test_root("reversal");
         let mut env = env_for(&root);
         env.options.openfeint_compatibility_profile = OpenFeintCompatibilityProfile::Baseline;
-        let add = query(&mut env, "player", "api.openfeint.com", Some(b"secret"));
+        let add = exact_wrapper_query(&mut env, "profile-off", Some(b"secret"));
         assert_eq!(
             SecItemAdd(&mut env, add, MutPtr::null()),
             ERR_SEC_UNIMPLEMENTED
