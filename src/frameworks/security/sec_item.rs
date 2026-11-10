@@ -828,8 +828,8 @@ mod tests {
 
         let wrong_type = exact_wrapper_query(&mut env, "wrong-type", Some(b"value"));
         let item_type_key = k(&mut env, K_SEC_ATTR_TYPE);
-        let not_a_number: id =
-            msg_class![env; NSData dataWithBytes:ConstVoidPtr::null() length:0];
+        let null_bytes = ConstVoidPtr::null();
+        let not_a_number: id = msg_class![env; NSData dataWithBytes:null_bytes length:0];
         set_object(&mut env, wrong_type, not_a_number, item_type_key);
         assert_eq!(
             SecItemAdd(&mut env, wrong_type, MutPtr::null()),
