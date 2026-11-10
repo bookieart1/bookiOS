@@ -94,8 +94,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cargo test --lib ui_control_alignment_defaults_and_round_trips --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee ofgreen-uikit-controls.log
-          cargo test --lib slider_state_and_standard_subviews_are_functional --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee -a ofgreen-uikit-controls.log
+          cargo test --lib frameworks::uikit::ui_view::ui_control::tests::ui_control_alignment_defaults_and_round_trips --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee ofgreen-uikit-controls.log
+          cargo test --lib frameworks::uikit::ui_view::ui_control::ui_slider::tests::slider_state_and_standard_subviews_are_functional --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee -a ofgreen-uikit-controls.log
         env:
           CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
 
