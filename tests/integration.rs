@@ -7,6 +7,105 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[derive(Debug, PartialEq, Eq)]
+enum StubBinaryPath<'a> {
+    Framework {
+        name: &'a str,
+        directory: &'a str,
+    },
+    Dylib {
+        file_name: &'a str,
+        link_name: &'a str,
+    },
+}
+
+fn classify_stub_binary_path(dylib_path: &str) -> Result<StubBinaryPath<'_>, String> {
+    if !dylib_path.starts_with('/') {
+        return Err("path is not absolute".to_string());
+    }
+
+    let (directory, binary_name) = dylib_path
+        .rsplit_once('/')
+        .ok_or_else(|| "path has no binary component".to_string())?;
+    if binary_name.is_empty() {
+        return Err("path has an empty binary component".to_string());
+    }
+
+    let directory_name = directory
+        .rsplit_once('/')
+        .map(|(_, name)| name)
+        .unwrap_or(directory);
+    if let Some(framework_name) = directory_name.strip_suffix(".framework") {
+        if framework_name.is_empty() {
+            return Err("framework directory has an empty name".to_string());
+        }
+        if binary_name != framework_name {
+            return Err(format!(
+                "framework binary {binary_name:?} does not match framework directory {directory_name:?}"
+            ));
+        }
+        return Ok(StubBinaryPath::Framework {
+            name: framework_name,
+            directory,
+        });
+    }
+
+    let link_name = binary_name
+        .strip_prefix("lib")
+        .and_then(|name| name.strip_suffix(".dylib"))
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| {
+            "path is neither a Name.framework/Name binary nor a libName.dylib".to_string()
+        })?;
+    Ok(StubBinaryPath::Dylib {
+        file_name: binary_name,
+        link_name,
+    })
+}
+
+#[test]
+fn classify_stub_binary_path_table() {
+    let cases = [
+        (
+            "/System/Library/Frameworks/Foundation.framework/Foundation",
+            Ok(StubBinaryPath::Framework {
+                name: "Foundation",
+                directory: "/System/Library/Frameworks/Foundation.framework",
+            }),
+        ),
+        (
+            "/System/Library/PrivateFrameworks/GraphicsServices.framework/GraphicsServices",
+            Ok(StubBinaryPath::Framework {
+                name: "GraphicsServices",
+                directory: "/System/Library/PrivateFrameworks/GraphicsServices.framework",
+            }),
+        ),
+        (
+            "/usr/lib/libSystem.B.dylib",
+            Ok(StubBinaryPath::Dylib {
+                file_name: "libSystem.B.dylib",
+                link_name: "System.B",
+            }),
+        ),
+        (
+            "/System/Library/PrivateFrameworks/Broken.framework/NotBroken",
+            Err("does not match framework directory"),
+        ),
+    ];
+    for (path, expected) in cases {
+        match (classify_stub_binary_path(path), expected) {
+            (Ok(actual), Ok(expected)) => assert_eq!(actual, expected),
+            (Err(actual), Err(expected_fragment)) => assert!(
+                actual.contains(expected_fragment),
+                "unexpected error for {path:?}: {actual}"
+            ),
+            (actual, expected) => {
+                panic!("unexpected classification for {path:?}: {actual:?}, expected {expected:?}")
+            }
+        }
+    }
+}
+
 // adapted from `assert_cmd` crate
 fn target_dir() -> PathBuf {
     env::current_exe()
@@ -391,41 +490,53 @@ fn test_app() -> Result<(), Box<dyn Error>> {
             stubs_lib_search_arg.as_str(),
             "-lobjc.A",
         ];
-        let dylib_name = dylib_path.rsplit_once("/").unwrap().1;
         // - The only non-framework libs should be libSystem and libobjc, which
         //   we expect to appear in the list before all the frameworks, and need
         //   to be compiled first.
         // - The frameworks have bare filenames, and usually need libobjc.
-        let (compile_args, out_path) =
-            if let Some(framework_path) = dylib_path.strip_prefix("/System/Library/Frameworks/") {
+        let stub_binary = classify_stub_binary_path(&dylib_path).map_err(|reason| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Unsupported registered dylib path {dylib_path:?}: {reason}"),
+            )
+        })?;
+        let (compile_args, out_path, framework_directory) = match stub_binary {
+            StubBinaryPath::Framework { name, directory } => {
                 extra_linker_args.push(format!("-framework"));
-                extra_linker_args.push(dylib_name.to_string());
-                (&compile_args[..], stubs_frameworks_dir.join(framework_path))
-            } else {
-                extra_linker_args.push(format!(
-                    "-l{}",
-                    dylib_name
-                        .strip_prefix("lib")
-                        .unwrap()
-                        .strip_suffix(".dylib")
-                        .unwrap()
-                ));
+                extra_linker_args.push(name.to_string());
+                (
+                    &compile_args[..],
+                    stubs_frameworks_dir
+                        .join(format!("{name}.framework"))
+                        .join(name),
+                    Some(directory),
+                )
+            }
+            StubBinaryPath::Dylib {
+                file_name,
+                link_name,
+            } => {
+                extra_linker_args.push(format!("-l{link_name}"));
                 (
                     // skip "-Ltests/stubs/lib/" and "-lobjc.A"
                     &compile_args[..compile_args.len() - 2],
-                    stubs_lib_dir.join(dylib_name),
+                    stubs_lib_dir.join(file_name),
+                    None,
                 )
-            };
+            }
+        };
         // Ensure that stubs/Frameworks/FooBarKit/ or stubs/lib/ exists
         std::fs::create_dir_all(out_path.parent().unwrap()).unwrap();
 
         // Ideally one could provide two framework search paths.
         // In reality only the first matching path is used, so the stub
         // framework needs to provide headers copied from the sdk.
-        if dylib_path.starts_with("/System/Library/Frameworks") {
+        if let Some(framework_directory) = framework_directory {
             let stub_headers = out_path.parent().unwrap().join("Headers");
-            let framework_dir = dylib_path.rsplit_once("/").unwrap().0;
-            let source_headers = tests_dir.join(format!("common-3.0.sdk/{framework_dir}/Headers"));
+            let source_headers = tests_dir
+                .join("common-3.0.sdk")
+                .join(framework_directory.trim_start_matches('/'))
+                .join("Headers");
 
             if source_headers.exists() {
                 copy_dir_all(source_headers, stub_headers)?;
