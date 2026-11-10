@@ -3,6 +3,9 @@ name: Authoritative consolidation Windows live transfer
 on:
   workflow_dispatch:
   workflow_call:
+  push:
+    branches:
+      - control/authoritative-trenches-reversal-a059582e
 
 permissions:
   contents: read
