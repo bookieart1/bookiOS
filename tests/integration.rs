@@ -6,6 +6,108 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
+
+static INTEGRATION_ENVIRONMENT_LOCK: Mutex<()> = Mutex::new(());
+
+#[derive(Debug, PartialEq, Eq)]
+enum StubBinaryPath<'a> {
+    Framework {
+        name: &'a str,
+        directory: &'a str,
+    },
+    Dylib {
+        file_name: &'a str,
+        link_name: &'a str,
+    },
+}
+
+fn classify_stub_binary_path(dylib_path: &str) -> Result<StubBinaryPath<'_>, String> {
+    if !dylib_path.starts_with('/') {
+        return Err("path is not absolute".to_string());
+    }
+
+    let (directory, binary_name) = dylib_path
+        .rsplit_once('/')
+        .ok_or_else(|| "path has no binary component".to_string())?;
+    if binary_name.is_empty() {
+        return Err("path has an empty binary component".to_string());
+    }
+
+    let directory_name = directory
+        .rsplit_once('/')
+        .map(|(_, name)| name)
+        .unwrap_or(directory);
+    if let Some(framework_name) = directory_name.strip_suffix(".framework") {
+        if framework_name.is_empty() {
+            return Err("framework directory has an empty name".to_string());
+        }
+        if binary_name != framework_name {
+            return Err(format!(
+                "framework binary {binary_name:?} does not match framework directory {directory_name:?}"
+            ));
+        }
+        return Ok(StubBinaryPath::Framework {
+            name: framework_name,
+            directory,
+        });
+    }
+
+    let link_name = binary_name
+        .strip_prefix("lib")
+        .and_then(|name| name.strip_suffix(".dylib"))
+        .filter(|name| !name.is_empty())
+        .ok_or_else(|| {
+            "path is neither a Name.framework/Name binary nor a libName.dylib".to_string()
+        })?;
+    Ok(StubBinaryPath::Dylib {
+        file_name: binary_name,
+        link_name,
+    })
+}
+
+#[test]
+fn classify_stub_binary_path_table() {
+    let cases = [
+        (
+            "/System/Library/Frameworks/Foundation.framework/Foundation",
+            Ok(StubBinaryPath::Framework {
+                name: "Foundation",
+                directory: "/System/Library/Frameworks/Foundation.framework",
+            }),
+        ),
+        (
+            "/System/Library/PrivateFrameworks/GraphicsServices.framework/GraphicsServices",
+            Ok(StubBinaryPath::Framework {
+                name: "GraphicsServices",
+                directory: "/System/Library/PrivateFrameworks/GraphicsServices.framework",
+            }),
+        ),
+        (
+            "/usr/lib/libSystem.B.dylib",
+            Ok(StubBinaryPath::Dylib {
+                file_name: "libSystem.B.dylib",
+                link_name: "System.B",
+            }),
+        ),
+        (
+            "/System/Library/PrivateFrameworks/Broken.framework/NotBroken",
+            Err("does not match framework directory"),
+        ),
+    ];
+    for (path, expected) in cases {
+        match (classify_stub_binary_path(path), expected) {
+            (Ok(actual), Ok(expected)) => assert_eq!(actual, expected),
+            (Err(actual), Err(expected_fragment)) => assert!(
+                actual.contains(expected_fragment),
+                "unexpected error for {path:?}: {actual}"
+            ),
+            (actual, expected) => {
+                panic!("unexpected classification for {path:?}: {actual:?}, expected {expected:?}")
+            }
+        }
+    }
+}
 
 // adapted from `assert_cmd` crate
 fn target_dir() -> PathBuf {
@@ -219,6 +321,76 @@ fn run_test_app(
     Ok(())
 }
 
+fn run_trenches_selector_mutation_app(
+    tests_dir: &Path,
+    extra_compile_args: &[&str],
+) -> Result<(), Box<dyn Error>> {
+    const APP_NAME: &str = "TrenchesSelectorMutation";
+    const CASES: [(&str, &str); 3] = [
+        (
+            "control",
+            "TRENCHESTEST case=control callbacks=ABCD membership=ABCD returned=1 overflow=0 result=PASS",
+        ),
+        (
+            "self-remove",
+            "TRENCHESTEST case=self-remove callbacks=ABCD membership=AC returned=1 overflow=0 result=PASS",
+        ),
+        (
+            "remove-later",
+            "TRENCHESTEST case=remove-later callbacks=ABCD membership=ABC returned=1 overflow=0 result=PASS",
+        ),
+    ];
+
+    let source = tests_dir.join(format!("{}_source/main.m", APP_NAME));
+    let header_root = tests_dir.join(format!("{}_headers", APP_NAME));
+    let header_search_arg = format!("-I{}", header_root.display());
+    let mut fixture_compile_args = Vec::with_capacity(extra_compile_args.len() + 1);
+    fixture_compile_args.push(header_search_arg.as_str());
+    fixture_compile_args.extend_from_slice(extra_compile_args);
+    let app_path = tests_dir.join(format!("{}.app", APP_NAME));
+    let output_path = app_path.join(APP_NAME);
+    build_object(
+        tests_dir,
+        &output_path,
+        [source.as_path()].into_iter(),
+        &fixture_compile_args,
+    )?;
+
+    let binary_path = target_dir().join(format!("touchHLE{}", env::consts::EXE_SUFFIX));
+    let mut results = Vec::new();
+    for (case, expected) in CASES {
+        let output = Command::new(&binary_path)
+            .arg(&app_path)
+            .arg("--headless")
+            .arg("--args")
+            .arg(case)
+            .output()
+            .expect("failed to execute touchHLE process");
+        std::io::stdout().write_all(&output.stdout).unwrap();
+        std::io::stderr().write_all(&output.stderr).unwrap();
+        results.push((case, expected, output));
+    }
+
+    let mut failures = Vec::new();
+    for (case, expected, output) in results {
+        let emulation_started =
+            find_subsequence(&output.stderr, b"CPU emulation begins now.").is_some();
+        let expected_marker = find_subsequence(&output.stdout, expected.as_bytes()).is_some();
+        if !output.status.success() || !emulation_started || !expected_marker {
+            failures.push(format!(
+                "case={case} status={} emulation_started={emulation_started} expected_marker={expected_marker}",
+                output.status
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "Trenches selector-mutation contract failures:\n{}",
+        failures.join("\n")
+    );
+    Ok(())
+}
+
 /// Recursively copy a directory's content to a destination skipping symlinks
 fn copy_dir_all(source: PathBuf, destination: PathBuf) -> std::io::Result<()> {
     std::fs::create_dir_all(&destination)?;
@@ -235,8 +407,7 @@ fn copy_dir_all(source: PathBuf, destination: PathBuf) -> std::io::Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_app() -> Result<(), Box<dyn Error>> {
+fn prepare_integration_environment() -> Result<(PathBuf, Vec<String>), Box<dyn Error>> {
     let tests_dir = current_dir()?.join("tests");
     let stubs_dir = tests_dir.join("stubs");
     let stubs_src_dir = stubs_dir.join("src");
@@ -253,18 +424,18 @@ fn test_app() -> Result<(), Box<dyn Error>> {
     let stubs_frameworks_search_arg = "-F".to_owned() + stubs_frameworks_dir.to_str().unwrap();
     let mut extra_linker_args = Vec::<String>::new();
     let mut extra_compile_args = vec![
-        "-mlinker-version=253",
-        "-Wno-expansion-to-defined",
-        "-Wno-literal-range",
-        bundled_libs_search_arg.as_str(),
-        stubs_lib_search_arg.as_str(),
-        stubs_frameworks_search_arg.as_str(),
-        "-ObjC",
-        "-fblocks",
-        "-fno-objc-exceptions",
+        "-mlinker-version=253".to_string(),
+        "-Wno-expansion-to-defined".to_string(),
+        "-Wno-literal-range".to_string(),
+        bundled_libs_search_arg.clone(),
+        stubs_lib_search_arg.clone(),
+        stubs_frameworks_search_arg,
+        "-ObjC".to_string(),
+        "-fblocks".to_string(),
+        "-fno-objc-exceptions".to_string(),
         // ARC is not available until IOS 5, so it can't be used.
-        "-fno-objc-arc",
-        "-fno-objc-arc-exceptions",
+        "-fno-objc-arc".to_string(),
+        "-fno-objc-arc-exceptions".to_string(),
     ];
 
     // Generate symbol stubs.
@@ -326,41 +497,53 @@ fn test_app() -> Result<(), Box<dyn Error>> {
             stubs_lib_search_arg.as_str(),
             "-lobjc.A",
         ];
-        let dylib_name = dylib_path.rsplit_once("/").unwrap().1;
         // - The only non-framework libs should be libSystem and libobjc, which
         //   we expect to appear in the list before all the frameworks, and need
         //   to be compiled first.
         // - The frameworks have bare filenames, and usually need libobjc.
-        let (compile_args, out_path) =
-            if let Some(framework_path) = dylib_path.strip_prefix("/System/Library/Frameworks/") {
+        let stub_binary = classify_stub_binary_path(&dylib_path).map_err(|reason| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Unsupported registered dylib path {dylib_path:?}: {reason}"),
+            )
+        })?;
+        let (compile_args, out_path, framework_directory) = match stub_binary {
+            StubBinaryPath::Framework { name, directory } => {
                 extra_linker_args.push(format!("-framework"));
-                extra_linker_args.push(dylib_name.to_string());
-                (&compile_args[..], stubs_frameworks_dir.join(framework_path))
-            } else {
-                extra_linker_args.push(format!(
-                    "-l{}",
-                    dylib_name
-                        .strip_prefix("lib")
-                        .unwrap()
-                        .strip_suffix(".dylib")
-                        .unwrap()
-                ));
+                extra_linker_args.push(name.to_string());
+                (
+                    &compile_args[..],
+                    stubs_frameworks_dir
+                        .join(format!("{name}.framework"))
+                        .join(name),
+                    Some(directory),
+                )
+            }
+            StubBinaryPath::Dylib {
+                file_name,
+                link_name,
+            } => {
+                extra_linker_args.push(format!("-l{link_name}"));
                 (
                     // skip "-Ltests/stubs/lib/" and "-lobjc.A"
                     &compile_args[..compile_args.len() - 2],
-                    stubs_lib_dir.join(dylib_name),
+                    stubs_lib_dir.join(file_name),
+                    None,
                 )
-            };
+            }
+        };
         // Ensure that stubs/Frameworks/FooBarKit/ or stubs/lib/ exists
         std::fs::create_dir_all(out_path.parent().unwrap()).unwrap();
 
         // Ideally one could provide two framework search paths.
         // In reality only the first matching path is used, so the stub
         // framework needs to provide headers copied from the sdk.
-        if dylib_path.starts_with("/System/Library/Frameworks") {
+        if let Some(framework_directory) = framework_directory {
             let stub_headers = out_path.parent().unwrap().join("Headers");
-            let framework_dir = dylib_path.rsplit_once("/").unwrap().0;
-            let source_headers = tests_dir.join(format!("common-3.0.sdk/{framework_dir}/Headers"));
+            let source_headers = tests_dir
+                .join("common-3.0.sdk")
+                .join(framework_directory.trim_start_matches('/'))
+                .join("Headers");
 
             if source_headers.exists() {
                 copy_dir_all(source_headers, stub_headers)?;
@@ -372,13 +555,31 @@ fn test_app() -> Result<(), Box<dyn Error>> {
     // Link against libstdc++ to support C++ test sources (virtual inheritance
     // tests etc). The bundled libstdc++ dylib path is already in the search
     // path via bundled_libs_search_arg.
-    extra_compile_args.push("-lstdc++.6.0.9");
+    extra_compile_args.push("-lstdc++.6.0.9".to_string());
+    extra_compile_args.extend(extra_linker_args);
 
-    // Vec<String> -> &[&str] ownership shenanigans
-    for arg in &extra_linker_args {
-        extra_compile_args.push(&arg);
-    }
+    Ok((tests_dir, extra_compile_args))
+}
 
-    // Finally, build TestApp itself.
-    run_test_app(&tests_dir, "TestApp", &extra_compile_args, &[])
+fn borrowed_args(args: &[String]) -> Vec<&str> {
+    args.iter().map(String::as_str).collect()
+}
+
+#[test]
+fn test_app() -> Result<(), Box<dyn Error>> {
+    let _lock = INTEGRATION_ENVIRONMENT_LOCK.lock().unwrap();
+    let (tests_dir, owned_compile_args) = prepare_integration_environment()?;
+    let extra_compile_args = borrowed_args(&owned_compile_args);
+
+    // Finally, build and run TestApp plus the bounded selector-mutation fixture.
+    run_test_app(&tests_dir, "TestApp", &extra_compile_args, &[])?;
+    run_trenches_selector_mutation_app(&tests_dir, &extra_compile_args)
+}
+
+#[test]
+fn trenches_selector_mutation_contract() -> Result<(), Box<dyn Error>> {
+    let _lock = INTEGRATION_ENVIRONMENT_LOCK.lock().unwrap();
+    let (tests_dir, owned_compile_args) = prepare_integration_environment()?;
+    let extra_compile_args = borrowed_args(&owned_compile_args);
+    run_trenches_selector_mutation_app(&tests_dir, &extra_compile_args)
 }
