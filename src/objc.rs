@@ -187,6 +187,11 @@ impl ObjC {
             message_type_info: None,
         }
     }
+
+    #[cfg(test)]
+    pub fn live_object_count(&self) -> usize {
+        self.objects.len()
+    }
 }
 
 pub const DYLIB: HostDylib = HostDylib {

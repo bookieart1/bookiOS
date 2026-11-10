@@ -19,6 +19,7 @@ use crate::objc::{
 };
 use crate::Environment;
 use plist::Value;
+use std::collections::HashSet;
 use std::io::Cursor;
 use std::ops::Add;
 use std::time::{Duration, SystemTime};
@@ -130,6 +131,18 @@ pub(super) fn deserialize_plist_from_file(
     path: &GuestPath,
     array_expected: bool,
 ) -> id {
+    deserialize_plist_from_file_with_mutability(env, path, array_expected, NSPropertyListImmutable)
+}
+
+/// Internal-only variant used by bounded framework compatibility profiles.
+/// Public `NSDictionary`/`NSArray` file loading continues to call the wrapper
+/// above and therefore retains its existing immutable nested-container route.
+pub(super) fn deserialize_plist_from_file_with_mutability(
+    env: &mut Environment,
+    path: &GuestPath,
+    array_expected: bool,
+    mut_options: NSPropertyListMutabilityOptions,
+) -> id {
     log_dbg!("Reading plist from {:?}.", path);
     let Ok(bytes) = env.fs.read(path) else {
         log_dbg!("Couldn't read file, returning nil.");
@@ -156,7 +169,90 @@ pub(super) fn deserialize_plist_from_file(
     // Note: The top-most container mutability may change
     // depending on the caller.
     // (see `NSMutableArray` and `NSMutableDictionary` implementations)
-    deserialize_plist(env, &root, NSPropertyListImmutable)
+    deserialize_plist(env, &root, mut_options)
+}
+
+/// Produce an independent immutable property-list graph without changing the
+/// public NSPropertyListSerialization APIs. The returned object is owned by
+/// the caller. This intentionally validates the complete graph by converting
+/// through the same property-list model used for persistence.
+pub(super) fn deep_immutable_property_list_snapshot(
+    env: &mut Environment,
+    property_list: id,
+) -> id {
+    if let Err(reason) = validate_property_list_graph(env, property_list, &mut HashSet::new()) {
+        env.diagnostic_property_list_rejection(property_list);
+        panic!("NSUserDefaults rejected invalid property-list value: {reason}");
+    }
+    let value = serialize_plist(env, property_list);
+    deserialize_plist(env, &value, NSPropertyListImmutable)
+}
+
+/// Validate before serializing so malformed graphs fail at a bounded point,
+/// before NSUserDefaults changes its application-domain dictionary. Repeated
+/// aliases are valid; only an object encountered again in the active ancestor
+/// chain is a cycle.
+fn validate_property_list_graph(
+    env: &mut Environment,
+    property_list: id,
+    active_containers: &mut HashSet<u32>,
+) -> Result<(), String> {
+    if property_list == nil {
+        return Err("nil nested value".to_owned());
+    }
+    let class: Class = msg![env; property_list class];
+    let dict_class = env.objc.get_known_class("NSDictionary", &mut env.mem);
+    let arr_class = env.objc.get_known_class("NSArray", &mut env.mem);
+    let str_class = env.objc.get_known_class("NSString", &mut env.mem);
+    let data_class = env.objc.get_known_class("NSData", &mut env.mem);
+
+    if env.objc.class_is_subclass_of(class, dict_class) {
+        let identity = property_list.to_bits();
+        if !active_containers.insert(identity) {
+            return Err(format!("dictionary cycle at object 0x{identity:x}"));
+        }
+        let dict_host_obj: DictionaryHostObject =
+            std::mem::take(env.objc.borrow_mut(property_list));
+        let mut pairs = Vec::with_capacity(dict_host_obj.count as usize);
+        for collisions in dict_host_obj.map.values() {
+            pairs.extend(collisions.iter().copied());
+        }
+        *env.objc.borrow_mut(property_list) = dict_host_obj;
+        for (key, value) in pairs {
+            let key_class: Class = msg![env; key class];
+            if !env.objc.class_is_subclass_of(key_class, str_class) {
+                active_containers.remove(&identity);
+                return Err("dictionary key is not an NSString".to_owned());
+            }
+            validate_property_list_graph(env, value, active_containers)?;
+        }
+        active_containers.remove(&identity);
+        Ok(())
+    } else if env.objc.class_is_subclass_of(class, arr_class) {
+        let identity = property_list.to_bits();
+        if !active_containers.insert(identity) {
+            return Err(format!("array cycle at object 0x{identity:x}"));
+        }
+        let arr_host_obj: ArrayHostObject = std::mem::take(env.objc.borrow_mut(property_list));
+        let values = arr_host_obj.array.clone();
+        *env.objc.borrow_mut(property_list) = arr_host_obj;
+        for value in values {
+            validate_property_list_graph(env, value, active_containers)?;
+        }
+        active_containers.remove(&identity);
+        Ok(())
+    } else if env.objc.class_is_subclass_of(class, str_class)
+        || env.objc.class_is_subclass_of(class, data_class)
+        || class == env.objc.get_known_class("NSNumber", &mut env.mem)
+        || class == env.objc.get_known_class("NSDate", &mut env.mem)
+    {
+        Ok(())
+    } else {
+        Err(format!(
+            "unsupported class {}",
+            env.objc.get_class_name(class)
+        ))
+    }
 }
 
 fn deserialize_plist(
@@ -423,5 +519,132 @@ mod tests {
         assert!(!ns_data::to_rust_slice(env, data).is_empty());
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);
+    }
+
+    #[test]
+    fn property_list_mutability_options_remain_distinct() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let child_key = ns_string::get_static_str(env, "child");
+        let leaf_key = ns_string::get_static_str(env, "leaf");
+        let mutable_dict_class = env
+            .objc
+            .get_known_class("NSMutableDictionary", &mut env.mem);
+        let mutable_string_class = env.objc.get_known_class("NSMutableString", &mut env.mem);
+        let mut child = plist::dictionary::Dictionary::new();
+        child.insert("leaf".to_owned(), Value::String("value".to_owned()));
+        let mut root = plist::dictionary::Dictionary::new();
+        root.insert("child".to_owned(), Value::Dictionary(child));
+        let value = Value::Dictionary(root);
+
+        for (option, containers_mutable, leaves_mutable) in [
+            (NSPropertyListImmutable, false, false),
+            (NSPropertyListMutableContainers, true, false),
+            (NSPropertyListMutableContainersAndLeaves, true, true),
+        ] {
+            let loaded = deserialize_plist(env, &value, option);
+            let loaded_child: id = msg![env; loaded objectForKey:child_key];
+            let loaded_leaf: id = msg![env; loaded_child objectForKey:leaf_key];
+            let root_class: Class = msg![env; loaded class];
+            let child_class: Class = msg![env; loaded_child class];
+            let leaf_class: Class = msg![env; loaded_leaf class];
+            assert_eq!(
+                env.objc
+                    .class_is_subclass_of(root_class, mutable_dict_class),
+                containers_mutable
+            );
+            assert_eq!(
+                env.objc
+                    .class_is_subclass_of(child_class, mutable_dict_class),
+                containers_mutable
+            );
+            assert_eq!(
+                env.objc
+                    .class_is_subclass_of(leaf_class, mutable_string_class),
+                leaves_mutable
+            );
+            release(env, loaded);
+        }
+    }
+
+    #[test]
+    fn rfq_file_route_reconstructs_mutable_containers_without_leaking_to_generic_route() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let host_root = std::env::temp_dir().join(format!(
+            "idared-rfq-plist-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&host_root).unwrap();
+        *env.fs = crate::fs::Fs::new_fake_fs_with_writable_host_root(&host_root);
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+
+        let child_key = ns_string::get_static_str(env, "child");
+        let value_key = ns_string::get_static_str(env, "value");
+        let new_key = ns_string::get_static_str(env, "new-key");
+        let original_value = ns_string::get_static_str(env, "original");
+        let changed_value = ns_string::get_static_str(env, "changed");
+        let child: id = msg_class![env; NSMutableDictionary new];
+        () = msg![env; child setObject:original_value forKey:value_key];
+        let root: id = msg_class![env; NSMutableDictionary new];
+        () = msg![env; root setObject:child forKey:child_key];
+
+        let property_list = serialize_plist(env, root);
+        let mut bytes = Vec::new();
+        property_list.to_writer_binary(&mut bytes).unwrap();
+        let directory = GuestPath::new("/Library/Preferences");
+        env.fs.create_dir_all(directory).unwrap();
+        let path = GuestPath::new("/Library/Preferences/rfq-test.plist");
+        env.fs.write(path, &bytes).unwrap();
+
+        let loaded = deserialize_plist_from_file_with_mutability(
+            env,
+            path,
+            /* array_expected: */ false,
+            NSPropertyListMutableContainers,
+        );
+        assert_ne!(loaded, nil);
+        let loaded_child: id = msg![env; loaded objectForKey:child_key];
+        () = msg![env; loaded setObject:changed_value forKey:new_key];
+        () = msg![env; loaded_child setObject:changed_value forKey:value_key];
+        let changed: id = msg![env; loaded_child objectForKey:value_key];
+        assert_eq!(changed, changed_value);
+
+        // Explicit mutableCopy remains shallow: it replaces the outer
+        // container but retains the reconstructed child container.
+        let copied: id = msg![env; loaded mutableCopy];
+        let copied_child: id = msg![env; copied objectForKey:child_key];
+        assert_ne!(copied, loaded);
+        assert_eq!(copied_child, loaded_child);
+        let copy_only_key = ns_string::get_static_str(env, "copy-only");
+        () = msg![env; copied setObject:changed_value forKey:copy_only_key];
+        let original_copy_only: id = msg![env; loaded objectForKey:copy_only_key];
+        assert_eq!(original_copy_only, nil);
+
+        // The existing generic file-loading route remains unchanged.
+        let generic = deserialize_plist_from_file(env, path, /* array_expected: */ false);
+        assert_ne!(generic, nil);
+        let generic_child: id = msg![env; generic objectForKey:child_key];
+        let generic_root_mutation = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            () = msg![env; generic setObject:changed_value forKey:new_key];
+        }));
+        assert!(generic_root_mutation.is_err());
+        let generic_child_mutation = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            () = msg![env; generic_child setObject:changed_value forKey:value_key];
+        }));
+        assert!(generic_child_mutation.is_err());
+
+        release(env, generic);
+        release(env, copied);
+        release(env, loaded);
+        release(env, root);
+        release(env, child);
+        release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+        std::fs::remove_dir_all(&host_root).unwrap();
     }
 }
