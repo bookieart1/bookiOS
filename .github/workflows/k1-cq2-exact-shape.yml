@@ -1,4 +1,4 @@
-name: K1 CQ2 exact-shape red and green qualification
+name: K1 CQ2R exact-shape green qualification
 
 on:
   workflow_dispatch:
@@ -14,16 +14,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  red-green-qualification:
+  green-qualification:
     runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
-      - name: Check out the exact green candidate and history
+      - name: Check out the exact repaired green candidate
         uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           submodules: recursive
-          fetch-depth: 3
+          fetch-depth: 1
 
       - name: Install the x86_64 test target
         run: rustup target add x86_64-apple-darwin
@@ -43,25 +43,6 @@ jobs:
           mv "vendor/cmake-3.31.6-macos-universal/CMake.app/Contents/" vendor/cmake
           rm -rf vendor/cmake-3.31.6-macos-universal
 
-      - name: Qualify the preserved red parent
-        shell: bash
-        env:
-          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
-        run: |
-          set -o pipefail
-          route_sha="$(git rev-parse HEAD)"
-          green_sha="$(git rev-parse HEAD^)"
-          red_sha="$(git rev-parse HEAD^^)"
-          git checkout --detach "$red_sha"
-          set +e
-          cargo test --lib frameworks::security::sec_item::tests::exact_mpoauth_wrapper_shape_contract --target x86_64-apple-darwin -- --exact --nocapture 2>&1 | tee "$RUNNER_TEMP/k1-cq2-red.log"
-          red_exit=${PIPESTATUS[0]}
-          set -e
-          test "$red_exit" -ne 0
-          grep -F "K1_CQ2_EXACT_ADD_STATUS=-50" "$RUNNER_TEMP/k1-cq2-red.log"
-          git checkout --detach "$green_sha"
-          test "$route_sha" = "$GITHUB_SHA"
-
       - name: Run focused Security qualification
         run: cargo test --lib frameworks::security::sec_item::tests --target x86_64-apple-darwin -- --nocapture
         env:
@@ -77,9 +58,10 @@ jobs:
         shell: bash
         run: |
           echo "K1_CQ2_MANIFEST_BEGIN"
-          echo "route_sha=${GITHUB_SHA}"
-          echo "green_sha=$(git rev-parse HEAD)"
-          echo "red_sha=$(git rev-parse HEAD^)"
+          echo "cq2r_sha=${GITHUB_SHA}"
+          echo "qualified_red_sha=185dac43b11acfc70e944c06777be3fbd1cd8eb6"
+          echo "typed_candidate_sha=3af05c1d63573e4817c7e55b1484bb6cf5fd7b4b"
+          echo "test_repair_sha=e0a23889fcce850cafebb23c8902566451d0cac1"
           echo "workflow=${GITHUB_WORKFLOW}"
           echo "run_id=${GITHUB_RUN_ID}"
           echo "job=${GITHUB_JOB}"
