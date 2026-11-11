@@ -72,17 +72,17 @@ pub enum UserDefaultsCompatibilityProfile {
     Rfq10B500OldLinkedV1,
 }
 
-/// Selects ordinary guest OpenFeint class loading or its explicit diagnostic
-/// rollback.
+/// Selects the safer substitute OpenFeint path or explicit guest OpenFeint
+/// class loading.
 ///
-/// The default permits original guest OpenFeint classes for every application
-/// that contains them. `Baseline` retains the old fake-class path solely for
-/// controlled reversal. Network access remains controlled independently and
-/// is off by default.
+/// `Baseline` is the default for every application and retains the substitute
+/// fake-class behavior. `GuestLocalInitV1` permits original guest OpenFeint
+/// classes only when explicitly selected. Network access remains controlled
+/// independently and is off by default.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub enum OpenFeintCompatibilityProfile {
-    Baseline,
     #[default]
+    Baseline,
     GuestLocalInitV1,
 }
 
@@ -186,12 +186,12 @@ impl Default for Options {
             diagnostics: false,
             diagnostic_campaign: DiagnosticCampaign::Off,
             diagnostic_watch_addresses: Vec::new(),
-            // These are ordinary shared contracts in Development 2.51. The
-            // baseline values remain parseable only as explicit diagnostic
-            // reversals; no bundle identity activates the corrected behavior.
+            // NSUserDefaults remains an ordinary shared contract. Guest
+            // OpenFeint loading is intentionally separate and opt-in; no
+            // bundle identity activates it.
             user_defaults_compatibility_profile:
                 UserDefaultsCompatibilityProfile::Rfq10B500OldLinkedV1,
-            openfeint_compatibility_profile: OpenFeintCompatibilityProfile::GuestLocalInitV1,
+            openfeint_compatibility_profile: OpenFeintCompatibilityProfile::Baseline,
         }
     }
 }
@@ -579,13 +579,14 @@ mod tests {
     }
 
     #[test]
-    fn openfeint_guest_contract_is_default_and_not_bundle_scoped() {
+    fn openfeint_baseline_is_default_and_guest_contract_is_explicit() {
         let mut options = Options::default();
         assert_eq!(
             options.openfeint_compatibility_profile,
-            OpenFeintCompatibilityProfile::GuestLocalInitV1
+            OpenFeintCompatibilityProfile::Baseline
         );
-        assert!(options.openfeint_compatibility_profile.guest_local_init());
+        assert_eq!(options.openfeint_compatibility_profile.as_str(), "baseline");
+        assert!(!options.openfeint_compatibility_profile.guest_local_init());
 
         assert_eq!(
             options.parse_argument("--openfeint-profile=guest-local-init-v1"),
@@ -601,6 +602,10 @@ mod tests {
             .parse_argument("--openfeint-profile=unknown")
             .is_err());
         assert_eq!(
+            options.openfeint_compatibility_profile,
+            OpenFeintCompatibilityProfile::GuestLocalInitV1
+        );
+        assert_eq!(
             options.parse_argument("--openfeint-profile=baseline"),
             Ok(true)
         );
@@ -609,5 +614,11 @@ mod tests {
             OpenFeintCompatibilityProfile::Baseline
         );
         assert!(!options.openfeint_compatibility_profile.guest_local_init());
+
+        let unrelated_app = Options::default();
+        assert_eq!(
+            unrelated_app.openfeint_compatibility_profile,
+            OpenFeintCompatibilityProfile::Baseline
+        );
     }
 }
