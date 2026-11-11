@@ -3471,7 +3471,8 @@ fn get_bytes_range_inner(
         .expect("NSString byte-conversion range overflow");
     assert!(
         end <= all_units.len(),
-        "NSString byte-conversion range out of bounds"
+        "NSString byte-conversion range out of bounds: start={start} requested={requested} end={end} actual={}",
+        all_units.len()
     );
     let units = &all_units[start..end];
     let lossy = options & NSStringEncodingConversionAllowLossy != 0;
