@@ -1,0 +1,81 @@
+name: Development 2.55 campaign qualification
+
+on:
+  push:
+    branches:
+      - compatibility/development-2.55-broad-campaign
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: development-255-campaign-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  focused-contracts:
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.cargo-target/host
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Verify exact source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git diff --check 82727c48c747252e3dd5ad301bb1423f55dbf2b5..HEAD
+
+      - name: Restore CMake 3.31.6
+        id: cache-cmake
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/cmake
+          key: cmake_3_31_6_macos
+
+      - name: Download CMake 3.31.6 on cache miss
+        if: steps.cache-cmake.outputs.cache-hit != 'true'
+        run: curl -L -O "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-macos-universal.tar.gz"
+
+      - name: Extract CMake 3.31.6 on cache miss
+        if: steps.cache-cmake.outputs.cache-hit != 'true'
+        run: tar xzf cmake-3.31.6-macos-universal.tar.gz -C vendor && mv vendor/cmake-3.31.6-macos-universal/CMake.app/Contents vendor/cmake && rm -rf vendor/cmake-3.31.6-macos-universal
+
+      - name: Restore host Cargo cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .cargo-target/host
+          key: development-255-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'src/**/Cargo.toml', '.cargo/config.toml') }}-${{ github.sha }}
+          restore-keys: |
+            development-255-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'Cargo.toml', 'src/**/Cargo.toml', '.cargo/config.toml') }}-
+            cargo-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install host target
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Run selected focused contracts sequentially
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked --lib development_255_ --target x86_64-apple-darwin -- --test-threads=1 --nocapture 2>&1 | tee development-255-focused.log
+        env:
+          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+
+      - name: Upload focused evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: development-255-focused-${{ github.sha }}
+          path: development-255-focused.log
+          if-no-files-found: error
