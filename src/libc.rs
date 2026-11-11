@@ -60,6 +60,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
         dispatch::CONSTANTS,
         stdio::CONSTANTS,
         stdlib::CONSTANTS,
+        time::CONSTANTS,
         mach::init::CONSTANTS,
         netdb::CONSTANTS,
     ],

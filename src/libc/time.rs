@@ -5,7 +5,7 @@
  */
 //! `time.h` (C) and `sys/time.h` (POSIX)
 
-use crate::dyld::{export_c_func, FunctionExports};
+use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
 use crate::libc::clocale::{setlocale, LC_CTYPE};
 use crate::libc::errno::set_errno;
 use crate::libc::stdio::printf::{isspace, isspace_inner};
@@ -26,6 +26,21 @@ pub struct State {
 #[allow(non_camel_case_types)]
 /// Time in seconds since UNIX epoch (1970-01-01 00:00:00)
 pub type time_t = i32;
+
+/// Darwin's legacy process timezone globals. touchHLE currently models local
+/// time as UTC, so the seconds-west offset and daylight-saving flag are both
+/// zero. These are data symbols (not pointer constants): guest code loads the
+/// values directly from the addresses installed by dyld.
+pub const CONSTANTS: ConstantExports = &[
+    (
+        "_timezone",
+        HostConstant::Custom(|env| env.mem.alloc_and_write(0i32).cast_void().cast_const()),
+    ),
+    (
+        "_daylight",
+        HostConstant::Custom(|env| env.mem.alloc_and_write(0i32).cast_void().cast_const()),
+    ),
+];
 
 #[allow(non_camel_case_types)]
 type clock_t = u64;
