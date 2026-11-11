@@ -138,4 +138,11 @@ mod tests {
         );
         assert_eq!(env.mem.read(masks_count), 0);
     }
+
+    #[test]
+    fn thread_exception_port_setter_is_exported() {
+        assert!(FUNCTIONS
+            .iter()
+            .any(|(name, _)| *name == "_thread_set_exception_ports"));
+    }
 }
