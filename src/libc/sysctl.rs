@@ -454,7 +454,7 @@ fn sysctlbyname(
     // no L2 cache. Historical Darwin therefore has no value for this optional
     // name: callers must receive the normal "name not found" result rather
     // than an invented cache size or an emulator panic.
-    if name_str == "hw.l2cachesize" {
+    if name_str == "hw.l2cachesize" || name_str == "hw.l3cachesize" {
         log_dbg!("sysctlbyname({name_str:?}) is unavailable on iPhone1,1");
         set_errno(env, ENOENT);
         return -1;
