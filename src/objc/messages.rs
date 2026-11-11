@@ -352,6 +352,17 @@ fn objc_msgSend_inner(
             selector_name
         );
     }
+    if super2.is_none() {
+        let selector_name = selector.as_str(&env.mem).to_owned();
+        if let Some(returns_object) = crate::libc::dispatch::try_objc_block_message(
+            env,
+            receiver.cast(),
+            &selector_name,
+        ) {
+            env.diagnostic_end(diagnostic_call, returns_object);
+            return;
+        }
+    }
     if !skip_initialize {
         maybe_initialize_class(env, receiver);
     }

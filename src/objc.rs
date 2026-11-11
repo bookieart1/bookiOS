@@ -169,6 +169,9 @@ pub struct ObjC {
     /// Type information isn't part of the `objc_msgSend` ABI, so an alternative
     /// channel is needed.
     message_type_info: Option<(std::any::TypeId, &'static str)>,
+
+    /// Stable legacy Blocks ABI class markers exported by libobjc.
+    block_markers: [Class; 3],
 }
 
 impl ObjC {
@@ -185,7 +188,16 @@ impl ObjC {
             cached_guest_functions: HashMap::new(),
             class_name_cstrings: HashMap::new(),
             message_type_info: None,
+            block_markers: [nil; 3],
         }
+    }
+
+    pub(crate) fn set_block_marker(&mut self, index: usize, marker: Class) {
+        self.block_markers[index] = marker;
+    }
+
+    pub(crate) fn block_marker(&self, index: usize) -> Class {
+        self.block_markers[index]
     }
 
     #[cfg(test)]
@@ -213,17 +225,39 @@ const CONSTANTS: ConstantExports = &[
     // stable, distinct, non-null addresses so legacy Blocks ABI checks work.
     (
         "__NSConcreteStackBlock",
-        HostConstant::Custom(|env| env.mem.alloc_and_write(0u8).cast().cast_const()),
+        HostConstant::Custom(export_stack_block_marker),
     ),
     (
         "__NSConcreteGlobalBlock",
-        HostConstant::Custom(|env| env.mem.alloc_and_write(0u8).cast().cast_const()),
+        HostConstant::Custom(export_global_block_marker),
     ),
     (
         "__NSConcreteMallocBlock",
-        HostConstant::Custom(|env| env.mem.alloc_and_write(0u8).cast().cast_const()),
+        HostConstant::Custom(export_malloc_block_marker),
     ),
 ];
+
+fn export_block_marker(env: &mut Environment, requested: usize) -> ConstVoidPtr {
+    if env.objc.block_marker(0) == nil {
+        for index in 0..3 {
+            let marker = env.mem.alloc_and_write(0u8).cast();
+            env.objc.set_block_marker(index, marker);
+        }
+    }
+    env.objc.block_marker(requested).cast().cast_const()
+}
+
+fn export_stack_block_marker(env: &mut Environment) -> ConstVoidPtr {
+    export_block_marker(env, 0)
+}
+
+fn export_global_block_marker(env: &mut Environment) -> ConstVoidPtr {
+    export_block_marker(env, 1)
+}
+
+fn export_malloc_block_marker(env: &mut Environment) -> ConstVoidPtr {
+    export_block_marker(env, 2)
+}
 
 /// Block support is iOS 4+, but it seems like Block Runtime Helpers
 /// could still be called on even if minimal iOS version is set to 3.x?

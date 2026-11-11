@@ -20,11 +20,18 @@ const QUEUE_GLOBAL_OFFSET: u32 = 2;
 pub struct State {
     main_queue: MutVoidPtr,
     global_queues: HashMap<i32, MutVoidPtr>,
+    copied_blocks: HashMap<u32, OwnedBlock>,
+}
+
+struct OwnedBlock {
+    copied: CopiedBlock,
+    retain_count: u32,
 }
 
 /// The fixed header of a 32-bit Apple block literal. Captured variables, if
 /// any, follow this header and are accessed by the block's invoke function.
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub(crate) struct BlockLiteral {
     _isa: MutVoidPtr,
     _flags: i32,
@@ -98,6 +105,104 @@ pub(crate) fn dispose_copied_block(env: &mut Environment, copied: CopiedBlock) {
         () = dispose_helper.call_from_host(env, (copied.block.cast_void(),));
     }
     env.mem.free(copied.block.cast_void());
+}
+
+fn block_kind(env: &Environment, block: MutPtr<BlockLiteral>) -> Option<usize> {
+    let isa = env.mem.read(block)._isa;
+    (0..3).find(|&index| env.objc.block_marker(index).to_bits() == isa.to_bits())
+}
+
+fn copy_objc_block(env: &mut Environment, block: MutPtr<BlockLiteral>) -> MutPtr<BlockLiteral> {
+    match block_kind(env, block) {
+        Some(0) => {
+            let copied = copy_block_for_later(env, block);
+            let result = copied.block();
+            let mut literal = env.mem.read(result);
+            literal._isa = env.objc.block_marker(2).cast();
+            env.mem.write(result, literal);
+            env.libc_state.dispatch.copied_blocks.insert(
+                result.to_bits(),
+                OwnedBlock {
+                    copied,
+                    retain_count: 1,
+                },
+            );
+            result
+        }
+        Some(1) => block,
+        Some(2) => {
+            let owned = env
+                .libc_state
+                .dispatch
+                .copied_blocks
+                .get_mut(&block.to_bits())
+                .expect("malloc Block is not owned by the Block runtime");
+            owned.retain_count = owned.retain_count.checked_add(1).unwrap();
+            block
+        }
+        _ => panic!("Object is not a recognized legacy Block"),
+    }
+}
+
+fn release_objc_block(env: &mut Environment, block: MutPtr<BlockLiteral>) {
+    if block_kind(env, block) != Some(2) {
+        return;
+    }
+    let bits = block.to_bits();
+    let should_dispose = {
+        let owned = env
+            .libc_state
+            .dispatch
+            .copied_blocks
+            .get_mut(&bits)
+            .expect("malloc Block is not owned by the Block runtime");
+        assert_ne!(owned.retain_count, 0);
+        owned.retain_count -= 1;
+        owned.retain_count == 0
+    };
+    if should_dispose {
+        let owned = env.libc_state.dispatch.copied_blocks.remove(&bits).unwrap();
+        dispose_copied_block(env, owned.copied);
+    }
+}
+
+/// Handle the NSObject-compatible surface implemented by legacy Blocks.
+/// Returns whether the selector was handled and whether it returned an object.
+pub(crate) fn try_objc_block_message(
+    env: &mut Environment,
+    receiver: MutPtr<BlockLiteral>,
+    selector: &str,
+) -> Option<bool> {
+    block_kind(env, receiver)?;
+    match selector {
+        "copy" | "copyWithZone:" => {
+            let copied = copy_objc_block(env, receiver);
+            env.cpu.regs_mut()[0] = copied.to_bits();
+            env.cpu.regs_mut()[1] = 0;
+            Some(true)
+        }
+        "retain" => {
+            if block_kind(env, receiver) == Some(2) {
+                let _ = copy_objc_block(env, receiver);
+            }
+            env.cpu.regs_mut()[0] = receiver.to_bits();
+            env.cpu.regs_mut()[1] = 0;
+            Some(true)
+        }
+        "release" => {
+            release_objc_block(env, receiver);
+            env.cpu.regs_mut()[0..2].fill(0);
+            Some(false)
+        }
+        "autorelease" => {
+            // Blocks copied by framework owners are released by those owners.
+            // Legacy stack/global Blocks do not gain lifetime from autorelease.
+            env.cpu.regs_mut()[0] = receiver.to_bits();
+            env.cpu.regs_mut()[1] = 0;
+            Some(true)
+        }
+        _ => None,
+    }
 }
 
 fn new_queue_object(env: &mut Environment, global: bool) -> MutVoidPtr {
@@ -309,5 +414,46 @@ mod tests {
         dispatch_release(&mut env, queue);
         assert_eq!(env.mem.read(words + QUEUE_RETAIN_COUNT_OFFSET), 1);
         dispatch_release(&mut env, queue);
+    }
+
+    #[test]
+    fn development_255_legacy_objc_stack_block_copy_contract() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let stack_marker = env.mem.alloc_and_write(0u8).cast();
+        let global_marker = env.mem.alloc_and_write(0u8).cast();
+        let malloc_marker = env.mem.alloc_and_write(0u8).cast();
+        env.objc.set_block_marker(0, stack_marker);
+        env.objc.set_block_marker(1, global_marker);
+        env.objc.set_block_marker(2, malloc_marker);
+
+        let descriptor = env.mem.alloc(8).cast::<u32>();
+        env.mem.write(descriptor, 0);
+        env.mem.write(descriptor + 1, std::mem::size_of::<BlockLiteral>() as u32);
+        let block = env.mem.alloc_and_write(BlockLiteral {
+            _isa: stack_marker.cast(),
+            _flags: 0,
+            _reserved: 0,
+            invoke: GuestFunction::from_addr_with_thumb_bit(0),
+            _descriptor: descriptor.cast(),
+        });
+
+        assert_eq!(try_objc_block_message(&mut env, block, "copy"), Some(true));
+        let copied = MutPtr::<BlockLiteral>::from_bits(env.cpu.regs()[0]);
+        assert_ne!(copied, block);
+        assert_eq!(env.mem.read(copied)._isa, malloc_marker.cast());
+        assert_eq!(env.libc_state.dispatch.copied_blocks.len(), 1);
+        assert_eq!(try_objc_block_message(&mut env, copied, "retain"), Some(true));
+        assert_eq!(
+            env.libc_state
+                .dispatch
+                .copied_blocks
+                .get(&copied.to_bits())
+                .unwrap()
+                .retain_count,
+            2
+        );
+        assert_eq!(try_objc_block_message(&mut env, copied, "release"), Some(false));
+        assert_eq!(try_objc_block_message(&mut env, copied, "release"), Some(false));
+        assert!(env.libc_state.dispatch.copied_blocks.is_empty());
     }
 }
