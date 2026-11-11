@@ -70,6 +70,12 @@ const UIViewAnimationCurveEaseInOut: UIViewAnimationCurve = 0;
 const UIViewAnimationCurveEaseIn: UIViewAnimationCurve = 1;
 const UIViewAnimationCurveEaseOut: UIViewAnimationCurve = 2;
 const UIViewAnimationCurveLinear: UIViewAnimationCurve = 3;
+type UIViewAnimationTransition = NSInteger;
+const UIViewAnimationTransitionNone: UIViewAnimationTransition = 0;
+const UIViewAnimationTransitionFlipFromLeft: UIViewAnimationTransition = 1;
+const UIViewAnimationTransitionFlipFromRight: UIViewAnimationTransition = 2;
+const UIViewAnimationTransitionCurlUp: UIViewAnimationTransition = 3;
+const UIViewAnimationTransitionCurlDown: UIViewAnimationTransition = 4;
 
 #[derive(Default)]
 pub struct State {
@@ -448,6 +454,29 @@ pub const CLASSES: ClassExports = objc_classes! {
         _ => panic!("Unknown UIViewAnimationCurve {:?}", curve),
     };
     () = msg_class![env; CATransaction setAnimationTimingFunction:timing_function];
+}
+
++ (())setAnimationTransition:(UIViewAnimationTransition)transition
+                     forView:(id)view
+                        cache:(bool)cache {
+    log_dbg!("[UIView setAnimationTransition:{} forView:{:?} cache:{}]", transition, view, cache);
+    if transition == UIViewAnimationTransitionNone {
+        return;
+    }
+    assert_ne!(view, nil);
+    let (transition_type, subtype) = match transition {
+        UIViewAnimationTransitionFlipFromLeft => ("push", "fromLeft"),
+        UIViewAnimationTransitionFlipFromRight => ("push", "fromRight"),
+        UIViewAnimationTransitionCurlUp => ("reveal", "fromTop"),
+        UIViewAnimationTransitionCurlDown => ("reveal", "fromBottom"),
+        _ => panic!("Unknown UIViewAnimationTransition {transition}"),
+    };
+    let animation: id = msg_class![env; CATransition new];
+    () = msg![env; animation setType:(get_static_str(env, transition_type))];
+    () = msg![env; animation setSubtype:(get_static_str(env, subtype))];
+    let layer: id = msg![env; view layer];
+    () = msg![env; layer addAnimation:animation forKey:(get_static_str(env, "UIViewAnimationTransition"))];
+    release(env, animation);
 }
 
 + (())setAnimationRepeatAutoreverses:(bool)repeat_autoreverses {
