@@ -1722,15 +1722,22 @@ pub const CLASSES: ClassExports = objc_classes! {
          atomically:(bool)use_aux_file
            encoding:(NSStringEncoding)encoding
               error:(MutPtr<id>)error { // NSError**
-    assert!(encoding == NSUTF8StringEncoding || encoding == NSASCIIStringEncoding);
-
-    let string = to_rust_string(env, this);
-    let c_string = env.mem.alloc_and_write_cstr(string.as_bytes());
-    // This should not include a NULL terminator!
-    let length: NSUInteger = string.len().try_into().unwrap();
-    // NSData will handle releasing the string (it is autoreleased)
-    let data: id = msg_class![env; NSData dataWithBytesNoCopy:(c_string.cast_void())
-                                                    length:length];
+    let units: Vec<u16> = env
+        .objc
+        .borrow::<StringHostObject>(this)
+        .iter_code_units()
+        .collect();
+    let Some(bytes) = encode_utf16_units(&units, encoding, false, true) else {
+        return false;
+    };
+    let length: NSUInteger = bytes.len().try_into().unwrap();
+    let buffer = env.mem.alloc(length);
+    env.mem
+        .bytes_at_mut(buffer.cast(), length)
+        .copy_from_slice(&bytes);
+    let data: id = msg_class![env; NSData dataWithBytes:(buffer.cast_const())
+                                              length:length];
+    env.mem.free(buffer);
 
     // TODO: write extended attributes about text encoding
     let success: bool = msg![env; data writeToFile:path atomically:use_aux_file];
