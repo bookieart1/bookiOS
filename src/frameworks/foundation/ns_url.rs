@@ -121,6 +121,35 @@ pub const CLASSES: ClassExports = objc_classes! {
     this
 }
 
+- (id)initWithScheme:(id)scheme // NSString*
+                 host:(id)host // NSString*
+                 path:(id)path { // NSString*
+    if scheme == nil {
+        release(env, this);
+        return nil;
+    }
+    let scheme = to_rust_string(env, scheme).into_owned();
+    let host = if host == nil {
+        String::new()
+    } else {
+        to_rust_string(env, host).into_owned()
+    };
+    let path = if path == nil {
+        String::new()
+    } else {
+        to_rust_string(env, path).into_owned()
+    };
+    let absolute = if host.is_empty() {
+        format!("{scheme}:{path}")
+    } else if path.is_empty() || path.starts_with('/') {
+        format!("{scheme}://{host}{path}")
+    } else {
+        format!("{scheme}://{host}/{path}")
+    };
+    let absolute = from_rust_string(env, absolute);
+    msg![env; this initWithString:absolute]
+}
+
 - (id)initWithString:(id)url // NSString*
        relativeToURL:(id)base_url { // NSURL*
     if url == nil || base_url == nil {
