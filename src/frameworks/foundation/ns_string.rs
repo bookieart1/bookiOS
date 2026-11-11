@@ -3313,11 +3313,12 @@ mod byte_buffer_tests {
     #[test]
     fn utf16_buffer_conversion_uses_two_bytes_per_code_unit() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let string = from_rust_string(&mut env, "AB".to_owned());
+        let env = &mut env;
+        let string = from_rust_string(env, "AB".to_owned());
         let buffer = env.mem.alloc(4).cast();
 
         assert!(get_bytes_buffer_inner(
-            &mut env,
+            env,
             string,
             buffer,
             4,
@@ -3325,6 +3326,9 @@ mod byte_buffer_tests {
             false,
         ));
         assert_eq!(env.mem.bytes_at(buffer, 4), &[b'A', 0, b'B', 0]);
+        let byte_length: NSUInteger =
+            msg![env; string lengthOfBytesUsingEncoding:NSUTF16StringEncoding];
+        assert_eq!(byte_length, 4);
     }
 }
 

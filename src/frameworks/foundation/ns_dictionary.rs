@@ -1515,6 +1515,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn keyed_subscript_reads_the_same_value_as_object_for_key() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let key = get_static_str(env, "key");
+        let value = get_static_str(env, "value");
+        let dictionary: id =
+            msg_class![env; NSDictionary dictionaryWithObject:value forKey:key];
+
+        let subscripted: id = msg![env; dictionary objectForKeyedSubscript:key];
+
+        assert_eq!(subscripted, value);
+    }
+
+    #[test]
     fn mutable_singleton_factory_and_keyed_archive_preserve_mutability() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
