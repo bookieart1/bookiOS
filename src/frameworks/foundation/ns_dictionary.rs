@@ -542,6 +542,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     value != nil
 }
 
+- (id)objectForKeyedSubscript:(id)key {
+    msg![env; this objectForKey:key]
+}
+
 // These probably comes from some category related to plists.
 - (id)initWithContentsOfFile:(id)path { // NSString*
     release(env, this);
