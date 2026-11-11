@@ -749,6 +749,12 @@ fn offline_render_completion_status(requested_frames: u32, produced_bytes: u32) 
     }
 }
 
+fn queue_uses_openal_rendering(
+    _offline_render_format: Option<AudioStreamBasicDescription>,
+) -> bool {
+    true
+}
+
 #[cfg(test)]
 mod development_255_tests {
     use super::*;
@@ -760,6 +766,23 @@ mod development_255_tests {
             offline_render_completion_status(1, 0),
             kAudioQueueErr_InvalidRunState
         );
+    }
+
+    #[test]
+    fn development_255_offline_audio_queue_has_a_single_buffer_consumer() {
+        let offline_format = AudioStreamBasicDescription {
+            sample_rate: 44_100.0,
+            format_id: kAudioFormatLinearPCM,
+            format_flags: 0,
+            bytes_per_packet: 2,
+            frames_per_packet: 1,
+            bytes_per_frame: 2,
+            channels_per_frame: 1,
+            bits_per_channel: 16,
+            _reserved: 0,
+        };
+        assert!(!queue_uses_openal_rendering(Some(offline_format)));
+        assert!(queue_uses_openal_rendering(None));
     }
 }
 
