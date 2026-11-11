@@ -33,6 +33,10 @@ struct NSNumberFormatterHostObject {
     currency_grouping_separator: id,
     currency_code: id,
     currency_symbol: id,
+    positive_prefix: id,
+    positive_suffix: id,
+    negative_prefix: id,
+    negative_suffix: id,
     locale: id,
 }
 impl HostObject for NSNumberFormatterHostObject {}
@@ -59,6 +63,10 @@ pub const CLASSES: ClassExports = objc_classes! {
         currency_grouping_separator: nil,
         currency_code: nil,
         currency_symbol: nil,
+        positive_prefix: nil,
+        positive_suffix: nil,
+        negative_prefix: nil,
+        negative_suffix: nil,
         locale: nil,
     });
     env.objc.alloc_object(this, host_object, &mut env.mem)
@@ -66,7 +74,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())dealloc {
     let (positive_format, negative_format, grouping_separator,
-         currency_grouping_separator, currency_code, currency_symbol, locale) = {
+         currency_grouping_separator, currency_code, currency_symbol,
+         positive_prefix, positive_suffix, negative_prefix, negative_suffix, locale) = {
         let state = env.objc.borrow_mut::<NSNumberFormatterHostObject>(this);
         (
             std::mem::replace(&mut state.positive_format, nil),
@@ -75,6 +84,10 @@ pub const CLASSES: ClassExports = objc_classes! {
             std::mem::replace(&mut state.currency_grouping_separator, nil),
             std::mem::replace(&mut state.currency_code, nil),
             std::mem::replace(&mut state.currency_symbol, nil),
+            std::mem::replace(&mut state.positive_prefix, nil),
+            std::mem::replace(&mut state.positive_suffix, nil),
+            std::mem::replace(&mut state.negative_prefix, nil),
+            std::mem::replace(&mut state.negative_suffix, nil),
             std::mem::replace(&mut state.locale, nil),
         )
     };
@@ -84,6 +97,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     release(env, currency_grouping_separator);
     release(env, currency_code);
     release(env, currency_symbol);
+    release(env, positive_prefix);
+    release(env, positive_suffix);
+    release(env, negative_prefix);
+    release(env, negative_suffix);
     release(env, locale);
     env.objc.dealloc_object(this, &mut env.mem)
 }
@@ -166,6 +183,30 @@ pub const CLASSES: ClassExports = objc_classes! {
     );
     release(env, old);
 }
+- (id)positivePrefix {
+    env.objc.borrow::<NSNumberFormatterHostObject>(this).positive_prefix
+}
+- (())setPositivePrefix:(id)prefix {
+    set_owned_affix(env, this, prefix, 0);
+}
+- (id)positiveSuffix {
+    env.objc.borrow::<NSNumberFormatterHostObject>(this).positive_suffix
+}
+- (())setPositiveSuffix:(id)suffix {
+    set_owned_affix(env, this, suffix, 1);
+}
+- (id)negativePrefix {
+    env.objc.borrow::<NSNumberFormatterHostObject>(this).negative_prefix
+}
+- (())setNegativePrefix:(id)prefix {
+    set_owned_affix(env, this, prefix, 2);
+}
+- (id)negativeSuffix {
+    env.objc.borrow::<NSNumberFormatterHostObject>(this).negative_suffix
+}
+- (())setNegativeSuffix:(id)suffix {
+    set_owned_affix(env, this, suffix, 3);
+}
 - (bool)isLenient {
     env.objc.borrow::<NSNumberFormatterHostObject>(this).lenient
 }
@@ -204,7 +245,8 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
     let (style, min_fraction, max_fraction, min_integer, grouping_size, grouping,
          positive_format, negative_format, grouping_separator,
-         currency_grouping_separator, currency_symbol) = {
+         currency_grouping_separator, currency_symbol, positive_prefix,
+         positive_suffix, negative_prefix, negative_suffix) = {
         let state = env.objc.borrow::<NSNumberFormatterHostObject>(this);
         (
             state.style,
@@ -218,6 +260,10 @@ pub const CLASSES: ClassExports = objc_classes! {
             state.grouping_separator,
             state.currency_grouping_separator,
             state.currency_symbol,
+            state.positive_prefix,
+            state.positive_suffix,
+            state.negative_prefix,
+            state.negative_suffix,
         )
     };
 
@@ -237,6 +283,8 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 
     let mut value: f64 = msg![env; number doubleValue];
+    let negative = value.is_sign_negative();
+    value = value.abs();
     if style == NSNumberFormatterPercentStyle {
         value *= 100.0;
     }
@@ -260,16 +308,33 @@ pub const CLASSES: ClassExports = objc_classes! {
         }
         fixed
     };
-    if style == NSNumberFormatterCurrencyStyle {
-        let symbol = if currency_symbol == nil {
+    let currency_symbol = if currency_symbol == nil {
             "$".into()
         } else {
             ns_string::to_rust_string(env, currency_symbol).into_owned()
         };
-        output.insert_str(0, &symbol);
-    } else if style == NSNumberFormatterPercentStyle {
-        output.push('%');
-    }
+    let default_prefix = if style == NSNumberFormatterCurrencyStyle {
+        format!("{}{}", if negative { "-" } else { "" }, currency_symbol)
+    } else if negative {
+        "-".to_owned()
+    } else {
+        String::new()
+    };
+    let default_suffix = if style == NSNumberFormatterPercentStyle { "%" } else { "" };
+    let prefix = if negative { negative_prefix } else { positive_prefix };
+    let suffix = if negative { negative_suffix } else { positive_suffix };
+    let prefix = if prefix == nil {
+        default_prefix
+    } else {
+        ns_string::to_rust_string(env, prefix).into_owned()
+    };
+    let suffix = if suffix == nil {
+        default_suffix.to_owned()
+    } else {
+        ns_string::to_rust_string(env, suffix).into_owned()
+    };
+    output.insert_str(0, &prefix);
+    output.push_str(&suffix);
     let string = ns_string::from_rust_string(env, output);
     autorelease(env, string)
 }
@@ -352,6 +417,27 @@ fn set_owned_string(env: &mut Environment, formatter: id, value: id, currency: b
             std::mem::replace(&mut state.currency_grouping_separator, copied)
         } else {
             std::mem::replace(&mut state.grouping_separator, copied)
+        }
+    };
+    release(env, old);
+}
+
+fn set_owned_affix(env: &mut Environment, formatter: id, value: id, slot: u8) {
+    let copied: id = if value == nil {
+        nil
+    } else {
+        msg![env; value copy]
+    };
+    let old = {
+        let state = env
+            .objc
+            .borrow_mut::<NSNumberFormatterHostObject>(formatter);
+        match slot {
+            0 => std::mem::replace(&mut state.positive_prefix, copied),
+            1 => std::mem::replace(&mut state.positive_suffix, copied),
+            2 => std::mem::replace(&mut state.negative_prefix, copied),
+            3 => std::mem::replace(&mut state.negative_suffix, copied),
+            _ => unreachable!(),
         }
     };
     release(env, old);
