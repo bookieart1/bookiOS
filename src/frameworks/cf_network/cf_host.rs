@@ -12,7 +12,7 @@ use crate::frameworks::core_foundation::{CFIndex, CFTypeRef};
 use crate::frameworks::foundation::ns_string::to_rust_string;
 use crate::libc::errno::ENETUNREACH;
 use crate::mem::{MutPtr, MutVoidPtr, SafeRead};
-use crate::objc::{id, nil, objc_classes, release, retain, ClassExports, HostObject};
+use crate::objc::{id, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject};
 use crate::Environment;
 
 type CFHostRef = CFTypeRef;
@@ -197,6 +197,13 @@ fn CFStreamCreatePairWithSocketToCFHost(
     crate::frameworks::core_foundation::cf_socket_stream::create_pair(env, name, port.try_into().unwrap(), read_stream, write_stream);
 }
 
+fn CFNetworkCopySystemProxySettings(env: &mut Environment) -> CFTypeRef {
+    // The compatibility lane is intentionally offline and has no configured
+    // guest proxy. Core Foundation's Copy rule still requires a retained
+    // dictionary rather than NULL.
+    msg_class![env; NSDictionary new]
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFHostCreateWithName(_, _)),
     export_c_func!(CFHostCreateCopy(_, _)),
@@ -209,6 +216,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFHostGetReachability(_, _)),
     export_c_func!(CFHostCancelInfoResolution(_, _)),
     export_c_func!(CFStreamCreatePairWithSocketToCFHost(_, _, _, _, _)),
+    export_c_func!(CFNetworkCopySystemProxySettings()),
 ];
 
 #[cfg(test)]
