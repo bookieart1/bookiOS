@@ -25,12 +25,16 @@ mod development_255_tests {
     fn development_255_label_baseline_adjustment_defaults_and_round_trips() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let label: id = msg_class![env; UILabel new];
         let default_value: UIBaselineAdjustment = msg![env; label baselineAdjustment];
         assert_eq!(default_value, 0);
         () = msg![env; label setBaselineAdjustment:2i32];
         let value: UIBaselineAdjustment = msg![env; label baselineAdjustment];
         assert_eq!(value, 2);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }
 use crate::frameworks::uikit::ui_graphics::UIGraphicsGetCurrentContext;

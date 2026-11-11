@@ -1490,12 +1490,12 @@ mod tests {
     #[test]
     fn development_255_legacy_view_transition_selector_is_exposed() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let selector = env.objc.register_host_selector(
-            "setAnimationTransition:forView:cache:".to_owned(),
-            &mut env.mem,
-        );
-        let class = env.objc.get_known_class("UIView", &mut env.mem);
-        assert!(env.objc.class_has_method(class, selector));
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        () = msg_class![env; UIView setAnimationTransition:UIViewAnimationTransitionNone forView:nil cache:false];
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 
     #[test]

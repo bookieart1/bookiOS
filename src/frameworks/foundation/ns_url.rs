@@ -591,6 +591,8 @@ mod tests {
     fn development_255_scheme_host_path_initializer_constructs_absolute_url() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let scheme = from_rust_string(env, "https".to_owned());
         let host = from_rust_string(env, "example.com".to_owned());
         let path = from_rust_string(env, "/legacy/path".to_owned());
@@ -598,6 +600,8 @@ mod tests {
         let url: id = msg![env; url initWithScheme:scheme host:host path:path];
         let absolute: id = msg![env; url absoluteString];
         assert_eq!(to_rust_string(env, absolute), "https://example.com/legacy/path");
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 
     #[test]
