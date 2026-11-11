@@ -733,10 +733,24 @@ fn AudioQueueOfflineRender(
         in_number_frames,
         produced
     );
-    if produced == 0 {
+    offline_render_completion_status(in_number_frames, produced)
+}
+
+fn offline_render_completion_status(_requested_frames: u32, produced_bytes: u32) -> OSStatus {
+    if produced_bytes == 0 {
         kAudioQueueErr_InvalidRunState
     } else {
         0
+    }
+}
+
+#[cfg(test)]
+mod development_255_tests {
+    use super::*;
+
+    #[test]
+    fn development_255_zero_frame_offline_render_is_a_successful_no_op() {
+        assert_eq!(offline_render_completion_status(0, 0), 0);
     }
 }
 
