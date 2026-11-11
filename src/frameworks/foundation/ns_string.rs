@@ -3327,6 +3327,17 @@ mod byte_buffer_tests {
             msg![env; string lengthOfBytesUsingEncoding:NSUTF16StringEncoding];
         assert_eq!(byte_length, 4);
     }
+
+    #[test]
+    fn resolving_symlinks_standardizes_the_flattened_guest_path() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let path = from_rust_string(env, "/Library//Caches/./item/".to_owned());
+
+        let resolved: id = msg![env; path stringByResolvingSymlinksInPath];
+
+        assert_eq!(to_rust_string(env, resolved), "/Library/Caches/item");
+    }
 }
 
 fn encode_utf16_units(
