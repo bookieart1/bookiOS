@@ -138,7 +138,7 @@ fn align_up(value: NSUInteger, alignment: NSUInteger) -> NSUInteger {
 
 /// Parse one Objective-C type encoding and return the number of bytes consumed,
 /// its size and its alignment for the 32-bit iOS ABI.
-fn parse_type_layout(
+pub(crate) fn parse_type_layout(
     env: &Environment,
     type_ptr: ConstPtr<u8>,
 ) -> (GuestUSize, NSUInteger, NSUInteger) {

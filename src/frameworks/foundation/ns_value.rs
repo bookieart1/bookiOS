@@ -44,6 +44,10 @@ pub struct State {
 
 #[derive(Debug)]
 pub(super) enum NSValueHostObject {
+    Raw {
+        bytes: Vec<u8>,
+        obj_c_type: crate::mem::MutPtr<u8>,
+    },
     NonretainedObject(id),
     CGPoint(CGPoint),
     CGSize(CGSize),
@@ -263,6 +267,19 @@ pub const CLASSES: ClassExports = objc_classes! {
 // implemented here yet (TODO).
 @implementation NSValue: NSObject
 
++ (id)valueWithBytes:(ConstVoidPtr)bytes objCType:(ConstPtr<u8>)obj_c_type {
+    let (_, size, _) = super::ns_method_signature::parse_type_layout(env, obj_c_type);
+    let stored_bytes = env.mem.bytes_at(bytes.cast(), size).to_vec();
+    let type_bytes = env.mem.cstr_at(obj_c_type).to_vec();
+    let stored_type = env.mem.alloc_and_write_cstr(&type_bytes);
+    let host_object = Box::new(NSValueHostObject::Raw {
+        bytes: stored_bytes,
+        obj_c_type: stored_type,
+    });
+    let new = env.objc.alloc_object(this, host_object, &mut env.mem);
+    autorelease(env, new)
+}
+
 + (id)valueWithPointer:(ConstVoidPtr)ptr {
     // TODO: implement with `value:withObjCType:` instead
     msg_class![env; NSNumber numberWithUnsignedInt:(ptr.to_bits())]
@@ -309,6 +326,34 @@ pub const CLASSES: ClassExports = objc_classes! {
         NSValueHostObject::NonretainedObject(object) => *object,
         _ => unimplemented!("nonretainedObjectValue for a non-object NSValue"),
     }
+}
+
+- (())getValue:(MutVoidPtr)buffer {
+    let bytes = match env.objc.borrow::<NSValueHostObject>(this) {
+        NSValueHostObject::Raw { bytes, .. } => bytes.clone(),
+        _ => unimplemented!("getValue: for specialized NSValue"),
+    };
+    env.mem
+        .bytes_at_mut(buffer.cast(), bytes.len().try_into().unwrap())
+        .copy_from_slice(&bytes);
+}
+
+- (ConstPtr<u8>)objCType {
+    match env.objc.borrow::<NSValueHostObject>(this) {
+        NSValueHostObject::Raw { obj_c_type, .. } => obj_c_type.cast_const(),
+        _ => unimplemented!("objCType for specialized NSValue"),
+    }
+}
+
+- (())dealloc {
+    let host = std::mem::replace(
+        env.objc.borrow_mut::<NSValueHostObject>(this),
+        NSValueHostObject::NonretainedObject(nil),
+    );
+    if let NSValueHostObject::Raw { obj_c_type, .. } = host {
+        env.mem.free(obj_c_type.cast());
+    }
+    env.objc.dealloc_object(this, &mut env.mem)
 }
 
 - (CGPoint)CGPointValue {
