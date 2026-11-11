@@ -18,12 +18,9 @@ typedef void touchHLE_Mem;
 /* Exported from the main crate, see src/cpu.rs. Note the polarity: these
  * report *failure*. A read does so through its out-parameter, since any
  * value it could return is a legitimate result; a write returns true. */
-uint8_t touchHLE_cpu_read_u8(touchHLE_Mem *mem, uint32_t addr, bool *error,
-                             uint32_t pc, uint32_t lr);
-uint16_t touchHLE_cpu_read_u16(touchHLE_Mem *mem, uint32_t addr, bool *error,
-                               uint32_t pc, uint32_t lr);
-uint32_t touchHLE_cpu_read_u32(touchHLE_Mem *mem, uint32_t addr, bool *error,
-                               uint32_t pc, uint32_t lr);
+uint8_t touchHLE_cpu_read_u8(touchHLE_Mem *mem, uint32_t addr, bool *error);
+uint16_t touchHLE_cpu_read_u16(touchHLE_Mem *mem, uint32_t addr, bool *error);
+uint32_t touchHLE_cpu_read_u32(touchHLE_Mem *mem, uint32_t addr, bool *error);
 bool touchHLE_cpu_write_u8(touchHLE_Mem *mem, uint32_t addr, uint8_t value,
                            uint32_t pc, uint32_t lr);
 bool touchHLE_cpu_write_u16(touchHLE_Mem *mem, uint32_t addr, uint16_t value,

@@ -1880,7 +1880,6 @@ impl Environment {
 
     #[cold]
     fn log_memory_fault_context(&self, source: &str) {
-        self.mem.dump_diagnostic_guest_reads();
         // A CPU fault reports the instruction after the fault. A panic from a
         // guest-to-host API call instead leaves PC in the host-call stub and
         // LR at the guest caller, so report both addresses.
@@ -1918,7 +1917,7 @@ impl Environment {
         // stripped producer can be inspected without instruction tracing.
         if (cpsr & cpu::Cpu::CPSR_THUMB) == 0 {
             let fault_instruction = pc.saturating_sub(4);
-            if self.diagnostics.is_some() || self.mem.diagnostic_guest_watches_configured() {
+            if self.diagnostics.is_some() {
                 let read = |address| {
                     let bytes = self
                         .mem
