@@ -139,6 +139,7 @@ pub struct State {
     crypto: crypto::State,
     dirent: dirent::State,
     dlfcn: dlfcn::State,
+    pub dispatch: dispatch::State,
     keymgr: keymgr::State,
     math: math::State,
     netdb: netdb::State,

@@ -10,6 +10,17 @@ use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant}
 use crate::environment::ThreadBlock;
 use crate::mem::{ConstPtr, ConstVoidPtr, MutPtr, MutVoidPtr, SafeRead};
 use crate::Environment;
+use std::collections::HashMap;
+
+const QUEUE_MAGIC: u32 = 0x7175_6575;
+const QUEUE_RETAIN_COUNT_OFFSET: u32 = 1;
+const QUEUE_GLOBAL_OFFSET: u32 = 2;
+
+#[derive(Default)]
+pub struct State {
+    main_queue: MutVoidPtr,
+    global_queues: HashMap<i32, MutVoidPtr>,
+}
 
 /// The fixed header of a 32-bit Apple block literal. Captured variables, if
 /// any, follow this header and are accessed by the block's invoke function.
@@ -89,10 +100,24 @@ pub(crate) fn dispose_copied_block(env: &mut Environment, copied: CopiedBlock) {
     env.mem.free(copied.block.cast_void());
 }
 
-fn new_queue_object(env: &mut Environment) -> MutVoidPtr {
+fn new_queue_object(env: &mut Environment, global: bool) -> MutVoidPtr {
     // Queue objects are opaque to callers. Scheduling is intentionally added
     // separately when a game demonstrates which dispatch operations it needs.
-    env.mem.alloc_and_write(0x7175_6575_u32).cast()
+    let queue = env.mem.alloc(12).cast::<u32>();
+    env.mem.write(queue, QUEUE_MAGIC);
+    env.mem.write(queue + QUEUE_RETAIN_COUNT_OFFSET, 1);
+    env.mem.write(queue + QUEUE_GLOBAL_OFFSET, u32::from(global));
+    queue.cast()
+}
+
+fn get_main_queue(env: &mut Environment) -> MutVoidPtr {
+    let existing = env.libc_state.dispatch.main_queue;
+    if !existing.is_null() {
+        return existing;
+    }
+    let queue = new_queue_object(env, true);
+    env.libc_state.dispatch.main_queue = queue;
+    queue
 }
 
 fn dispatch_queue_create(
@@ -106,13 +131,79 @@ fn dispatch_queue_create(
             env.mem.cstr_at_utf8(label).unwrap_or("<invalid UTF-8>")
         );
     }
-    new_queue_object(env)
+    new_queue_object(env, false)
 }
 
 fn dispatch_group_create(env: &mut Environment) -> MutVoidPtr {
     // Dispatch objects are opaque. Group operations will be implemented when
     // an app demonstrates which scheduling behaviour it needs.
-    new_queue_object(env)
+    new_queue_object(env, false)
+}
+
+fn dispatch_get_global_queue(
+    env: &mut Environment,
+    identifier: i32,
+    flags: u32,
+) -> MutVoidPtr {
+    // iOS 4 exposed the four documented global priorities. The flags argument
+    // was reserved and required to be zero.
+    const DISPATCH_QUEUE_PRIORITY_HIGH: i32 = 2;
+    const DISPATCH_QUEUE_PRIORITY_DEFAULT: i32 = 0;
+    const DISPATCH_QUEUE_PRIORITY_LOW: i32 = -2;
+    const DISPATCH_QUEUE_PRIORITY_BACKGROUND: i32 = i16::MIN as i32;
+
+    if flags != 0
+        || !matches!(
+            identifier,
+            DISPATCH_QUEUE_PRIORITY_HIGH
+                | DISPATCH_QUEUE_PRIORITY_DEFAULT
+                | DISPATCH_QUEUE_PRIORITY_LOW
+                | DISPATCH_QUEUE_PRIORITY_BACKGROUND
+        )
+    {
+        return MutVoidPtr::null();
+    }
+    if let Some(&queue) = env.libc_state.dispatch.global_queues.get(&identifier) {
+        return queue;
+    }
+    let queue = new_queue_object(env, true);
+    env.libc_state
+        .dispatch
+        .global_queues
+        .insert(identifier, queue);
+    queue
+}
+
+fn dispatch_retain(env: &mut Environment, object: MutVoidPtr) {
+    if object.is_null() {
+        return;
+    }
+    let queue = object.cast::<u32>();
+    assert_eq!(env.mem.read(queue), QUEUE_MAGIC);
+    if env.mem.read(queue + QUEUE_GLOBAL_OFFSET) != 0 {
+        return;
+    }
+    let count = env.mem.read(queue + QUEUE_RETAIN_COUNT_OFFSET);
+    env.mem
+        .write(queue + QUEUE_RETAIN_COUNT_OFFSET, count.checked_add(1).unwrap());
+}
+
+fn dispatch_release(env: &mut Environment, object: MutVoidPtr) {
+    if object.is_null() {
+        return;
+    }
+    let queue = object.cast::<u32>();
+    assert_eq!(env.mem.read(queue), QUEUE_MAGIC);
+    if env.mem.read(queue + QUEUE_GLOBAL_OFFSET) != 0 {
+        return;
+    }
+    let count = env.mem.read(queue + QUEUE_RETAIN_COUNT_OFFSET);
+    assert_ne!(count, 0);
+    if count == 1 {
+        env.mem.free(object);
+    } else {
+        env.mem.write(queue + QUEUE_RETAIN_COUNT_OFFSET, count - 1);
+    }
 }
 
 pub(crate) fn invoke_block_synchronously(env: &mut Environment, block: MutPtr<BlockLiteral>) {
@@ -178,13 +269,45 @@ fn dispatch_once(env: &mut Environment, predicate: MutPtr<i32>, block: MutPtr<Bl
 
 pub const CONSTANTS: ConstantExports = &[(
     "__dispatch_main_q",
-    HostConstant::Custom(|env| new_queue_object(env).cast_const()),
+    HostConstant::Custom(|env| get_main_queue(env).cast_const()),
 )];
 
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(dispatch_queue_create(_, _)),
     export_c_func!(dispatch_group_create()),
+    export_c_func!(dispatch_get_global_queue(_, _)),
+    export_c_func!(dispatch_retain(_)),
+    export_c_func!(dispatch_release(_)),
     export_c_func!(dispatch_async(_, _)),
     export_c_func!(dispatch_group_async(_, _, _)),
     export_c_func!(dispatch_once(_, _)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn development_255_dispatch_global_queue_lifetime_contract() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let default = dispatch_get_global_queue(&mut env, 0, 0);
+        assert!(!default.is_null());
+        assert_eq!(dispatch_get_global_queue(&mut env, 0, 0), default);
+        dispatch_retain(&mut env, default);
+        dispatch_release(&mut env, default);
+        assert_eq!(dispatch_get_global_queue(&mut env, 123, 0), MutVoidPtr::null());
+        assert_eq!(dispatch_get_global_queue(&mut env, 0, 1), MutVoidPtr::null());
+    }
+
+    #[test]
+    fn development_255_dispatch_created_queue_retain_release_contract() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let queue = new_queue_object(&mut env, false);
+        dispatch_retain(&mut env, queue);
+        let words = queue.cast::<u32>();
+        assert_eq!(env.mem.read(words + QUEUE_RETAIN_COUNT_OFFSET), 2);
+        dispatch_release(&mut env, queue);
+        assert_eq!(env.mem.read(words + QUEUE_RETAIN_COUNT_OFFSET), 1);
+        dispatch_release(&mut env, queue);
+    }
+}
