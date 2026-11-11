@@ -3282,7 +3282,10 @@ pub fn get_bytes_buffer_inner(
     include_null_terminator: bool,
 ) -> bool {
     // TODO: other encodings
-    assert!(C_STRING_FRIENDLY_ENCODINGS.contains(&encoding));
+    assert!(
+        C_STRING_FRIENDLY_ENCODINGS.contains(&encoding),
+        "unsupported C-string encoding {encoding:#x}"
+    );
 
     let src = to_rust_string(env, str);
     if encoding == NSDOSKoreanStringEncoding {
