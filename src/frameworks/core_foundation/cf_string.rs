@@ -48,6 +48,27 @@ fn CFStringGetSystemEncoding(_env: &mut Environment) -> CFStringEncoding {
     kCFStringEncodingMacRoman
 }
 
+fn CFStringGetMaximumSizeForEncoding(
+    _env: &mut Environment,
+    length: CFIndex,
+    encoding: CFStringEncoding,
+) -> CFIndex {
+    if length < 0 {
+        return kCFNotFound;
+    }
+    let bytes_per_code_unit = match encoding {
+        kCFStringEncodingMacRoman
+        | kCFStringEncodingASCII
+        | kCFStringEncodingISOLatin1 => 1,
+        kCFStringEncodingDOSKorean | kCFStringEncodingUTF16 | kCFStringEncodingUTF16BE
+        | kCFStringEncodingUTF16LE => 2,
+        kCFStringEncodingUTF8 => 3,
+        kCFStringEncodingUTF32 | kCFStringEncodingUTF32BE | kCFStringEncodingUTF32LE => 4,
+        _ => return kCFNotFound,
+    };
+    length.saturating_mul(bytes_per_code_unit)
+}
+
 fn CFStringAppend(
     env: &mut Environment,
     the_string: CFMutableStringRef,
@@ -617,6 +638,7 @@ fn CFStringNormalize(
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFStringGetTypeID()),
     export_c_func!(CFStringGetSystemEncoding()),
+    export_c_func!(CFStringGetMaximumSizeForEncoding(_, _)),
     export_c_func!(CFStringAppend(_, _)),
     export_c_func!(CFStringAppendCString(_, _, _)),
     export_c_func!(CFStringAppendFormat(_, _, _, _)),
