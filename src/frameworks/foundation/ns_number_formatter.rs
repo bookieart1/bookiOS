@@ -693,6 +693,32 @@ mod tests {
     }
 
     #[test]
+    fn development_255_parapanic_decimal_generation_and_minus_sign_contract() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let formatter: id = msg_class![env; NSNumberFormatter new];
+        let minus = ns_string::from_rust_string(env, "~".to_owned());
+        let _: () = msg![env; formatter setMinusSign:minus];
+        release(env, minus);
+        let _: () = msg![env; formatter setGeneratesDecimalNumbers:true];
+        let generates: bool = msg![env; formatter generatesDecimalNumbers];
+        let stored_minus: id = msg![env; formatter minusSign];
+        assert!(generates);
+        assert_eq!(ns_string::to_rust_string(env, stored_minus), "~");
+
+        let negative: id = msg_class![env; NSNumber numberWithDouble:(-12.5f64)];
+        let output: id = msg![env; formatter stringFromNumber:negative];
+        assert_eq!(ns_string::to_rust_string(env, output), "~12.5");
+        let parsed: id = msg![env; formatter numberFromString:output];
+        let decimal_class: crate::objc::Class = msg_class![env; NSDecimalNumber class];
+        let is_decimal: bool = msg![env; parsed isKindOfClass:decimal_class];
+        assert!(is_decimal);
+        let parsed_value: f64 = msg![env; parsed doubleValue];
+        assert_eq!(parsed_value, -12.5);
+        release(env, formatter);
+    }
+
+    #[test]
     fn decimal_formatter_round_trips_bounded_number_state() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
