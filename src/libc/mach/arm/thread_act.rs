@@ -17,6 +17,12 @@ use crate::mem::{guest_size_of, MutPtr, SafeRead};
 use crate::{Environment, ThreadId};
 
 type thread_act_t = mach_port_t;
+type exception_mask_t = u32;
+type exception_mask_array_t = MutPtr<exception_mask_t>;
+type exception_handler_array_t = MutPtr<mach_port_t>;
+type exception_behavior_t = i32;
+type exception_behavior_array_t = MutPtr<exception_behavior_t>;
+type thread_state_flavor_array_t = MutPtr<thread_state_flavor_t>;
 
 const ARM_THREAD_STATE: thread_state_flavor_t = 1;
 const MACHINE_THREAD_STATE: thread_state_flavor_t = ARM_THREAD_STATE;
@@ -80,10 +86,29 @@ fn thread_get_state(
     KERN_SUCCESS
 }
 
+fn thread_get_exception_ports(
+    env: &mut Environment,
+    target_thread: thread_act_t,
+    _exception_mask: exception_mask_t,
+    _masks: exception_mask_array_t,
+    masks_count: MutPtr<mach_msg_type_number_t>,
+    _handlers: exception_handler_array_t,
+    _behaviors: exception_behavior_array_t,
+    _flavors: thread_state_flavor_array_t,
+) -> kern_return_t {
+    assert!(target_thread != MACH_PORT_NULL && target_thread != MACH_PORT_DEAD);
+    assert!(!masks_count.is_null());
+    // iDared does not install thread-specific exception handlers. Report an
+    // empty result set while preserving the caller-provided output arrays.
+    env.mem.write(masks_count, 0);
+    KERN_SUCCESS
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(thread_suspend(_)),
     export_c_func!(thread_resume(_)),
     export_c_func!(thread_get_state(_, _, _, _)),
+    export_c_func!(thread_get_exception_ports(_, _, _, _, _, _, _)),
 ];
 
 #[cfg(test)]
@@ -95,5 +120,22 @@ mod tests {
         assert!(FUNCTIONS
             .iter()
             .any(|(name, _)| *name == "_thread_get_exception_ports"));
+
+        let mut env = Environment::new_fake_for_test();
+        let masks_count = env.mem.alloc_and_write(32u32);
+        assert_eq!(
+            thread_get_exception_ports(
+                &mut env,
+                1,
+                1 << 1,
+                MutPtr::null(),
+                masks_count,
+                MutPtr::null(),
+                MutPtr::null(),
+                MutPtr::null(),
+            ),
+            KERN_SUCCESS
+        );
+        assert_eq!(env.mem.read(masks_count), 0);
     }
 }
