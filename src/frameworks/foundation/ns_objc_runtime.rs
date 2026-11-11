@@ -3,7 +3,7 @@
 use super::ns_string;
 use crate::dyld::{export_c_func, FunctionExports};
 use crate::mem::{ConstPtr, SafeRead};
-use crate::objc::{id, nil, release, retain, Class, SEL};
+use crate::objc::{autorelease, id, nil, release, retain, Class, SEL};
 use crate::Environment;
 
 /// Prefix of the 32-bit Objective-C 2 runtime's protocol_t structure. The
@@ -92,6 +92,10 @@ fn objc_release(env: &mut Environment, object: id) {
     release(env, object)
 }
 
+fn objc_autoreleaseReturnValue(env: &mut Environment, object: id) -> id {
+    autorelease(env, object)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,4 +142,5 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(NSStringFromProtocol(_)),
     export_c_func!(objc_retainAutoreleasedReturnValue(_)),
     export_c_func!(objc_release(_)),
+    export_c_func!(objc_autoreleaseReturnValue(_)),
 ];
