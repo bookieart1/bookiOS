@@ -668,6 +668,23 @@ mod tests {
     }
 
     #[test]
+    fn development_255_parapanic_padding_position_round_trips_without_format_width() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let formatter: id = msg_class![env; NSNumberFormatter new];
+        for position in 0u32..=3 {
+            let _: () = msg![env; formatter setPaddingPosition:position];
+            let stored: NSUInteger = msg![env; formatter paddingPosition];
+            assert_eq!(stored, position);
+        }
+        let _: () = msg![env; formatter setNumberStyle:NSNumberFormatterDecimalStyle];
+        let number: id = msg_class![env; NSNumber numberWithDouble:12.0f64];
+        let output: id = msg![env; formatter stringFromNumber:number];
+        assert_eq!(ns_string::to_rust_string(env, output), "12");
+        release(env, formatter);
+    }
+
+    #[test]
     fn decimal_formatter_round_trips_bounded_number_state() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
