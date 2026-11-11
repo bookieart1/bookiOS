@@ -736,7 +736,12 @@ fn AudioQueueOfflineRender(
     offline_render_completion_status(in_number_frames, produced)
 }
 
-fn offline_render_completion_status(_requested_frames: u32, produced_bytes: u32) -> OSStatus {
+fn offline_render_completion_status(requested_frames: u32, produced_bytes: u32) -> OSStatus {
+    // A zero-frame render is a valid probe/no-op. Older Unity audio startup
+    // uses it before creating a channel and requires a successful status.
+    if requested_frames == 0 {
+        return 0;
+    }
     if produced_bytes == 0 {
         kAudioQueueErr_InvalidRunState
     } else {
@@ -751,6 +756,10 @@ mod development_255_tests {
     #[test]
     fn development_255_zero_frame_offline_render_is_a_successful_no_op() {
         assert_eq!(offline_render_completion_status(0, 0), 0);
+        assert_eq!(
+            offline_render_completion_status(1, 0),
+            kAudioQueueErr_InvalidRunState
+        );
     }
 }
 
