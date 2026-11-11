@@ -729,6 +729,26 @@ mod tests {
         assert_eq!(count, 1);
         assert_eq!(first, main);
     }
+
+    #[test]
+    fn preferred_localizations_honor_explicit_preferences() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        env.bundle.set_fake_identity_for_test();
+        let env = &mut env;
+        let fr = ns_string::from_rust_string(env, "fr".to_owned());
+        let en = ns_string::from_rust_string(env, "en".to_owned());
+        let available = ns_array::from_vec(env, vec![fr, en]);
+        let preferences = ns_array::from_vec(env, vec![en]);
+
+        let result: id = msg_class![env; NSBundle
+            preferredLocalizationsFromArray:available
+            forPreferences:preferences];
+        let count: NSUInteger = msg![env; result count];
+        let first: id = msg![env; result objectAtIndex:0u32];
+
+        assert_eq!(count, 1);
+        assert!(msg![env; first isEqualToString:en]);
+    }
 }
 
 fn path_for_device_resource_helper(
