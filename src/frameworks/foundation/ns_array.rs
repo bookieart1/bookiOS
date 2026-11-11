@@ -303,6 +303,22 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, array_imm)
 }
 
+- (())enumerateObjectsUsingBlock:(MutPtr<BlockLiteral>)block {
+    assert!(!block.is_null(), "enumerateObjectsUsingBlock: requires a block");
+    let invoke = env.mem.read(block).invoke;
+    assert_ne!(invoke.addr_without_thumb_bit(), 0);
+    let stop = env.mem.alloc_and_write(false);
+    let count: NSUInteger = msg![env; this count];
+    for index in 0..count {
+        let object: id = msg![env; this objectAtIndex:index];
+        () = invoke.call_from_host(env, (block.cast_void(), object, index, stop));
+        if env.mem.read(stop) {
+            break;
+        }
+    }
+    env.mem.free(stop.cast());
+}
+
 - (())makeObjectsPerformSelector:(SEL)sel {
     let count: NSUInteger = msg![env; this count];
     env.diagnostic_array_event("perform-begin", this.to_bits(), 0, 0, count, count);
