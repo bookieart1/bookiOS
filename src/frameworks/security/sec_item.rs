@@ -26,21 +26,56 @@ const STORE_SCHEMA: u32 = 1;
 const STORE_PREFIX: &str = ".touchHLE-keychain-k1-";
 const STORE_SUFFIX: &str = ".binary.plist";
 
+const K_SEC_ATTR_ACCESS_GROUP: &str = "agrp";
+const K_SEC_ATTR_ACCESSIBLE: &str = "pdmn";
+const K_SEC_ATTR_ACCESSIBLE_AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY: &str = "cku";
+const K_SEC_ATTR_ACCESSIBLE_ALWAYS: &str = "dk";
 const K_SEC_ATTR_ACCOUNT: &str = "acct";
+const K_SEC_ATTR_APPLICATION_LABEL: &str = "klbl";
 const K_SEC_ATTR_AUTHENTICATION_TYPE: &str = "atyp";
 const K_SEC_ATTR_AUTHENTICATION_TYPE_DEFAULT: &str = "dflt";
+const K_SEC_ATTR_GENERIC: &str = "gena";
+const K_SEC_ATTR_IS_INVISIBLE: &str = "invi";
+const K_SEC_ATTR_LABEL: &str = "labl";
 const K_SEC_ATTR_SECURITY_DOMAIN: &str = "sdmn";
 const K_SEC_ATTR_SERVER: &str = "srvr";
+const K_SEC_ATTR_SERVICE: &str = "svce";
 const K_SEC_ATTR_TYPE: &str = "type";
 const K_SEC_CLASS: &str = "class";
+const K_SEC_CLASS_CERTIFICATE: &str = "cert";
+const K_SEC_CLASS_GENERIC_PASSWORD: &str = "genp";
+const K_SEC_CLASS_IDENTITY: &str = "idnt";
 const K_SEC_CLASS_INTERNET_PASSWORD: &str = "inet";
+const K_SEC_CLASS_KEY: &str = "keys";
 const K_SEC_MATCH_LIMIT: &str = "m_Limit";
+const K_SEC_MATCH_LIMIT_ALL: &str = "m_LimitAll";
 const K_SEC_MATCH_LIMIT_ONE: &str = "m_LimitOne";
+const K_SEC_RETURN_ATTRIBUTES: &str = "r_Attributes";
 const K_SEC_RETURN_DATA: &str = "r_Data";
 const K_SEC_VALUE_DATA: &str = "v_Data";
 
 pub const CONSTANTS: ConstantExports = &[
+    (
+        "_kSecAttrAccessGroup",
+        HostConstant::NSString(K_SEC_ATTR_ACCESS_GROUP),
+    ),
+    (
+        "_kSecAttrAccessible",
+        HostConstant::NSString(K_SEC_ATTR_ACCESSIBLE),
+    ),
+    (
+        "_kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly",
+        HostConstant::NSString(K_SEC_ATTR_ACCESSIBLE_AFTER_FIRST_UNLOCK_THIS_DEVICE_ONLY),
+    ),
+    (
+        "_kSecAttrAccessibleAlways",
+        HostConstant::NSString(K_SEC_ATTR_ACCESSIBLE_ALWAYS),
+    ),
     ("_kSecAttrAccount", HostConstant::NSString(K_SEC_ATTR_ACCOUNT)),
+    (
+        "_kSecAttrApplicationLabel",
+        HostConstant::NSString(K_SEC_ATTR_APPLICATION_LABEL),
+    ),
     (
         "_kSecAttrAuthenticationType",
         HostConstant::NSString(K_SEC_ATTR_AUTHENTICATION_TYPE),
@@ -49,21 +84,53 @@ pub const CONSTANTS: ConstantExports = &[
         "_kSecAttrAuthenticationTypeDefault",
         HostConstant::NSString(K_SEC_ATTR_AUTHENTICATION_TYPE_DEFAULT),
     ),
+    ("_kSecAttrGeneric", HostConstant::NSString(K_SEC_ATTR_GENERIC)),
+    (
+        "_kSecAttrIsInvisible",
+        HostConstant::NSString(K_SEC_ATTR_IS_INVISIBLE),
+    ),
+    ("_kSecAttrLabel", HostConstant::NSString(K_SEC_ATTR_LABEL)),
     (
         "_kSecAttrSecurityDomain",
         HostConstant::NSString(K_SEC_ATTR_SECURITY_DOMAIN),
     ),
     ("_kSecAttrServer", HostConstant::NSString(K_SEC_ATTR_SERVER)),
+    ("_kSecAttrService", HostConstant::NSString(K_SEC_ATTR_SERVICE)),
     ("_kSecAttrType", HostConstant::NSString(K_SEC_ATTR_TYPE)),
     ("_kSecClass", HostConstant::NSString(K_SEC_CLASS)),
+    (
+        "_kSecClassCertificate",
+        HostConstant::NSString(K_SEC_CLASS_CERTIFICATE),
+    ),
+    (
+        "_kSecClassGenericPassword",
+        HostConstant::NSString(K_SEC_CLASS_GENERIC_PASSWORD),
+    ),
+    (
+        "_kSecClassIdentity",
+        HostConstant::NSString(K_SEC_CLASS_IDENTITY),
+    ),
     (
         "_kSecClassInternetPassword",
         HostConstant::NSString(K_SEC_CLASS_INTERNET_PASSWORD),
     ),
+    ("_kSecClassKey", HostConstant::NSString(K_SEC_CLASS_KEY)),
     ("_kSecMatchLimit", HostConstant::NSString(K_SEC_MATCH_LIMIT)),
+    (
+        "_kSecMatchLimitAll",
+        HostConstant::NSString(K_SEC_MATCH_LIMIT_ALL),
+    ),
     (
         "_kSecMatchLimitOne",
         HostConstant::NSString(K_SEC_MATCH_LIMIT_ONE),
+    ),
+    // SecRandom.h defines the default generator token itself as NULL. Exporting
+    // the symbol still matters: a missing non-lazy-symbol slot makes clients
+    // dereference address zero before they can load that defined NULL value.
+    ("_kSecRandomDefault", HostConstant::NullPtr),
+    (
+        "_kSecReturnAttributes",
+        HostConstant::NSString(K_SEC_RETURN_ATTRIBUTES),
     ),
     ("_kSecReturnData", HostConstant::NSString(K_SEC_RETURN_DATA)),
     ("_kSecValueData", HostConstant::NSString(K_SEC_VALUE_DATA)),
