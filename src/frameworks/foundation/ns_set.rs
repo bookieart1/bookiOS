@@ -13,7 +13,8 @@ use crate::abi::DotDotDot;
 use crate::environment::Environment;
 use crate::mem::{ConstPtr, MutPtr};
 use crate::objc::{
-    autorelease, id, msg, msg_class, nil, objc_classes, retain, ClassExports, HostObject, NSZonePtr,
+    autorelease, id, msg, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject,
+    NSZonePtr,
 };
 
 /// Belongs to _touchHLE_NSSet
@@ -103,6 +104,14 @@ pub const CLASSES: ClassExports = objc_classes! {
             return true;
         }
     }
+}
+
+- (id)setByAddingObjectsFromSet:(id)other {
+    let combined: id = msg![env; this mutableCopy];
+    () = msg![env; combined unionSet:other];
+    let immutable: id = msg![env; combined copy];
+    release(env, combined);
+    autorelease(env, immutable)
 }
 
 @end
