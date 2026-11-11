@@ -954,4 +954,20 @@ mod tests {
         assert_eq!(env.objc.get_refcount(object).get(), before);
         release(env, object);
     }
+
+    #[test]
+    fn arbitrary_value_preserves_bytes_and_type_encoding() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let input = env.mem.alloc_and_write(0x1234_5678u32).cast_const().cast();
+        let encoding = env.mem.alloc_and_write_cstr(b"I").cast_const();
+
+        let value: id = msg_class![env; NSValue valueWithBytes:input objCType:encoding];
+        let output = env.mem.alloc(4).cast();
+        () = msg![env; value getValue:output];
+
+        assert_eq!(env.mem.read::<u32>(output.cast()), 0x1234_5678);
+        let actual_encoding: ConstPtr<u8> = msg![env; value objCType];
+        assert_eq!(env.mem.cstr_at(actual_encoding), b"I");
+    }
 }

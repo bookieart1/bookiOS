@@ -663,6 +663,13 @@ mod tests {
     use crate::mem::Ptr;
     use crate::objc::{id, release};
 
+    #[test]
+    fn maximum_size_for_encoding_is_exported() {
+        assert!(FUNCTIONS
+            .iter()
+            .any(|(name, _)| *name == "_CFStringGetMaximumSizeForEncoding"));
+    }
+
     fn create_with_bytes(
         env: &mut Environment,
         bytes: &[u8],
