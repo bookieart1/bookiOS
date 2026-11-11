@@ -1542,7 +1542,8 @@ mod tests {
         let marker = get_static_str(env, "marker");
         let dictionary: id =
             msg_class![env; NSDictionary dictionaryWithObject:value forKey:present];
-        let keys: id = msg_class![env; NSArray arrayWithObjects:present, missing, nil];
+        let keys: id = msg_class![env; NSMutableArray arrayWithObject:present];
+        msg![env; keys addObject:missing];
 
         let values: id = msg![env; dictionary objectsForKeys:keys notFoundMarker:marker];
 
