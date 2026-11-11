@@ -51,6 +51,8 @@ const HEALTHY_PRESENT_STREAK: u16 = 30;
 const SLOW_PRESENT_STREAK: u8 = 8;
 #[cfg(test)]
 const MAX_RECORDER_BYTES: usize = 512 * 1024;
+#[cfg(test)]
+const MAX_INLINE_RECORDER_BYTES: usize = 128 * 1024;
 
 #[derive(Clone, Copy, Debug)]
 struct Text {
@@ -557,51 +559,51 @@ struct CampaignEvent {
 }
 
 pub struct Recorder {
-    recent: Ring<Event, RECENT>,
-    signals: Ring<Event, SIGNALS>,
+    recent: Box<Ring<Event, RECENT>>,
+    signals: Box<Ring<Event, SIGNALS>>,
     /// Nil-producing boundaries survive longer than the generic signal ring,
     /// so a later null dereference can be related to its likely producer.
-    nil_origins: Ring<Event, NIL_ORIGINS>,
-    progress: Ring<Progress, PROGRESS>,
+    nil_origins: Box<Ring<Event, NIL_ORIGINS>>,
+    progress: Box<Ring<Progress, PROGRESS>>,
     /// Most recent selected object-producing boundary for a bounded set of
     /// live object pointers. This is deliberately not a general allocation
     /// trace: it exists to retain collection/coder provenance after the main
     /// event ring wraps.
-    provenance: [Provenance; PROVENANCE],
-    value_origins: [ValueOrigin; VALUE_ORIGINS],
-    boundary_details: Ring<BoundaryDetail, BOUNDARY_DETAILS>,
-    bundle_candidates: Ring<BundleCandidateEvent, BUNDLE_CANDIDATES>,
-    bundle_directory_entries: Ring<Text, BUNDLE_DIRECTORY_ENTRIES>,
-    collection_events: Ring<CollectionEvent, COLLECTION_EVENTS>,
-    invocation_events: Ring<InvocationEvent, INVOCATION_EVENTS>,
-    array_events: Ring<ArrayEvent, ARRAY_EVENTS>,
-    watched_objects: [u32; WATCHED_OBJECTS],
-    object_lifetime_events: Ring<ObjectLifetimeEvent, OBJECT_LIFETIME_EVENTS>,
-    autorelease_enqueues: Ring<ObjectLifetimeEvent, AUTORELEASE_ENQUEUES>,
-    dictionary_origins: [DictionaryOrigin; DICTIONARY_ORIGINS],
+    provenance: Box<[Provenance]>,
+    value_origins: Box<[ValueOrigin]>,
+    boundary_details: Box<Ring<BoundaryDetail, BOUNDARY_DETAILS>>,
+    bundle_candidates: Box<Ring<BundleCandidateEvent, BUNDLE_CANDIDATES>>,
+    bundle_directory_entries: Box<Ring<Text, BUNDLE_DIRECTORY_ENTRIES>>,
+    collection_events: Box<Ring<CollectionEvent, COLLECTION_EVENTS>>,
+    invocation_events: Box<Ring<InvocationEvent, INVOCATION_EVENTS>>,
+    array_events: Box<Ring<ArrayEvent, ARRAY_EVENTS>>,
+    watched_objects: Box<[u32]>,
+    object_lifetime_events: Box<Ring<ObjectLifetimeEvent, OBJECT_LIFETIME_EVENTS>>,
+    autorelease_enqueues: Box<Ring<ObjectLifetimeEvent, AUTORELEASE_ENQUEUES>>,
+    dictionary_origins: Box<[DictionaryOrigin]>,
     dictionary_origin_sequence: u64,
     defaults_lookup: DefaultsLookup,
-    defaults_events: Ring<DefaultsEvent, DEFAULTS_EVENTS>,
+    defaults_events: Box<Ring<DefaultsEvent, DEFAULTS_EVENTS>>,
     slow_capture: Option<SlowCapture>,
     pending_slow_capture: Option<PendingSlowCapture>,
     /// Largest individual present gap. Unlike the sustained-slow capture,
     /// this preserves evidence for a one-off jank transition.
     worst_present_gap: Option<SlowCapture>,
-    unresolved_relocations: Ring<UnresolvedRelocation, UNRESOLVED_RELOCATIONS>,
-    string_searches: Ring<StringSearch, STRING_SEARCHES>,
-    touch_events: Ring<TouchEvent, TOUCH_EVENTS>,
-    selector_events: Ring<SelectorEvent, SELECTOR_EVENTS>,
-    focused_boundary_events: Ring<FocusedBoundaryEvent, FOCUSED_BOUNDARY_EVENTS>,
+    unresolved_relocations: Box<Ring<UnresolvedRelocation, UNRESOLVED_RELOCATIONS>>,
+    string_searches: Box<Ring<StringSearch, STRING_SEARCHES>>,
+    touch_events: Box<Ring<TouchEvent, TOUCH_EVENTS>>,
+    selector_events: Box<Ring<SelectorEvent, SELECTOR_EVENTS>>,
+    focused_boundary_events: Box<Ring<FocusedBoundaryEvent, FOCUSED_BOUNDARY_EVENTS>>,
     /// Category-specific rings prevent the decisive input, transition, KVC or
     /// presentation boundary from being overwritten by unrelated focused
     /// traffic in long-running games.
-    input_boundary_events: Ring<FocusedBoundaryEvent, FOCUSED_CATEGORY_EVENTS>,
-    transition_boundary_events: Ring<FocusedBoundaryEvent, FOCUSED_CATEGORY_EVENTS>,
-    kvc_boundary_events: Ring<FocusedBoundaryEvent, FOCUSED_CATEGORY_EVENTS>,
-    presentation_boundary_events: Ring<FocusedBoundaryEvent, FOCUSED_CATEGORY_EVENTS>,
-    kvo_events: Ring<KvoEvent, KVO_EVENTS>,
-    media_events: Ring<MediaEvent, MEDIA_EVENTS>,
-    motion_events: Ring<MotionEvent, MOTION_EVENTS>,
+    input_boundary_events: Box<Ring<FocusedBoundaryEvent, FOCUSED_CATEGORY_EVENTS>>,
+    transition_boundary_events: Box<Ring<FocusedBoundaryEvent, FOCUSED_CATEGORY_EVENTS>>,
+    kvc_boundary_events: Box<Ring<FocusedBoundaryEvent, FOCUSED_CATEGORY_EVENTS>>,
+    presentation_boundary_events: Box<Ring<FocusedBoundaryEvent, FOCUSED_CATEGORY_EVENTS>>,
+    kvo_events: Box<Ring<KvoEvent, KVO_EVENTS>>,
+    media_events: Box<Ring<MediaEvent, MEDIA_EVENTS>>,
+    motion_events: Box<Ring<MotionEvent, MOTION_EVENTS>>,
     // Keep the campaign's full bounded history without making every Recorder
     // carry the ring inline. Existing diagnostics enforce a strict 512 KiB
     // Recorder ceiling because this object is present for every guest run.
@@ -633,40 +635,41 @@ impl Recorder {
     pub fn new() -> Box<Self> {
         let now = Instant::now();
         Box::new(Self {
-            recent: Ring::default(),
-            signals: Ring::default(),
-            nil_origins: Ring::default(),
-            progress: Ring::default(),
-            provenance: [Provenance::default(); PROVENANCE],
-            value_origins: [ValueOrigin::default(); VALUE_ORIGINS],
-            boundary_details: Ring::default(),
-            bundle_candidates: Ring::default(),
-            bundle_directory_entries: Ring::default(),
-            collection_events: Ring::default(),
-            invocation_events: Ring::default(),
-            array_events: Ring::default(),
-            watched_objects: [0; WATCHED_OBJECTS],
-            object_lifetime_events: Ring::default(),
-            autorelease_enqueues: Ring::default(),
-            dictionary_origins: [DictionaryOrigin::default(); DICTIONARY_ORIGINS],
+            recent: Box::default(),
+            signals: Box::default(),
+            nil_origins: Box::default(),
+            progress: Box::default(),
+            provenance: vec![Provenance::default(); PROVENANCE].into_boxed_slice(),
+            value_origins: vec![ValueOrigin::default(); VALUE_ORIGINS].into_boxed_slice(),
+            boundary_details: Box::default(),
+            bundle_candidates: Box::default(),
+            bundle_directory_entries: Box::default(),
+            collection_events: Box::default(),
+            invocation_events: Box::default(),
+            array_events: Box::default(),
+            watched_objects: vec![0; WATCHED_OBJECTS].into_boxed_slice(),
+            object_lifetime_events: Box::default(),
+            autorelease_enqueues: Box::default(),
+            dictionary_origins: vec![DictionaryOrigin::default(); DICTIONARY_ORIGINS]
+                .into_boxed_slice(),
             dictionary_origin_sequence: 0,
             defaults_lookup: DefaultsLookup::default(),
-            defaults_events: Ring::default(),
+            defaults_events: Box::default(),
             slow_capture: None,
             pending_slow_capture: None,
             worst_present_gap: None,
-            unresolved_relocations: Ring::default(),
-            string_searches: Ring::default(),
-            touch_events: Ring::default(),
-            selector_events: Ring::default(),
-            focused_boundary_events: Ring::default(),
-            input_boundary_events: Ring::default(),
-            transition_boundary_events: Ring::default(),
-            kvc_boundary_events: Ring::default(),
-            presentation_boundary_events: Ring::default(),
-            kvo_events: Ring::default(),
-            media_events: Ring::default(),
-            motion_events: Ring::default(),
+            unresolved_relocations: Box::default(),
+            string_searches: Box::default(),
+            touch_events: Box::default(),
+            selector_events: Box::default(),
+            focused_boundary_events: Box::default(),
+            input_boundary_events: Box::default(),
+            transition_boundary_events: Box::default(),
+            kvc_boundary_events: Box::default(),
+            presentation_boundary_events: Box::default(),
+            kvo_events: Box::default(),
+            media_events: Box::default(),
+            motion_events: Box::default(),
             campaign_events: Box::default(),
             runtime_method_misses: 0,
             sequence: 0,
@@ -2912,6 +2915,14 @@ mod tests {
         assert!(std::mem::size_of::<Recorder>() < MAX_RECORDER_BYTES);
         let text = Text::from_bytes(b"name\nforged line");
         assert_eq!(format!("{text}"), "name\\x0aforged line");
+    }
+    #[test]
+    fn development_255_diagnostic_recorder_preserves_windows_stack_budget() {
+        assert!(std::mem::size_of::<Recorder>() < MAX_INLINE_RECORDER_BYTES);
+        let recorder = Recorder::new();
+        assert_eq!(recorder.provenance.len(), PROVENANCE);
+        assert_eq!(recorder.value_origins.len(), VALUE_ORIGINS);
+        assert_eq!(recorder.dictionary_origins.len(), DICTIONARY_ORIGINS);
     }
     #[test]
     fn collection_provenance_survives_history_wrap_and_deallocation_clears_it() {
