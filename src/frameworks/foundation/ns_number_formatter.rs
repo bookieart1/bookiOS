@@ -618,6 +618,28 @@ mod tests {
     }
 
     #[test]
+    fn development_255_parapanic_multiplier_round_trips_and_scales_both_directions() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let formatter: id = msg_class![env; NSNumberFormatter new];
+        () = msg![env; formatter setNumberStyle:NSNumberFormatterDecimalStyle];
+        () = msg![env; formatter setMaximumFractionDigits:2u32];
+        let multiplier: id = msg_class![env; NSNumber numberWithDouble:100.0f64];
+        () = msg![env; formatter setMultiplier:multiplier];
+        let stored: id = msg![env; formatter multiplier];
+        let stored_value: f64 = msg![env; stored doubleValue];
+        assert_eq!(stored_value, 100.0);
+
+        let number: id = msg_class![env; NSNumber numberWithDouble:1.25f64];
+        let output: id = msg![env; formatter stringFromNumber:number];
+        assert_eq!(ns_string::to_rust_string(env, output), "125");
+        let parsed: id = msg![env; formatter numberFromString:output];
+        let parsed_value: f64 = msg![env; parsed doubleValue];
+        assert_eq!(parsed_value, 1.25);
+        release(env, formatter);
+    }
+
+    #[test]
     fn decimal_formatter_round_trips_bounded_number_state() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
