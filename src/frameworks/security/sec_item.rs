@@ -586,20 +586,36 @@ mod tests {
     }
 
     #[test]
-    fn constants_and_exports_cover_exact_hookworld_surface() {
-        assert_eq!(CONSTANTS.len(), 12);
+    fn constants_and_exports_cover_observed_keychain_surfaces() {
+        assert_eq!(CONSTANTS.len(), 28);
         let names: Vec<_> = CONSTANTS.iter().map(|(name, _)| *name).collect();
         for required in [
+            "_kSecAttrAccessGroup",
+            "_kSecAttrAccessible",
+            "_kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly",
+            "_kSecAttrAccessibleAlways",
             "_kSecAttrAccount",
+            "_kSecAttrApplicationLabel",
             "_kSecAttrAuthenticationType",
             "_kSecAttrAuthenticationTypeDefault",
+            "_kSecAttrGeneric",
+            "_kSecAttrIsInvisible",
+            "_kSecAttrLabel",
             "_kSecAttrSecurityDomain",
             "_kSecAttrServer",
+            "_kSecAttrService",
             "_kSecAttrType",
             "_kSecClass",
+            "_kSecClassCertificate",
+            "_kSecClassGenericPassword",
+            "_kSecClassIdentity",
             "_kSecClassInternetPassword",
+            "_kSecClassKey",
             "_kSecMatchLimit",
+            "_kSecMatchLimitAll",
             "_kSecMatchLimitOne",
+            "_kSecRandomDefault",
+            "_kSecReturnAttributes",
             "_kSecReturnData",
             "_kSecValueData",
         ] {

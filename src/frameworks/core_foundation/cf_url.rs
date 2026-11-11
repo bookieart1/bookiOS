@@ -341,7 +341,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn copy_path_obeys_create_ownership_and_nil_contract() {
+    fn legacy_file_property_constants_and_copy_path_contract() {
+        let constant_names: Vec<_> = CONSTANTS.iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            constant_names,
+            ["_kCFURLFileExists", "_kCFURLFileLength"]
+        );
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
         let path = from_rust_string(env, "/tmp/example".to_owned());
