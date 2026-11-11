@@ -1459,6 +1459,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn development_255_legacy_view_transition_selector_is_exposed() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let selector = env.objc.register_host_selector(
+            "setAnimationTransition:forView:cache:".to_owned(),
+            &mut env.mem,
+        );
+        let class = env.objc.get_known_class("UIView", &mut env.mem);
+        assert!(env.objc.class_has_method(class, selector));
+    }
+
+    #[test]
     fn detached_view_converts_points_and_rects_to_and_from_window_coordinates() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;

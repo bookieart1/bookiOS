@@ -14,6 +14,25 @@ use crate::frameworks::uikit::ui_font::{
     UILineBreakMode, UILineBreakModeTailTruncation, UITextAlignment, UITextAlignmentCenter,
     UITextAlignmentLeft, UITextAlignmentRight,
 };
+
+#[cfg(test)]
+mod development_255_tests {
+    use super::*;
+    use crate::objc::{msg, msg_class};
+    use crate::Environment;
+
+    #[test]
+    fn development_255_label_baseline_adjustment_defaults_and_round_trips() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let label: id = msg_class![env; UILabel new];
+        let default_value: UIBaselineAdjustment = msg![env; label baselineAdjustment];
+        assert_eq!(default_value, 0);
+        () = msg![env; label setBaselineAdjustment:2i32];
+        let value: UIBaselineAdjustment = msg![env; label baselineAdjustment];
+        assert_eq!(value, 2);
+    }
+}
 use crate::frameworks::uikit::ui_graphics::UIGraphicsGetCurrentContext;
 use crate::objc::{
     id, impl_HostObject_with_superclass, msg, msg_class, msg_super, nil, objc_classes, release,

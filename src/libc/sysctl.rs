@@ -556,6 +556,27 @@ mod tests {
     use crate::libc::errno::get_errno;
     use crate::mem::Ptr;
 
+    #[test]
+    fn development_255_l3_cache_query_returns_historical_absence() {
+        let mut env = Environment::new_fake_for_test();
+        let name = env.mem.alloc_and_write_cstr(b"hw.l3cachesize");
+        let output = env.mem.alloc_and_write(0xfeed_beefu32);
+        let output_len = env.mem.alloc_and_write(guest_size_of::<u32>());
+        assert_eq!(
+            sysctlbyname(
+                &mut env,
+                name.cast_const(),
+                output.cast(),
+                output_len,
+                Ptr::null(),
+                0,
+            ),
+            -1
+        );
+        assert_eq!(get_errno(&mut env), ENOENT);
+        assert_eq!(env.mem.read(output), 0xfeed_beefu32);
+    }
+
     fn kern_proc_pid_name(env: &mut Environment, pid: i32) -> MutPtr<i32> {
         let name = env.mem.alloc(guest_size_of::<i32>() * 4).cast::<i32>();
         for (index, value) in [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]

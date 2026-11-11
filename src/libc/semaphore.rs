@@ -200,3 +200,13 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(sem_close(_)),
     export_c_func!(sem_unlink(_)),
 ];
+
+#[cfg(test)]
+mod development_255_tests {
+    use super::*;
+
+    #[test]
+    fn development_255_semaphore_value_query_is_exported() {
+        assert!(FUNCTIONS.iter().any(|(name, _)| *name == "_sem_getvalue"));
+    }
+}

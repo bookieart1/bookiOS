@@ -681,6 +681,17 @@ mod tests {
     }
 
     #[test]
+    fn development_255_zero_length_subdata_is_a_valid_empty_data_object() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let data: id = msg_class![env; NSData data];
+        let empty: id = msg![env; data subdataWithRange:(NSRange { location: 0, length: 0 })];
+        assert_ne!(empty, nil);
+        let length: NSUInteger = msg![env; empty length];
+        assert_eq!(length, 0);
+    }
+
+    #[test]
     fn mutable_data_capacity_provides_stable_writable_storage() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;

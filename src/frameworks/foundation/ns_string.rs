@@ -2908,6 +2908,23 @@ mod ns_string_tests {
     use super::*;
 
     #[test]
+    fn development_255_combined_literal_case_insensitive_compare_contract() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let upper = from_rust_string(env, "Alpha".to_owned());
+        let lower = from_rust_string(env, "alpha".to_owned());
+        let result: NSComparisonResult = msg![env; upper compare:lower options:(NSCaseInsensitiveSearch | NSLiteralSearch)];
+        assert_eq!(result, NSOrderedSame);
+    }
+
+    #[test]
+    fn development_255_utf16_external_encoding_has_bom_and_round_trips() {
+        let units = [0x0041, 0x03a9];
+        let bytes = encode_utf16_units(&units, NSUTF16StringEncoding, false, true).unwrap();
+        assert_eq!(bytes, vec![0xff, 0xfe, 0x41, 0x00, 0xa9, 0x03]);
+    }
+
+    #[test]
     fn strings_file_parser_handles_comments_escapes_and_bare_values() {
         let parsed = StringsFileParser::new(
             r#"/* header */ "hello" = "line\nvalue"; // comment

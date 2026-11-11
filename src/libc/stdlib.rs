@@ -849,6 +849,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn development_255_wide_string_double_conversion_is_exported() {
+        assert!(FUNCTIONS.iter().any(|(name, _)| *name == "_wcstod"));
+    }
+
+    #[test]
+    fn development_255_random_state_initialization_is_exported() {
+        assert!(FUNCTIONS.iter().any(|(name, _)| *name == "_initstate"));
+    }
+
+    #[test]
     fn atoll_preserves_values_wider_than_guest_long() {
         let mut env = Environment::new_fake_for_test();
         let string = env.mem.alloc_and_write_cstr(b"  -4294967297suffix");

@@ -922,6 +922,13 @@ mod dev_246_graphics_state_tests {
     use crate::mem::Ptr;
 
     #[test]
+    fn development_255_miter_limit_setter_is_exported() {
+        assert!(FUNCTIONS
+            .iter()
+            .any(|(name, _)| *name == "_CGContextSetMiterLimit"));
+    }
+
+    #[test]
     fn line_join_and_rendering_intent_follow_save_restore_state() {
         let mut env = Environment::new_fake_for_test();
         let context = CGBitmapContextCreate(

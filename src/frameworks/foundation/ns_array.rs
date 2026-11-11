@@ -1314,6 +1314,32 @@ mod tests {
     use super::*;
     use crate::frameworks::foundation::ns_string::to_rust_string;
 
+    #[test]
+    fn development_255_mutable_array_exchange_contract() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let first = ns_string::from_rust_string(env, "first".to_owned());
+        let second = ns_string::from_rust_string(env, "second".to_owned());
+        let array: id = msg_class![env; NSMutableArray arrayWithObject:first];
+        () = msg![env; array addObject:second];
+        () = msg![env; array exchangeObjectAtIndex:0u32 withObjectAtIndex:1u32];
+        let zero: id = msg![env; array objectAtIndex:0u32];
+        let one: id = msg![env; array objectAtIndex:1u32];
+        assert_eq!(zero, second);
+        assert_eq!(one, first);
+    }
+
+    #[test]
+    fn development_255_array_block_enumeration_selector_is_exposed() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let selector = env.objc.register_host_selector(
+            "enumerateObjectsUsingBlock:".to_owned(),
+            &mut env.mem,
+        );
+        let class = env.objc.get_known_class("NSArray", &mut env.mem);
+        assert!(env.objc.class_has_method(class, selector));
+    }
+
     fn panic_text(payload: &(dyn std::any::Any + Send)) -> &str {
         payload
             .downcast_ref::<String>()

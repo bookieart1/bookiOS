@@ -559,6 +559,19 @@ mod tests {
     use crate::Environment;
 
     #[test]
+    fn development_255_scheme_host_path_initializer_constructs_absolute_url() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let scheme = from_rust_string(env, "https".to_owned());
+        let host = from_rust_string(env, "example.com".to_owned());
+        let path = from_rust_string(env, "/legacy/path".to_owned());
+        let url: id = msg_class![env; NSURL alloc];
+        let url: id = msg![env; url initWithScheme:scheme host:host path:path];
+        let absolute: id = msg![env; url absoluteString];
+        assert_eq!(to_rust_string(env, absolute), "https://example.com/legacy/path");
+    }
+
+    #[test]
     fn non_file_url_appends_a_path_component() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
