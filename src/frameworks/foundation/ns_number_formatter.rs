@@ -37,6 +37,7 @@ struct NSNumberFormatterHostObject {
     positive_suffix: id,
     negative_prefix: id,
     negative_suffix: id,
+    multiplier: id,
     locale: id,
 }
 impl HostObject for NSNumberFormatterHostObject {}
@@ -67,6 +68,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         positive_suffix: nil,
         negative_prefix: nil,
         negative_suffix: nil,
+        multiplier: nil,
         locale: nil,
     });
     env.objc.alloc_object(this, host_object, &mut env.mem)
@@ -75,7 +77,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())dealloc {
     let (positive_format, negative_format, grouping_separator,
          currency_grouping_separator, currency_code, currency_symbol,
-         positive_prefix, positive_suffix, negative_prefix, negative_suffix, locale) = {
+         positive_prefix, positive_suffix, negative_prefix, negative_suffix,
+         multiplier, locale) = {
         let state = env.objc.borrow_mut::<NSNumberFormatterHostObject>(this);
         (
             std::mem::replace(&mut state.positive_format, nil),
@@ -88,6 +91,7 @@ pub const CLASSES: ClassExports = objc_classes! {
             std::mem::replace(&mut state.positive_suffix, nil),
             std::mem::replace(&mut state.negative_prefix, nil),
             std::mem::replace(&mut state.negative_suffix, nil),
+            std::mem::replace(&mut state.multiplier, nil),
             std::mem::replace(&mut state.locale, nil),
         )
     };
@@ -101,6 +105,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     release(env, positive_suffix);
     release(env, negative_prefix);
     release(env, negative_suffix);
+    release(env, multiplier);
     release(env, locale);
     env.objc.dealloc_object(this, &mut env.mem)
 }
@@ -207,6 +212,17 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())setNegativeSuffix:(id)suffix {
     set_owned_affix(env, this, suffix, 3);
 }
+- (id)multiplier {
+    env.objc.borrow::<NSNumberFormatterHostObject>(this).multiplier
+}
+- (())setMultiplier:(id)multiplier {
+    let copied: id = if multiplier == nil { nil } else { msg![env; multiplier copy] };
+    let old = std::mem::replace(
+        &mut env.objc.borrow_mut::<NSNumberFormatterHostObject>(this).multiplier,
+        copied,
+    );
+    release(env, old);
+}
 - (bool)isLenient {
     env.objc.borrow::<NSNumberFormatterHostObject>(this).lenient
 }
@@ -246,7 +262,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     let (style, min_fraction, max_fraction, min_integer, grouping_size, grouping,
          positive_format, negative_format, grouping_separator,
          currency_grouping_separator, currency_symbol, positive_prefix,
-         positive_suffix, negative_prefix, negative_suffix) = {
+         positive_suffix, negative_prefix, negative_suffix, multiplier) = {
         let state = env.objc.borrow::<NSNumberFormatterHostObject>(this);
         (
             state.style,
@@ -264,6 +280,7 @@ pub const CLASSES: ClassExports = objc_classes! {
             state.positive_suffix,
             state.negative_prefix,
             state.negative_suffix,
+            state.multiplier,
         )
     };
 
@@ -283,6 +300,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 
     let mut value: f64 = msg![env; number doubleValue];
+    if multiplier != nil {
+        let scale: f64 = msg![env; multiplier doubleValue];
+        value *= scale;
+    }
     let negative = value.is_sign_negative();
     value = value.abs();
     if style == NSNumberFormatterPercentStyle {
@@ -347,10 +368,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     if string == nil {
         return nil;
     }
-    let (style, lenient, grouping_separator, currency_grouping_separator) = {
+    let (style, lenient, grouping_separator, currency_grouping_separator, multiplier) = {
         let state = env.objc.borrow::<NSNumberFormatterHostObject>(this);
         (state.style, state.lenient, state.grouping_separator,
-         state.currency_grouping_separator)
+         state.currency_grouping_separator, state.multiplier)
     };
     let mut value = ns_string::to_rust_string(env, string).trim().to_owned();
     let separator = if style == NSNumberFormatterCurrencyStyle
@@ -376,6 +397,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     };
     if style == NSNumberFormatterPercentStyle {
         parsed /= 100.0;
+    }
+    if multiplier != nil {
+        let scale: f64 = msg![env; multiplier doubleValue];
+        if scale == 0.0 {
+            return nil;
+        }
+        parsed /= scale;
     }
     msg_class![env; NSNumber numberWithDouble:parsed]
 }
