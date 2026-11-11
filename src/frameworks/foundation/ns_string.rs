@@ -3509,8 +3509,8 @@ fn get_bytes_range_inner(
     if start != available_start || end != available_end {
         log!(
             "Warning: legacy NSString byte conversion clips range {{{}, {}}} to string length {}",
-            range.location,
-            range.length,
+            start,
+            requested,
             all_units.len()
         );
     }
