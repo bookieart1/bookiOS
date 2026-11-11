@@ -23,6 +23,15 @@ pub fn fixed_to_float(fixed: GLfixed) -> GLfloat {
     ((fixed as f64) / ((1 << 16) as f64)) as f32
 }
 
+/// Convert a floating-point scalar to the signed 16.16 representation used by
+/// OpenGL ES 1.1's `GLfixed`, clamping values outside that representation.
+pub fn float_to_fixed(float: GLfloat) -> GLfixed {
+    let scaled = f64::from(float) * f64::from(1 << 16);
+    scaled
+        .round()
+        .clamp(f64::from(GLfixed::MIN), f64::from(GLfixed::MAX)) as GLfixed
+}
+
 /// Convert a fixed-point 4-by-4 matrix to floating-point.
 pub unsafe fn matrix_fixed_to_float(m: *const GLfixed) -> [GLfloat; 16] {
     let mut matrix = [0f32; 16];

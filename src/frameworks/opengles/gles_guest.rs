@@ -20,6 +20,7 @@ use touchHLE_gl_bindings::gles11::{
 use crate::dyld::{export_c_func, export_c_func_aliased, FunctionExports};
 use crate::frameworks::opengles::eagl::EAGLContextHostObject;
 use crate::gles::{gles11_raw as gles11, GLES}; // constants only
+use crate::gles::util::float_to_fixed;
 use crate::mem::{ConstPtr, ConstVoidPtr, GuestISize, GuestUSize, Mem, MutPtr, MutVoidPtr, Ptr};
 use crate::objc::nil;
 use crate::Environment;
@@ -199,6 +200,23 @@ fn glGetFloatv(env: &mut Environment, pname: GLenum, params: MutPtr<GLfloat>) {
     with_ctx_and_mem(env, |gles, mem| {
         let params = mem.ptr_at_mut(params, 16 /* upper bound */);
         unsafe { gles.GetFloatv(pname, params) };
+    });
+}
+fn glGetFixedv(env: &mut Environment, pname: GLenum, params: MutPtr<GLfixed>) {
+    // These are the three sixteen-component, floating-point state queries in
+    // OpenGL ES 1.1. Query the host's equivalent state and perform the S15.16
+    // conversion required by the guest API. Other glGetFixedv parameter types
+    // need their own historical conversion rules and remain explicit gaps.
+    assert!(matches!(
+        pname,
+        gles11::MODELVIEW_MATRIX | gles11::PROJECTION_MATRIX | gles11::TEXTURE_MATRIX
+    ));
+    with_ctx_and_mem(env, |gles, mem| {
+        let mut floats = [0.0; 16];
+        unsafe { gles.GetFloatv(pname, floats.as_mut_ptr()) };
+        for (index, value) in floats.into_iter().enumerate() {
+            mem.write(params + index as GuestUSize, float_to_fixed(value));
+        }
     });
 }
 fn glGetIntegerv(env: &mut Environment, pname: GLenum, params: MutPtr<GLint>) {
@@ -1884,6 +1902,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(glDisableClientState(_)),
     export_c_func!(glGetBooleanv(_, _)),
     export_c_func!(glGetFloatv(_, _)),
+    export_c_func!(glGetFixedv(_, _)),
     export_c_func!(glGetIntegerv(_, _)),
     export_c_func!(glGetPointerv(_, _)),
     export_c_func!(glGetTexEnviv(_, _, _)),
@@ -2118,5 +2137,9 @@ mod tests {
     #[test]
     fn fixed_point_matrix_query_is_exported() {
         assert!(FUNCTIONS.iter().any(|(name, _)| *name == "_glGetFixedv"));
+        assert_eq!(float_to_fixed(1.0), 0x0001_0000);
+        assert_eq!(float_to_fixed(-0.5), -0x0000_8000);
+        assert_eq!(float_to_fixed(GLfloat::INFINITY), GLfixed::MAX);
+        assert_eq!(float_to_fixed(GLfloat::NEG_INFINITY), GLfixed::MIN);
     }
 }
