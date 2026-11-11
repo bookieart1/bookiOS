@@ -990,16 +990,13 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (NSUInteger)lengthOfBytesUsingEncoding:(NSStringEncoding)encoding {
-    if C_STRING_FRIENDLY_ENCODINGS.contains(&encoding) {
-        let length: NSUInteger = msg![env; this length];
-        let units: Vec<u16> = (0..length)
-            .map(|index| msg![env; this characterAtIndex:index])
-            .collect();
-        return encode_utf16_units(&units, encoding, false, false)
-            .map(|bytes| bytes.len().try_into().unwrap())
-            .unwrap_or(0);
-    }
-    unimplemented!("lengthOfBytesUsingEncoding: {}", encoding)
+    let length: NSUInteger = msg![env; this length];
+    let units: Vec<u16> = (0..length)
+        .map(|index| msg![env; this characterAtIndex:index])
+        .collect();
+    encode_utf16_units(&units, encoding, false, false)
+        .map(|bytes| bytes.len().try_into().unwrap())
+        .unwrap_or(0)
 }
 
 - (NSRange)rangeOfString:(id)search_string {
