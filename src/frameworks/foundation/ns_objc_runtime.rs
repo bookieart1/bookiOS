@@ -112,6 +112,11 @@ mod tests {
             .iter()
             .any(|(name, _)| *name == "_objc_retainAutoreleasedReturnValue"));
     }
+
+    #[test]
+    fn arc_release_helper_is_exported() {
+        assert!(FUNCTIONS.iter().any(|(name, _)| *name == "_objc_release"));
+    }
 }
 
 pub const FUNCTIONS: FunctionExports = &[

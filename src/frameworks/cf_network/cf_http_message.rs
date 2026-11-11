@@ -176,6 +176,23 @@ pub const CONSTANTS: ConstantExports = &[
     ),
 ];
 
+#[cfg(test)]
+mod proxy_constant_tests {
+    use super::*;
+
+    #[test]
+    fn http_proxy_dictionary_keys_are_exported() {
+        let names: Vec<_> = CONSTANTS.iter().map(|(name, _)| *name).collect();
+        for required in [
+            "_kCFNetworkProxiesHTTPEnable",
+            "_kCFNetworkProxiesHTTPProxy",
+            "_kCFNetworkProxiesHTTPPort",
+        ] {
+            assert!(names.contains(&required));
+        }
+    }
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFHTTPMessageCreateRequest(_, _, _, _)),
     export_c_func!(CFHTTPMessageSetHeaderFieldValue(_, _, _)),
