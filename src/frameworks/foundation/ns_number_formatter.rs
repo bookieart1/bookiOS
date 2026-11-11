@@ -32,6 +32,7 @@ struct NSNumberFormatterHostObject {
     grouping_separator: id,
     currency_grouping_separator: id,
     currency_code: id,
+    currency_symbol: id,
     locale: id,
 }
 impl HostObject for NSNumberFormatterHostObject {}
@@ -57,6 +58,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         grouping_separator: nil,
         currency_grouping_separator: nil,
         currency_code: nil,
+        currency_symbol: nil,
         locale: nil,
     });
     env.objc.alloc_object(this, host_object, &mut env.mem)
@@ -64,7 +66,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())dealloc {
     let (positive_format, negative_format, grouping_separator,
-         currency_grouping_separator, currency_code, locale) = {
+         currency_grouping_separator, currency_code, currency_symbol, locale) = {
         let state = env.objc.borrow_mut::<NSNumberFormatterHostObject>(this);
         (
             std::mem::replace(&mut state.positive_format, nil),
@@ -72,6 +74,7 @@ pub const CLASSES: ClassExports = objc_classes! {
             std::mem::replace(&mut state.grouping_separator, nil),
             std::mem::replace(&mut state.currency_grouping_separator, nil),
             std::mem::replace(&mut state.currency_code, nil),
+            std::mem::replace(&mut state.currency_symbol, nil),
             std::mem::replace(&mut state.locale, nil),
         )
     };
@@ -80,6 +83,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     release(env, grouping_separator);
     release(env, currency_grouping_separator);
     release(env, currency_code);
+    release(env, currency_symbol);
     release(env, locale);
     env.objc.dealloc_object(this, &mut env.mem)
 }
@@ -151,6 +155,17 @@ pub const CLASSES: ClassExports = objc_classes! {
     );
     release(env, old);
 }
+- (id)currencySymbol {
+    env.objc.borrow::<NSNumberFormatterHostObject>(this).currency_symbol
+}
+- (())setCurrencySymbol:(id)symbol {
+    let copied: id = if symbol == nil { nil } else { msg![env; symbol copy] };
+    let old = std::mem::replace(
+        &mut env.objc.borrow_mut::<NSNumberFormatterHostObject>(this).currency_symbol,
+        copied,
+    );
+    release(env, old);
+}
 - (bool)isLenient {
     env.objc.borrow::<NSNumberFormatterHostObject>(this).lenient
 }
@@ -189,7 +204,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
     let (style, min_fraction, max_fraction, min_integer, grouping_size, grouping,
          positive_format, negative_format, grouping_separator,
-         currency_grouping_separator) = {
+         currency_grouping_separator, currency_symbol) = {
         let state = env.objc.borrow::<NSNumberFormatterHostObject>(this);
         (
             state.style,
@@ -202,6 +217,7 @@ pub const CLASSES: ClassExports = objc_classes! {
             state.negative_format,
             state.grouping_separator,
             state.currency_grouping_separator,
+            state.currency_symbol,
         )
     };
 
@@ -245,7 +261,12 @@ pub const CLASSES: ClassExports = objc_classes! {
         fixed
     };
     if style == NSNumberFormatterCurrencyStyle {
-        output.insert(0, '$');
+        let symbol = if currency_symbol == nil {
+            "$".into()
+        } else {
+            ns_string::to_rust_string(env, currency_symbol).into_owned()
+        };
+        output.insert_str(0, &symbol);
     } else if style == NSNumberFormatterPercentStyle {
         output.push('%');
     }
