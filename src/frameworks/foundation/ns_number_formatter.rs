@@ -31,6 +31,7 @@ struct NSNumberFormatterHostObject {
     negative_format: id,
     grouping_separator: id,
     currency_grouping_separator: id,
+    currency_code: id,
     locale: id,
 }
 impl HostObject for NSNumberFormatterHostObject {}
@@ -55,6 +56,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         negative_format: nil,
         grouping_separator: nil,
         currency_grouping_separator: nil,
+        currency_code: nil,
         locale: nil,
     });
     env.objc.alloc_object(this, host_object, &mut env.mem)
@@ -62,13 +64,14 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())dealloc {
     let (positive_format, negative_format, grouping_separator,
-         currency_grouping_separator, locale) = {
+         currency_grouping_separator, currency_code, locale) = {
         let state = env.objc.borrow_mut::<NSNumberFormatterHostObject>(this);
         (
             std::mem::replace(&mut state.positive_format, nil),
             std::mem::replace(&mut state.negative_format, nil),
             std::mem::replace(&mut state.grouping_separator, nil),
             std::mem::replace(&mut state.currency_grouping_separator, nil),
+            std::mem::replace(&mut state.currency_code, nil),
             std::mem::replace(&mut state.locale, nil),
         )
     };
@@ -76,6 +79,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     release(env, negative_format);
     release(env, grouping_separator);
     release(env, currency_grouping_separator);
+    release(env, currency_code);
     release(env, locale);
     env.objc.dealloc_object(this, &mut env.mem)
 }
@@ -135,6 +139,17 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (())setCurrencyGroupingSeparator:(id)separator {
     set_owned_string(env, this, separator, true);
+}
+- (id)currencyCode {
+    env.objc.borrow::<NSNumberFormatterHostObject>(this).currency_code
+}
+- (())setCurrencyCode:(id)code {
+    let copied: id = if code == nil { nil } else { msg![env; code copy] };
+    let old = std::mem::replace(
+        &mut env.objc.borrow_mut::<NSNumberFormatterHostObject>(this).currency_code,
+        copied,
+    );
+    release(env, old);
 }
 - (bool)isLenient {
     env.objc.borrow::<NSNumberFormatterHostObject>(this).lenient
