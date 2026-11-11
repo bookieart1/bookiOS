@@ -1543,7 +1543,7 @@ mod tests {
         let dictionary: id =
             msg_class![env; NSDictionary dictionaryWithObject:value forKey:present];
         let keys: id = msg_class![env; NSMutableArray arrayWithObject:present];
-        msg![env; keys addObject:missing];
+        let _: () = msg![env; keys addObject:missing];
 
         let values: id = msg![env; dictionary objectsForKeys:keys notFoundMarker:marker];
 
