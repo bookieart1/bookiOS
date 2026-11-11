@@ -3345,6 +3345,41 @@ mod byte_buffer_tests {
 
         assert_eq!(to_rust_string(env, resolved), "/Library/Caches/item");
     }
+
+    #[test]
+    fn legacy_byte_conversion_clips_a_range_past_string_end() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let string = from_rust_string(env, "iPhone".to_owned());
+        let buffer = env.mem.alloc(40).cast();
+        let used = env.mem.alloc_and_write(0u32);
+        let remaining = env.mem.alloc_and_write(NSRange {
+            location: 0,
+            length: 0,
+        });
+
+        assert!(get_bytes_range_inner(
+            env,
+            string,
+            buffer,
+            40,
+            used,
+            NSUTF8StringEncoding,
+            NSStringEncodingConversionAllowLossy,
+            NSRange {
+                location: 0,
+                length: 40,
+            },
+            remaining,
+        ));
+        assert_eq!(env.mem.bytes_at(buffer, 6), b"iPhone");
+        assert_eq!(env.mem.read(used), 6);
+        let remaining: NSRange = env.mem.read(remaining);
+        let remaining_location = remaining.location;
+        let remaining_length = remaining.length;
+        assert_eq!(remaining_location, 6);
+        assert_eq!(remaining_length, 34);
+    }
 }
 
 fn encode_utf16_units(
