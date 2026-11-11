@@ -26,6 +26,7 @@ struct NSNumberFormatterHostObject {
     minimum_integer_digits: NSUInteger,
     uses_grouping_separator: bool,
     grouping_size: NSUInteger,
+    padding_position: NSUInteger,
     lenient: bool,
     positive_format: id,
     negative_format: id,
@@ -57,6 +58,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         minimum_integer_digits: 1,
         uses_grouping_separator: false,
         grouping_size: 3,
+        padding_position: 0,
         lenient: false,
         positive_format: nil,
         negative_format: nil,
@@ -153,6 +155,12 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (())setGroupingSize:(NSUInteger)size {
     env.objc.borrow_mut::<NSNumberFormatterHostObject>(this).grouping_size = size;
+}
+- (NSUInteger)paddingPosition {
+    env.objc.borrow::<NSNumberFormatterHostObject>(this).padding_position
+}
+- (())setPaddingPosition:(NSUInteger)position {
+    env.objc.borrow_mut::<NSNumberFormatterHostObject>(this).padding_position = position;
 }
 - (id)groupingSeparator {
     env.objc.borrow::<NSNumberFormatterHostObject>(this).grouping_separator
