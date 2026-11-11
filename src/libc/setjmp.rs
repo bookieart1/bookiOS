@@ -130,4 +130,9 @@ mod tests {
         assert_eq!(lr, 0x89);
         env.mem.free(buffer.cast());
     }
+
+    #[test]
+    fn double_underscore_setjmp_exports_the_existing_register_buffer_abi() {
+        assert!(FUNCTIONS.iter().any(|(name, _)| *name == "__setjmp"));
+    }
 }

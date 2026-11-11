@@ -636,6 +636,26 @@ mod tests {
     }
 
     #[test]
+    fn immutable_set_union_returns_an_independent_set() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let first: id = msg_class![env; NSObject new];
+        let second: id = msg_class![env; NSObject new];
+        let left: id = msg_class![env; NSSet setWithObject:first];
+        let right: id = msg_class![env; NSSet setWithObject:second];
+
+        let union: id = msg![env; left setByAddingObjectsFromSet:right];
+
+        assert_ne!(union, left);
+        let count: NSUInteger = msg![env; union count];
+        assert_eq!(count, 2);
+        let left_count: NSUInteger = msg![env; left count];
+        assert_eq!(left_count, 1);
+        release(env, first);
+        release(env, second);
+    }
+
+    #[test]
     fn counted_set_tracks_multiplicity_and_distinct_count() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
