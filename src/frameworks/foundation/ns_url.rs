@@ -521,6 +521,22 @@ fn resolve_url_reference(base: &str, reference: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{resolve_url_reference, url_host, url_path, url_query, url_scheme};
+    use crate::frameworks::foundation::ns_string::{from_rust_string, to_rust_string};
+    use crate::objc::{id, msg, msg_class};
+    use crate::Environment;
+
+    #[test]
+    fn non_file_url_appends_a_path_component() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let base = from_rust_string(&mut env, "https://example.com/base".to_owned());
+        let component = from_rust_string(&mut env, "child".to_owned());
+        let url: id = msg_class![&mut env; NSURL URLWithString:base];
+
+        let appended: id = msg![&mut env; url URLByAppendingPathComponent:component];
+        let absolute: id = msg![&mut env; appended absoluteString];
+
+        assert_eq!(to_rust_string(&mut env, absolute), "https://example.com/base/child");
+    }
 
     #[test]
     fn test_resolve_url_reference() {
