@@ -222,6 +222,37 @@ fn strtod(env: &mut Environment, nptr: ConstPtr<u8>, endptr: MutPtr<MutPtr<u8>>)
     res
 }
 
+fn wcstod(
+    env: &mut Environment,
+    nptr: ConstPtr<wchar_t>,
+    endptr: MutPtr<MutPtr<wchar_t>>,
+) -> f64 {
+    set_errno(env, 0);
+    let wide = env.mem.wcstr_at(nptr);
+    let ascii: Vec<u8> = wide
+        .chars()
+        .take_while(|character| character.is_ascii())
+        .map(|character| character as u8)
+        .collect();
+    let narrow = env.mem.alloc_and_write_cstr(&ascii);
+    let conversion = atof_inner(env, narrow.cast_const());
+    env.mem.free(narrow.cast());
+    match conversion {
+        Ok((value, consumed)) => {
+            if !endptr.is_null() {
+                env.mem.write(endptr, (nptr + consumed).cast_mut());
+            }
+            value
+        }
+        Err(_) => {
+            if !endptr.is_null() {
+                env.mem.write(endptr, nptr.cast_mut());
+            }
+            0.0
+        }
+    }
+}
+
 fn strtod_l(
     env: &mut Environment,
     nptr: ConstPtr<u8>,
@@ -809,6 +840,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(atoll(_)),
     export_c_func!(atof(_)),
     export_c_func!(strtod(_, _)),
+    export_c_func!(wcstod(_, _)),
     export_c_func!(strtod_l(_, _, _)),
     export_c_func!(srand(_)),
     export_c_func!(sranddev()),
