@@ -1628,6 +1628,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, new_string)
 }
 
+- (id)stringByResolvingSymlinksInPath {
+    // The guest filesystem flattens host symlinks while importing application
+    // bundles, so no guest symlink nodes remain to traverse. Path
+    // standardization is therefore the complete observable resolution step.
+    msg![env; this stringByStandardizingPath]
+}
+
 - (id)stringsByAppendingPaths:(id)paths {
     let count: NSUInteger = msg![env; paths count];
     let mut_arr: id = msg_class![env; NSMutableArray new];
