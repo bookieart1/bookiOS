@@ -38,8 +38,43 @@ const NSFileSystemFreeSize: &str = "NSFileSystemFreeSize";
 pub const NSFileType: &str = "NSFileType";
 pub const NSFileTypeDirectory: &str = "NSFileTypeDirectory";
 pub const NSFileTypeRegular: &str = "NSFileTypeRegular";
+const NSFileOwnerAccountName: &str = "NSFileOwnerAccountName";
+const NSFileOwnerAccountID: &str = "NSFileOwnerAccountID";
+const NSFileGroupOwnerAccountName: &str = "NSFileGroupOwnerAccountName";
+const NSFileGroupOwnerAccountID: &str = "NSFileGroupOwnerAccountID";
+const NSFileHFSCreatorCode: &str = "NSFileHFSCreatorCode";
+const NSFileSystemSize: &str = "NSFileSystemSize";
+const NSFileTypeSymbolicLink: &str = "NSFileTypeSymbolicLink";
 
 pub const CONSTANTS: ConstantExports = &[
+    (
+        "_NSFileOwnerAccountName",
+        HostConstant::NSString(NSFileOwnerAccountName),
+    ),
+    (
+        "_NSFileOwnerAccountID",
+        HostConstant::NSString(NSFileOwnerAccountID),
+    ),
+    (
+        "_NSFileGroupOwnerAccountName",
+        HostConstant::NSString(NSFileGroupOwnerAccountName),
+    ),
+    (
+        "_NSFileGroupOwnerAccountID",
+        HostConstant::NSString(NSFileGroupOwnerAccountID),
+    ),
+    (
+        "_NSFileHFSCreatorCode",
+        HostConstant::NSString(NSFileHFSCreatorCode),
+    ),
+    (
+        "_NSFileSystemSize",
+        HostConstant::NSString(NSFileSystemSize),
+    ),
+    (
+        "_NSFileTypeSymbolicLink",
+        HostConstant::NSString(NSFileTypeSymbolicLink),
+    ),
     (
         "_NSFileModificationDate",
         HostConstant::NSString(NSFileModificationDate),
