@@ -667,6 +667,20 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, immutable_values)
 }
 
+- (id)objectsForKeys:(id)keys notFoundMarker:(id)marker {
+    assert!(keys != nil && marker != nil);
+    let values: id = msg_class![env; NSMutableArray array];
+    let count: NSUInteger = msg![env; keys count];
+    for index in 0..count {
+        let key: id = msg![env; keys objectAtIndex:index];
+        let value: id = msg![env; this objectForKey:key];
+        let value = if value == nil { marker } else { value };
+        let _: () = msg![env; values addObject:value];
+    }
+    let immutable_values: id = msg![env; values copy];
+    autorelease(env, immutable_values)
+}
+
 - (id)descriptionInStringsFileFormat {
     let string_class: Class = msg_class![env; NSString class];
     let number_class: Class = msg_class![env; NSNumber class];
