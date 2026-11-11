@@ -28,10 +28,16 @@ pub type CFURLRef = super::CFTypeRef;
 
 // Historical CFURL access-property key, available from iPhone OS 2.0. Its
 // value is the key's public name (see CFURLAccess.c's CONST_STRING_DECL).
-pub const CONSTANTS: ConstantExports = &[(
-    "_kCFURLFileLength",
-    HostConstant::NSString("kCFURLFileLength"),
-)];
+pub const CONSTANTS: ConstantExports = &[
+    (
+        "_kCFURLFileExists",
+        HostConstant::NSString("kCFURLFileExists"),
+    ),
+    (
+        "_kCFURLFileLength",
+        HostConstant::NSString("kCFURLFileLength"),
+    ),
+];
 
 type CFURLPathStyle = CFIndex;
 const kCFURLPOSIXPathStyle: CFURLPathStyle = 0;
@@ -63,9 +69,8 @@ pub fn CFURLGetFileSystemRepresentation(
 }
 
 /// Historical CFURL resource-property access used by pre-iOS-5 games.  This
-/// first contract deliberately supports only the file-length property already
-/// exported by this framework; unsupported keys fail instead of returning a
-/// fabricated value.
+/// Supported legacy keys return their documented value types; unsupported
+/// keys fail instead of returning a fabricated value.
 fn CFURLCreatePropertyFromResource(
     env: &mut Environment,
     allocator: CFAllocatorRef,
@@ -84,8 +89,11 @@ fn CFURLCreatePropertyFromResource(
         return Ptr::null();
     }
 
+    let file_exists_key = get_static_str(env, "kCFURLFileExists");
     let file_length_key = get_static_str(env, "kCFURLFileLength");
-    if !msg![env; property isEqual:file_length_key] {
+    let requests_file_exists: bool = msg![env; property isEqual:file_exists_key];
+    let requests_file_length: bool = msg![env; property isEqual:file_length_key];
+    if !requests_file_exists && !requests_file_length {
         log!(
             "Warning: CFURLCreatePropertyFromResource unsupported property {:?}",
             property
@@ -98,6 +106,13 @@ fn CFURLCreatePropertyFromResource(
 
     let path: id = msg![env; url path];
     let manager: id = msg_class![env; NSFileManager defaultManager];
+    if requests_file_exists {
+        let exists: bool = msg![env; manager fileExistsAtPath:path];
+        let value: id = msg_class![env; NSNumber numberWithBool:exists];
+        retain(env, value);
+        return value;
+    }
+
     let no_error: MutPtr<id> = Ptr::null();
     let attributes: id = msg![env; manager attributesOfItemAtPath:path error:no_error];
     if attributes == nil {
@@ -351,6 +366,21 @@ mod tests {
         let env = &mut env;
         let path = from_rust_string(env, "/tmp/example".to_owned());
         let url: id = msg_class![env; NSURL fileURLWithPath:path];
+        let exists_key = get_static_str(env, "kCFURLFileExists");
+        let error = env.mem.alloc_and_write(123i32);
+        let exists = CFURLCreatePropertyFromResource(
+            env,
+            kCFAllocatorDefault,
+            url,
+            exists_key,
+            error,
+        );
+        assert_ne!(exists, nil);
+        assert!(!msg![env; exists boolValue]);
+        assert_eq!(env.mem.read(error), 0);
+        release(env, exists);
+        env.mem.free(error.cast());
+
         let copied = CFURLCopyPath(env, url);
         assert_eq!(to_rust_string(env, copied), "/tmp/example");
         release(env, copied);
