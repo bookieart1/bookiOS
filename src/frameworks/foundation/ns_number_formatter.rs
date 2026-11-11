@@ -429,6 +429,21 @@ mod tests {
     use crate::objc::release;
 
     #[test]
+    fn development_255_parapanic_currency_code_is_copied_and_round_trips() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let formatter: id = msg_class![env; NSNumberFormatter new];
+        let initial: id = msg![env; formatter currencyCode];
+        assert_eq!(initial, nil);
+        let code = ns_string::from_rust_string(env, "CRD".to_owned());
+        () = msg![env; formatter setCurrencyCode:code];
+        release(env, code);
+        let stored: id = msg![env; formatter currencyCode];
+        assert_eq!(ns_string::to_rust_string(env, stored), "CRD");
+        release(env, formatter);
+    }
+
+    #[test]
     fn decimal_formatter_round_trips_bounded_number_state() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
