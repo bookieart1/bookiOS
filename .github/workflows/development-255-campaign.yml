@@ -11,7 +11,9 @@ permissions:
 
 concurrency:
   group: development-255-campaign-${{ github.ref }}
-  cancel-in-progress: false
+  # Only the newest exact-source checkpoint is useful during this campaign.
+  # Do not let superseded checkpoints hold the shared hosted-run queue.
+  cancel-in-progress: true
 
 jobs:
   focused-contracts:
