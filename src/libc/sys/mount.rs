@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn getfsstat_exports_the_single_guest_filesystem_contract() {
-        assert!(FUNCTIONS.iter().any(|(name, _)| *name == "getfsstat"));
+        assert!(FUNCTIONS.iter().any(|(name, _)| *name == "_getfsstat"));
 
         let mut env = Environment::new_fake_for_test();
         assert_eq!(getfsstat(&mut env, MutPtr::null(), 0, 2), 1);
