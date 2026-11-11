@@ -28,6 +28,7 @@ struct NSNumberFormatterHostObject {
     grouping_size: NSUInteger,
     padding_position: NSUInteger,
     lenient: bool,
+    generates_decimal_numbers: bool,
     positive_format: id,
     negative_format: id,
     grouping_separator: id,
@@ -39,6 +40,7 @@ struct NSNumberFormatterHostObject {
     negative_prefix: id,
     negative_suffix: id,
     multiplier: id,
+    minus_sign: id,
     locale: id,
 }
 impl HostObject for NSNumberFormatterHostObject {}
@@ -60,6 +62,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         grouping_size: 3,
         padding_position: 0,
         lenient: false,
+        generates_decimal_numbers: false,
         positive_format: nil,
         negative_format: nil,
         grouping_separator: nil,
@@ -71,6 +74,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         negative_prefix: nil,
         negative_suffix: nil,
         multiplier: nil,
+        minus_sign: nil,
         locale: nil,
     });
     env.objc.alloc_object(this, host_object, &mut env.mem)
@@ -80,7 +84,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     let (positive_format, negative_format, grouping_separator,
          currency_grouping_separator, currency_code, currency_symbol,
          positive_prefix, positive_suffix, negative_prefix, negative_suffix,
-         multiplier, locale) = {
+         multiplier, minus_sign, locale) = {
         let state = env.objc.borrow_mut::<NSNumberFormatterHostObject>(this);
         (
             std::mem::replace(&mut state.positive_format, nil),
@@ -94,6 +98,7 @@ pub const CLASSES: ClassExports = objc_classes! {
             std::mem::replace(&mut state.negative_prefix, nil),
             std::mem::replace(&mut state.negative_suffix, nil),
             std::mem::replace(&mut state.multiplier, nil),
+            std::mem::replace(&mut state.minus_sign, nil),
             std::mem::replace(&mut state.locale, nil),
         )
     };
@@ -108,6 +113,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     release(env, negative_prefix);
     release(env, negative_suffix);
     release(env, multiplier);
+    release(env, minus_sign);
     release(env, locale);
     env.objc.dealloc_object(this, &mut env.mem)
 }
@@ -231,6 +237,23 @@ pub const CLASSES: ClassExports = objc_classes! {
     );
     release(env, old);
 }
+- (bool)generatesDecimalNumbers {
+    env.objc.borrow::<NSNumberFormatterHostObject>(this).generates_decimal_numbers
+}
+- (())setGeneratesDecimalNumbers:(bool)generates {
+    env.objc.borrow_mut::<NSNumberFormatterHostObject>(this).generates_decimal_numbers = generates;
+}
+- (id)minusSign {
+    env.objc.borrow::<NSNumberFormatterHostObject>(this).minus_sign
+}
+- (())setMinusSign:(id)minus_sign {
+    let copied: id = if minus_sign == nil { nil } else { msg![env; minus_sign copy] };
+    let old = std::mem::replace(
+        &mut env.objc.borrow_mut::<NSNumberFormatterHostObject>(this).minus_sign,
+        copied,
+    );
+    release(env, old);
+}
 - (bool)isLenient {
     env.objc.borrow::<NSNumberFormatterHostObject>(this).lenient
 }
@@ -270,7 +293,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     let (style, min_fraction, max_fraction, min_integer, grouping_size, grouping,
          positive_format, negative_format, grouping_separator,
          currency_grouping_separator, currency_symbol, positive_prefix,
-         positive_suffix, negative_prefix, negative_suffix, multiplier) = {
+         positive_suffix, negative_prefix, negative_suffix, multiplier, minus_sign) = {
         let state = env.objc.borrow::<NSNumberFormatterHostObject>(this);
         (
             state.style,
@@ -289,6 +312,7 @@ pub const CLASSES: ClassExports = objc_classes! {
             state.negative_prefix,
             state.negative_suffix,
             state.multiplier,
+            state.minus_sign,
         )
     };
 
@@ -342,10 +366,15 @@ pub const CLASSES: ClassExports = objc_classes! {
         } else {
             ns_string::to_rust_string(env, currency_symbol).into_owned()
         };
-    let default_prefix = if style == NSNumberFormatterCurrencyStyle {
-        format!("{}{}", if negative { "-" } else { "" }, currency_symbol)
-    } else if negative {
+    let minus_sign = if minus_sign == nil {
         "-".to_owned()
+    } else {
+        ns_string::to_rust_string(env, minus_sign).into_owned()
+    };
+    let default_prefix = if style == NSNumberFormatterCurrencyStyle {
+        format!("{}{}", if negative { minus_sign.as_str() } else { "" }, currency_symbol)
+    } else if negative {
+        minus_sign
     } else {
         String::new()
     };
@@ -376,10 +405,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     if string == nil {
         return nil;
     }
-    let (style, lenient, grouping_separator, currency_grouping_separator, multiplier) = {
+    let (style, lenient, grouping_separator, currency_grouping_separator, multiplier,
+         generates_decimal_numbers, minus_sign) = {
         let state = env.objc.borrow::<NSNumberFormatterHostObject>(this);
         (state.style, state.lenient, state.grouping_separator,
-         state.currency_grouping_separator, state.multiplier)
+         state.currency_grouping_separator, state.multiplier,
+         state.generates_decimal_numbers, state.minus_sign)
     };
     let mut value = ns_string::to_rust_string(env, string).trim().to_owned();
     let separator = if style == NSNumberFormatterCurrencyStyle
@@ -393,6 +424,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     };
     if !separator.is_empty() {
         value = value.replace(&separator, "");
+    }
+    if minus_sign != nil {
+        let minus_sign = ns_string::to_rust_string(env, minus_sign);
+        if !minus_sign.is_empty() {
+            value = value.replace(minus_sign.as_ref(), "-");
+        }
     }
     value.retain(|character| character != '$' && character != '%');
     let parsed = if lenient {
@@ -413,7 +450,14 @@ pub const CLASSES: ClassExports = objc_classes! {
         }
         parsed /= scale;
     }
-    msg_class![env; NSNumber numberWithDouble:parsed]
+    if generates_decimal_numbers {
+        let decimal_text = ns_string::from_rust_string(env, parsed.to_string());
+        let decimal: id = msg_class![env; NSDecimalNumber decimalNumberWithString:decimal_text];
+        release(env, decimal_text);
+        decimal
+    } else {
+        msg_class![env; NSNumber numberWithDouble:parsed]
+    }
 }
 
 @end
@@ -697,6 +741,7 @@ mod tests {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
         let formatter: id = msg_class![env; NSNumberFormatter new];
+        let _: () = msg![env; formatter setNumberStyle:NSNumberFormatterDecimalStyle];
         let minus = ns_string::from_rust_string(env, "~".to_owned());
         let _: () = msg![env; formatter setMinusSign:minus];
         release(env, minus);
@@ -710,9 +755,8 @@ mod tests {
         let output: id = msg![env; formatter stringFromNumber:negative];
         assert_eq!(ns_string::to_rust_string(env, output), "~12.5");
         let parsed: id = msg![env; formatter numberFromString:output];
-        let decimal_class: crate::objc::Class = msg_class![env; NSDecimalNumber class];
-        let is_decimal: bool = msg![env; parsed isKindOfClass:decimal_class];
-        assert!(is_decimal);
+        let parsed_class = crate::objc::ObjC::try_read_isa(parsed, &env.mem).unwrap();
+        assert_eq!(env.objc.try_get_class_name(parsed_class), Some("NSDecimalNumber"));
         let parsed_value: f64 = msg![env; parsed doubleValue];
         assert_eq!(parsed_value, -12.5);
         release(env, formatter);
