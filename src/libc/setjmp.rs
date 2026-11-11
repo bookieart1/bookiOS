@@ -10,7 +10,7 @@
 //! functions.
 
 use crate::abi::GuestFunction;
-use crate::dyld::{export_c_func, FunctionExports};
+use crate::dyld::{export_c_func, export_c_func_aliased, FunctionExports};
 use crate::mem::{MutPtr, SafeRead};
 use crate::{abi, Environment};
 
@@ -101,6 +101,8 @@ fn siglongjmp(env: &mut Environment, jmp_buf: MutPtr<JmpBuf>, status: u32) {
 
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(setjmp(_)),
+    // Historical ARM libSystem also exposes the same ABI as `__setjmp`.
+    export_c_func_aliased!("_setjmp", setjmp(_)),
     export_c_func!(longjmp(_, _)),
     export_c_func!(sigsetjmp(_, _)),
     export_c_func!(siglongjmp(_, _)),
