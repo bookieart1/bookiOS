@@ -2110,3 +2110,13 @@ fn _get_buffer_size(env: &mut Environment, target: GLenum) -> GLint {
         buffer_size
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixed_point_matrix_query_is_exported() {
+        assert!(FUNCTIONS.iter().any(|(name, _)| *name == "_glGetFixedv"));
+    }
+}
