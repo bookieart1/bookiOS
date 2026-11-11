@@ -357,6 +357,13 @@ mod tests {
 
     #[test]
     fn legacy_file_property_constants_and_copy_path_contract() {
+        let framework_constant_names: Vec<_> = crate::frameworks::core_foundation::DYLIB
+            .constant_exports
+            .iter()
+            .flat_map(|exports| exports.iter().map(|(name, _)| *name))
+            .collect();
+        assert!(framework_constant_names.contains(&"_kCFBundleIdentifierKey"));
+
         let constant_names: Vec<_> = CONSTANTS.iter().map(|(name, _)| *name).collect();
         assert_eq!(
             constant_names,

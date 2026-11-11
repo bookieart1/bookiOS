@@ -354,6 +354,15 @@ mod tests {
 
     #[test]
     fn dev_244_movie_repeat_mode_is_paired_state() {
+        let exported_names: Vec<_> = crate::frameworks::media_player::DYLIB
+            .constant_exports
+            .iter()
+            .flat_map(|exports| exports.iter().map(|(name, _)| *name))
+            .collect();
+        assert!(exported_names.contains(
+            &"_MPMusicPlayerControllerVolumeDidChangeNotification"
+        ));
+
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
         let player: id = msg_class![env; MPMoviePlayerController alloc];

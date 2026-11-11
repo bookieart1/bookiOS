@@ -752,6 +752,20 @@ mod tests {
 
     #[test]
     fn remote_notification_type_state_round_trips_and_clears() {
+        let exported_names: Vec<_> = crate::frameworks::uikit::DYLIB
+            .constant_exports
+            .iter()
+            .flat_map(|exports| exports.iter().map(|(name, _)| *name))
+            .collect();
+        for required in [
+            "_UIBackgroundTaskInvalid",
+            "_UIScreenDidConnectNotification",
+            "_UIScreenDidDisconnectNotification",
+            "_UIScreenModeDidChangeNotification",
+        ] {
+            assert!(exported_names.contains(&required));
+        }
+
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
         let application: id = msg_class![env; UIApplication alloc];
