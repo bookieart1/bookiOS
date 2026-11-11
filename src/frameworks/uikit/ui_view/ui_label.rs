@@ -36,7 +36,7 @@ mod development_255_tests {
 use crate::frameworks::uikit::ui_graphics::UIGraphicsGetCurrentContext;
 use crate::objc::{
     id, impl_HostObject_with_superclass, msg, msg_class, msg_super, nil, objc_classes, release,
-    retain, todo_objc_setter, ClassExports, NSZonePtr,
+    retain, ClassExports, NSZonePtr,
 };
 
 type UIBaselineAdjustment = NSInteger;
@@ -60,6 +60,7 @@ pub struct UILabelHostObject {
     number_of_lines: NSInteger,
     adjusts_font_size_to_fit_width: bool,
     minimum_font_size: CGFloat,
+    baseline_adjustment: UIBaselineAdjustment,
 }
 impl_HostObject_with_superclass!(UILabelHostObject);
 impl Default for UILabelHostObject {
@@ -78,6 +79,7 @@ impl Default for UILabelHostObject {
             number_of_lines: 1,
             adjusts_font_size_to_fit_width: false,
             minimum_font_size: 0.0,
+            baseline_adjustment: 0,
         }
     }
 }
@@ -199,6 +201,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         number_of_lines: _,
         adjusts_font_size_to_fit_width: _,
         minimum_font_size: _,
+        baseline_adjustment: _,
     } = env.objc.borrow(this);
     release(env, text);
     release(env, font);
@@ -393,8 +396,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     () = msg![env; this setNeedsDisplay];
 }
 
+- (UIBaselineAdjustment)baselineAdjustment {
+    env.objc.borrow::<UILabelHostObject>(this).baseline_adjustment
+}
 - (())setBaselineAdjustment:(UIBaselineAdjustment)value {
-    todo_objc_setter!(this, value);
+    assert!((0..=2).contains(&value));
+    env.objc.borrow_mut::<UILabelHostObject>(this).baseline_adjustment = value;
+    () = msg![env; this setNeedsDisplay];
 }
 
 - (())drawRect:(CGRect)_rect {
@@ -419,6 +427,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         number_of_lines,
         adjusts_font_size_to_fit_width,
         minimum_font_size,
+        baseline_adjustment: _,
     } = env.objc.borrow_mut(this);
 
     let effective_text_color = if highlighted && highlighted_text_color != nil {
