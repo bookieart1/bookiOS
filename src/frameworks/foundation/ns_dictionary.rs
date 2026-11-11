@@ -1547,8 +1547,10 @@ mod tests {
 
         let values: id = msg![env; dictionary objectsForKeys:keys notFoundMarker:marker];
 
-        assert_eq!(msg![env; values objectAtIndex:0u32], value);
-        assert_eq!(msg![env; values objectAtIndex:1u32], marker);
+        let first: id = msg![env; values objectAtIndex:0u32];
+        let second: id = msg![env; values objectAtIndex:1u32];
+        assert_eq!(first, value);
+        assert_eq!(second, marker);
     }
 
     #[test]
