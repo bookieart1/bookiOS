@@ -130,6 +130,18 @@ const kCFStreamPropertyHTTPResponseHeader: &str = "kCFStreamPropertyHTTPResponse
 
 pub const CONSTANTS: ConstantExports = &[
     (
+        "_kCFNetworkProxiesHTTPEnable",
+        HostConstant::NSString("HTTPEnable"),
+    ),
+    (
+        "_kCFNetworkProxiesHTTPProxy",
+        HostConstant::NSString("HTTPProxy"),
+    ),
+    (
+        "_kCFNetworkProxiesHTTPPort",
+        HostConstant::NSString("HTTPPort"),
+    ),
+    (
         "_kCFHTTPVersion1_0",
         HostConstant::NSString(kCFHTTPVersion1_0),
     ),
