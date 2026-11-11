@@ -22,7 +22,7 @@ use crate::libc::stdlib::qsort::qsort_generic;
 use crate::mem::{ConstPtr, MutPtr, MutVoidPtr, Ptr, SafeRead};
 use crate::objc::{
     autorelease, id, msg, msg_class, msg_send, nil, objc_classes, release, retain, Class,
-    ClassExports, HostObject, NSZonePtr, SEL,
+    ClassExports, HostObject, NSZonePtr, SEL, TrivialHostObject,
 };
 use crate::Environment;
 
@@ -33,6 +33,37 @@ struct ObjectEnumeratorHostObject {
     iterator: std::vec::IntoIter<id>,
 }
 impl HostObject for ObjectEnumeratorHostObject {}
+
+fn alloc_array_class_cluster_member(
+    env: &mut Environment,
+    class: Class,
+    zone: NSZonePtr,
+) -> id {
+    if class == env.objc.get_known_class("NSArray", &mut env.mem) {
+        msg_class![env; _touchHLE_NSArray allocWithZone:zone]
+    } else {
+        // Genuine NSArray subclasses provide their own primitive storage.
+        // Preserve their class identity and guest ivars instead of replacing
+        // them with touchHLE's private concrete class.
+        env.objc
+            .alloc_object(class, Box::new(TrivialHostObject), &mut env.mem)
+    }
+}
+
+fn alloc_mutable_array_class_cluster_member(
+    env: &mut Environment,
+    class: Class,
+    zone: NSZonePtr,
+) -> id {
+    if class == env.objc.get_known_class("NSMutableArray", &mut env.mem) {
+        msg_class![env; _touchHLE_NSMutableArray allocWithZone:zone]
+    } else {
+        // As with immutable subclasses, the subclass owns its primitive
+        // storage and must retain its exact Objective-C identity.
+        env.objc
+            .alloc_object(class, Box::new(TrivialHostObject), &mut env.mem)
+    }
+}
 
 /// Belongs to _touchHLE_NSArray
 #[derive(Debug, Default)]
@@ -96,10 +127,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 @implementation NSArray: NSObject
 
 + (id)allocWithZone:(NSZonePtr)zone {
-    // NSArray might be subclassed by something which needs allocWithZone:
-    // to have the normal behaviour. Unimplemented: call superclass alloc then.
-    assert!(this == env.objc.get_known_class("NSArray", &mut env.mem));
-    msg_class![env; _touchHLE_NSArray allocWithZone:zone]
+    alloc_array_class_cluster_member(env, this, zone)
 }
 
 + (id)array {
@@ -491,10 +519,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 @implementation NSMutableArray: NSArray
 
 + (id)allocWithZone:(NSZonePtr)zone {
-    // NSArray might be subclassed by something which needs allocWithZone:
-    // to have the normal behaviour. Unimplemented: call superclass alloc then.
-    assert!(this == env.objc.get_known_class("NSMutableArray", &mut env.mem));
-    msg_class![env; _touchHLE_NSMutableArray allocWithZone:zone]
+    alloc_mutable_array_class_cluster_member(env, this, zone)
 }
 
 + (id)arrayWithCapacity:(NSUInteger)capacity {
@@ -1346,6 +1371,45 @@ fn init_with_objects_inner(env: &mut Environment, arr: id, first_obj: id, args: 
 mod tests {
     use super::*;
     use crate::frameworks::foundation::ns_string::to_rust_string;
+
+    #[test]
+    fn development_255_array_subclass_allocation_preserves_requested_identity() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let subclass = env
+            .objc
+            .get_known_class("_touchHLE_NSArray_non_retaining", &mut env.mem);
+        let object = alloc_array_class_cluster_member(env, subclass, MutVoidPtr::null());
+        let actual_class: Class = msg![env; object class];
+        assert_eq!(actual_class, subclass);
+        assert!(env
+            .objc
+            .get_host_object(object)
+            .unwrap()
+            .as_any()
+            .is::<TrivialHostObject>());
+        env.objc.dealloc_object(object, &mut env.mem);
+    }
+
+    #[test]
+    fn development_255_mutable_array_subclass_allocation_preserves_requested_identity() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let subclass = env
+            .objc
+            .get_known_class("_touchHLE_NSMutableArray_non_retaining", &mut env.mem);
+        let object =
+            alloc_mutable_array_class_cluster_member(env, subclass, MutVoidPtr::null());
+        let actual_class: Class = msg![env; object class];
+        assert_eq!(actual_class, subclass);
+        assert!(env
+            .objc
+            .get_host_object(object)
+            .unwrap()
+            .as_any()
+            .is::<TrivialHostObject>());
+        env.objc.dealloc_object(object, &mut env.mem);
+    }
 
     #[test]
     fn development_255_mutable_array_exchange_contract() {
