@@ -750,9 +750,9 @@ fn offline_render_completion_status(requested_frames: u32, produced_bytes: u32) 
 }
 
 fn queue_uses_openal_rendering(
-    _offline_render_format: Option<AudioStreamBasicDescription>,
+    offline_render_format: Option<AudioStreamBasicDescription>,
 ) -> bool {
-    true
+    offline_render_format.is_none()
 }
 
 #[cfg(test)]
@@ -1315,6 +1315,9 @@ pub fn handle_audio_queue(env: &mut Environment, in_aq: AudioQueueRef) {
         State::get_with_context(&mut env.framework_state, &mut env.openal_manager);
 
     let host_object = state.audio_queues.get_mut(&in_aq).unwrap();
+    if !queue_uses_openal_rendering(host_object.offline_render_format) {
+        return;
+    }
     let Some(al_source) = host_object.al_source else {
         return;
     };
@@ -1430,6 +1433,17 @@ fn AudioQueuePrime(
 ) -> OSStatus {
     return_if_null!(in_aq);
 
+    let uses_openal = State::get(&mut env.framework_state)
+        .audio_queues
+        .get(&in_aq)
+        .is_some_and(|queue| queue_uses_openal_rendering(queue.offline_render_format));
+    if !uses_openal {
+        if !out_number_of_frames_prepared.is_null() {
+            env.mem.write(out_number_of_frames_prepared, 0);
+        }
+        return 0;
+    }
+
     match prime_audio_queue(env, in_aq) {
         Ok(frames_prepared) => {
             if !out_number_of_frames_prepared.is_null() {
@@ -1471,7 +1485,13 @@ pub fn AudioQueueStart(
 
     assert!(in_device_start_time.is_null()); // TODO
 
-    _ = prime_audio_queue(env, in_aq);
+    let uses_openal = State::get(&mut env.framework_state)
+        .audio_queues
+        .get(&in_aq)
+        .is_some_and(|queue| queue_uses_openal_rendering(queue.offline_render_format));
+    if uses_openal {
+        _ = prime_audio_queue(env, in_aq);
+    }
 
     let (state, context) =
         State::get_with_context(&mut env.framework_state, &mut env.openal_manager);
@@ -1481,11 +1501,11 @@ pub fn AudioQueueStart(
     host_object.is_running = AudioQueueIsRunning::Running;
     host_object.started = true;
 
-    if is_supported_audio_format(&host_object.format) {
+    if uses_openal && is_supported_audio_format(&host_object.format) {
         let al_source = host_object.al_source.unwrap();
         unsafe { context.SourcePlay(al_source) };
         assert!(unsafe { context.GetError() } == 0);
-    } else {
+    } else if uses_openal {
         log!(
             "AudioQueueStart: Unsupported format {:?}",
             host_object.format
