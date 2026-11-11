@@ -1,4 +1,4 @@
-name: Development 2.51 unsigned IPA live transfer
+name: Development 2.54 unsigned IPA live transfer
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: development-251-ipa-${{ github.ref }}
+  group: development-254-ipa-${{ github.ref }}
   cancel-in-progress: false
 
 env:
@@ -15,7 +15,7 @@ env:
   CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
   DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
   DEV_BUNDLE_ID: com.bookieart1.idared32bit.dev
-  DEV_DISPLAY_NAME: iDared Dev 2.51
+  DEV_DISPLAY_NAME: iDared Dev 2.54
 
 jobs:
   build-package-live-transfer:
@@ -30,13 +30,17 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
-      - name: Verify exact Development 2.51 source
+      - name: Verify exact Development 2.54 source
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(jq -r .historical_accounting_base CONSOLIDATION_MANIFEST.json)" = "a950ac43aca0a2c14dd198e9e03955abb8092705"
           test "$(jq -r .source_commit_binding CONSOLIDATION_MANIFEST.json)" = "__SOURCE_COMMIT__"
-          test "$(jq -r .manifest_id CONSOLIDATION_MANIFEST.json)" = "IDARED-DEVELOPMENT-2.51-UNIVERSAL-CONTRACTS-20261110"
+          test "$(jq -r .manifest_id CONSOLIDATION_MANIFEST.json)" = "IDARED-DEVELOPMENT-2.54-NULL-ACCESS-CLUSTER-20261111"
+          test "$(jq -r .component_evidence.ui_control_content_horizontal_alignment CONSOLIDATION_MANIFEST.json)" = "0488343218639febbf2f26a3f745e2a14df7a5dd"
+          test "$(jq -r .component_evidence.ui_button_content_edge_insets CONSOLIDATION_MANIFEST.json)" = "b2749d30f3924748483b17b221b116e72f8be5bd"
+          test "$(jq -r .component_evidence.openfeint_baseline_default CONSOLIDATION_MANIFEST.json)" = "9b4121c7374c607b91256ff5cab5a3a1ee7a5eb1"
+          test "$(jq -r .component_evidence.null_access_cluster_general_contracts CONSOLIDATION_MANIFEST.json)" = "82727c48c747252e3dd5ad301bb1423f55dbf2b5"
           xcodebuild -version
           rustc --version
           cargo --version
@@ -81,12 +85,12 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -destination "generic/platform=iOS" \
-            -archivePath "$RUNNER_TEMP/iDared-Dev-2.51.xcarchive" \
+            -archivePath "$RUNNER_TEMP/iDared-Dev-2.54.xcarchive" \
             PRODUCT_BUNDLE_IDENTIFIER="$DEV_BUNDLE_ID" \
             INFOPLIST_KEY_CFBundleDisplayName="$DEV_DISPLAY_NAME" \
             INFOPLIST_KEY_CFBundleName="$DEV_DISPLAY_NAME" \
-            CURRENT_PROJECT_VERSION=251 \
-            MARKETING_VERSION=2.51 \
+            CURRENT_PROJECT_VERSION=254 \
+            MARKETING_VERSION=2.54 \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -96,7 +100,7 @@ jobs:
         id: package
         run: |
           set -euo pipefail
-          ARCHIVE="$RUNNER_TEMP/iDared-Dev-2.51.xcarchive"
+          ARCHIVE="$RUNNER_TEMP/iDared-Dev-2.54.xcarchive"
           APP="$ARCHIVE/Products/Applications/iDared 32bit.app"
           BINARY="$APP/iDared 32bit"
           OUT="$RUNNER_TEMP/consolidated-transfer"
@@ -107,15 +111,15 @@ jobs:
           test "$(jq -r .source_commit_binding "$APP/ConsolidationManifest.json")" = "$GITHUB_SHA"
           test "$(plutil -extract CFBundleIdentifier raw "$APP/Info.plist")" = "$DEV_BUNDLE_ID"
           test "$(plutil -extract CFBundleDisplayName raw "$APP/Info.plist")" = "$DEV_DISPLAY_NAME"
-          test "$(plutil -extract CFBundleVersion raw "$APP/Info.plist")" = "251"
-          test "$(plutil -extract CFBundleShortVersionString raw "$APP/Info.plist")" = "2.51"
+          test "$(plutil -extract CFBundleVersion raw "$APP/Info.plist")" = "254"
+          test "$(plutil -extract CFBundleShortVersionString raw "$APP/Info.plist")" = "2.54"
           test ! -e "$APP/embedded.mobileprovision"
           ! codesign -dv "$APP" >/dev/null 2>&1
           test -z "$(find "$APP" -type f -iname '*.ipa' -print -quit)"
           archs="$(lipo -archs "$BINARY")"
           echo "$archs" | grep -qw arm64
           cp -R "$APP" "$OUT/Payload/"
-          (cd "$OUT" && /usr/bin/zip -qry iDared-Dev-2.51-unsigned.ipa Payload)
+          (cd "$OUT" && /usr/bin/zip -qry iDared-Dev-2.54-unsigned.ipa Payload)
           cp -R "$ARCHIVE/dSYMs" "$OUT/symbols/"
           dwarfdump --uuid "$BINARY" > "$OUT/binary-uuid.txt"
           find "$OUT/symbols/dSYMs" -name '*.dSYM' -exec dwarfdump --uuid {} \; > "$OUT/dsym-uuids.txt"
@@ -130,27 +134,27 @@ jobs:
             echo "unsigned=true"
             echo "provisioning_profile=absent"
             echo "guest_ipas=absent"
-            shasum -a 256 "$OUT/iDared-Dev-2.51-unsigned.ipa"
+            shasum -a 256 "$OUT/iDared-Dev-2.54-unsigned.ipa"
             shasum -a 256 "$APP/ConsolidationManifest.json"
             cat "$OUT/binary-uuid.txt"
             cat "$OUT/dsym-uuids.txt"
           } > "$OUT/package-manifest.txt"
-          (cd "$OUT" && /usr/bin/zip -qry iDared-Dev-2.51-native-symbols.zip symbols binary-uuid.txt dsym-uuids.txt package-manifest.txt)
-          shasum -a 256 "$OUT/iDared-Dev-2.51-native-symbols.zip" >> "$OUT/package-manifest.txt"
+          (cd "$OUT" && /usr/bin/zip -qry iDared-Dev-2.54-native-symbols.zip symbols binary-uuid.txt dsym-uuids.txt package-manifest.txt)
+          shasum -a 256 "$OUT/iDared-Dev-2.54-native-symbols.zip" >> "$OUT/package-manifest.txt"
           cat "$OUT/package-manifest.txt"
 
       - name: Serve IPA and symbols through bounded ephemeral HTTPS routes
         run: |
           set -euo pipefail
           OUT="$RUNNER_TEMP/consolidated-transfer"
-          IPA="$OUT/iDared-Dev-2.51-unsigned.ipa"
-          SYMBOLS="$OUT/iDared-Dev-2.51-native-symbols.zip"
+          IPA="$OUT/iDared-Dev-2.54-unsigned.ipa"
+          SYMBOLS="$OUT/iDared-Dev-2.54-native-symbols.zip"
           TOKEN="$(openssl rand -hex 32)"
           PORT="$((22000 + RANDOM % 18000))"
           cat > "$RUNNER_TEMP/serve-two.py" <<'PY'
           import http.server, os, sys
           port=int(sys.argv[1]); token=sys.argv[2]; ipa=sys.argv[3]; symbols=sys.argv[4]; sentinel=sys.argv[5]
-          routes={f'/{token}/iDared-Dev-2.51-unsigned.ipa':ipa,f'/{token}/iDared-Dev-2.51-native-symbols.zip':symbols}
+          routes={f'/{token}/iDared-Dev-2.54-unsigned.ipa':ipa,f'/{token}/iDared-Dev-2.54-native-symbols.zip':symbols}
           done=set()
           class H(http.server.BaseHTTPRequestHandler):
               def do_GET(self):
@@ -203,8 +207,8 @@ jobs:
           echo "symbols_sha256=$(shasum -a 256 "$SYMBOLS" | awk '{print $1}')"
           echo "symbols_size=$(stat -f %z "$SYMBOLS")"
           echo "cloudflared_digest=$ACTUAL_DIGEST"
-          echo "IPA_URL=$ORIGIN/$TOKEN/iDared-Dev-2.51-unsigned.ipa"
-          echo "SYMBOLS_URL=$ORIGIN/$TOKEN/iDared-Dev-2.51-native-symbols.zip"
+          echo "IPA_URL=$ORIGIN/$TOKEN/iDared-Dev-2.54-unsigned.ipa"
+          echo "SYMBOLS_URL=$ORIGIN/$TOKEN/iDared-Dev-2.54-native-symbols.zip"
           echo "CONSOLIDATED_IPA_TRANSFER_END"
           deadline=$((SECONDS+600))
           while [[ ! -f "$RUNNER_TEMP/transfer-complete" && $SECONDS -lt $deadline ]]; do
