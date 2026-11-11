@@ -96,6 +96,10 @@ fn objc_autoreleaseReturnValue(env: &mut Environment, object: id) -> id {
     autorelease(env, object)
 }
 
+fn objc_retain(env: &mut Environment, object: id) -> id {
+    retain(env, object)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,4 +152,5 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(objc_retainAutoreleasedReturnValue(_)),
     export_c_func!(objc_release(_)),
     export_c_func!(objc_autoreleaseReturnValue(_)),
+    export_c_func!(objc_retain(_)),
 ];
