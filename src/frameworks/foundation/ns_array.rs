@@ -505,6 +505,15 @@ pub const CLASSES: ClassExports = objc_classes! {
     true
 }
 
+// Convenience behavior belongs to the public abstract class so genuine
+// NSArray and NSMutableArray subclasses inherit it. The implementation uses
+// only the documented primitive and copying surface.
+- (id)sortedArrayUsingSelector:(SEL)comparator {
+    let new = msg![env; this mutableCopy];
+    () = msg![env; new sortUsingSelector:comparator];
+    autorelease(env, new)
+}
+
 @end
 
 // NSMutableArray is an abstract class. A subclass must provide everything
@@ -747,12 +756,6 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
     let res = from_vec(env, tmp);
     autorelease(env, res)
-}
-
-- (id)sortedArrayUsingSelector:(SEL)comparator {
-    let new = msg![env; this mutableCopy];
-    () = msg![env; new sortUsingSelector:comparator];
-    autorelease(env, new)
 }
 
 - (id)sortedArrayUsingDescriptors:(id)descriptors { // NSArray<NSSortDescriptor*>*
@@ -1409,6 +1412,19 @@ mod tests {
             .as_any()
             .is::<TrivialHostObject>());
         env.objc.dealloc_object(object, &mut env.mem);
+    }
+
+    #[test]
+    fn development_255_mutable_array_inherits_sorted_array_selector() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let selector = env.objc.register_host_selector(
+            "sortedArrayUsingSelector:".to_owned(),
+            &mut env.mem,
+        );
+        let mutable_class = env
+            .objc
+            .get_known_class("NSMutableArray", &mut env.mem);
+        assert!(env.objc.class_has_method(mutable_class, selector));
     }
 
     #[test]
