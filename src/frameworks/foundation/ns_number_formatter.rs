@@ -497,6 +497,41 @@ mod tests {
     }
 
     #[test]
+    fn development_255_parapanic_number_prefixes_and_suffixes_round_trip_and_format() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let formatter: id = msg_class![env; NSNumberFormatter new];
+        () = msg![env; formatter setNumberStyle:NSNumberFormatterCurrencyStyle];
+        () = msg![env; formatter setMaximumFractionDigits:0u32];
+
+        let positive_prefix = ns_string::from_rust_string(env, "+".to_owned());
+        let positive_suffix = ns_string::from_rust_string(env, "!".to_owned());
+        let negative_prefix = ns_string::from_rust_string(env, "(".to_owned());
+        let negative_suffix = ns_string::from_rust_string(env, ")".to_owned());
+        () = msg![env; formatter setPositivePrefix:positive_prefix];
+        () = msg![env; formatter setPositiveSuffix:positive_suffix];
+        () = msg![env; formatter setNegativePrefix:negative_prefix];
+        () = msg![env; formatter setNegativeSuffix:negative_suffix];
+        release(env, positive_prefix);
+        release(env, positive_suffix);
+        release(env, negative_prefix);
+        release(env, negative_suffix);
+
+        let positive_prefix: id = msg![env; formatter positivePrefix];
+        let negative_suffix: id = msg![env; formatter negativeSuffix];
+        assert_eq!(ns_string::to_rust_string(env, positive_prefix), "+");
+        assert_eq!(ns_string::to_rust_string(env, negative_suffix), ")");
+
+        let positive: id = msg_class![env; NSNumber numberWithDouble:12.0f64];
+        let negative: id = msg_class![env; NSNumber numberWithDouble:(-12.0f64)];
+        let positive_output: id = msg![env; formatter stringFromNumber:positive];
+        let negative_output: id = msg![env; formatter stringFromNumber:negative];
+        assert_eq!(ns_string::to_rust_string(env, positive_output), "+12!");
+        assert_eq!(ns_string::to_rust_string(env, negative_output), "(12)");
+        release(env, formatter);
+    }
+
+    #[test]
     fn decimal_formatter_round_trips_bounded_number_state() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
