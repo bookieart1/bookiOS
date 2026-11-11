@@ -128,8 +128,26 @@ fn fstatfs(env: &mut Environment, fd: FileDescriptor, buf: MutPtr<statfs>) -> i3
     result
 }
 
-pub const FUNCTIONS: FunctionExports =
-    &[export_c_func!(statfs(_, _)), export_c_func!(fstatfs(_, _))];
+fn getfsstat(env: &mut Environment, buf: MutPtr<statfs>, bufsize: i32, _flags: i32) -> i32 {
+    const FILESYSTEM_COUNT: i32 = 1;
+    if buf.is_null() {
+        return FILESYSTEM_COUNT;
+    }
+
+    let entry_size: i32 = std::mem::size_of::<statfs>().try_into().unwrap();
+    if bufsize < entry_size {
+        return 0;
+    }
+
+    env.mem.write(buf, fake_statfs());
+    FILESYSTEM_COUNT
+}
+
+pub const FUNCTIONS: FunctionExports = &[
+    export_c_func!(statfs(_, _)),
+    export_c_func!(fstatfs(_, _)),
+    export_c_func!(getfsstat(_, _, _)),
+];
 
 #[cfg(test)]
 mod tests {
@@ -138,5 +156,25 @@ mod tests {
     #[test]
     fn getfsstat_exports_the_single_guest_filesystem_contract() {
         assert!(FUNCTIONS.iter().any(|(name, _)| *name == "getfsstat"));
+
+        let mut env = Environment::new_fake_for_test();
+        assert_eq!(getfsstat(&mut env, MutPtr::null(), 0, 2), 1);
+
+        let entry = env.mem.alloc(std::mem::size_of::<statfs>() as u32).cast();
+        assert_eq!(getfsstat(&mut env, entry, 0, 2), 0);
+        assert_eq!(
+            getfsstat(
+                &mut env,
+                entry,
+                std::mem::size_of::<statfs>() as i32,
+                2,
+            ),
+            1
+        );
+        let populated: statfs = env.mem.read(entry);
+        let filesystem_type = populated.f_fstypename;
+        let mount_path = populated.f_mntonname;
+        assert_eq!(&filesystem_type[..3], b"hfs");
+        assert_eq!(mount_path[0], b'/');
     }
 }
