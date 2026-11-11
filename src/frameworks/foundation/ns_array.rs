@@ -22,7 +22,7 @@ use crate::libc::stdlib::qsort::qsort_generic;
 use crate::mem::{ConstPtr, MutPtr, MutVoidPtr, Ptr, SafeRead};
 use crate::objc::{
     autorelease, id, msg, msg_class, msg_send, nil, objc_classes, release, retain, Class,
-    ClassExports, HostObject, NSZonePtr, SEL, TrivialHostObject,
+    ClassExports, HostObject, NSZonePtr, TrivialHostObject, SEL,
 };
 use crate::Environment;
 
@@ -34,11 +34,20 @@ struct ObjectEnumeratorHostObject {
 }
 impl HostObject for ObjectEnumeratorHostObject {}
 
-fn alloc_array_class_cluster_member(
-    env: &mut Environment,
-    class: Class,
-    zone: NSZonePtr,
-) -> id {
+fn enumerate_objects_using<F>(env: &mut Environment, array: id, mut visit: F)
+where
+    F: FnMut(&mut Environment, id, NSUInteger) -> bool,
+{
+    let count: NSUInteger = msg![env; array count];
+    for index in 0..count {
+        let object: id = msg![env; array objectAtIndex:index];
+        if visit(env, object, index) {
+            break;
+        }
+    }
+}
+
+fn alloc_array_class_cluster_member(env: &mut Environment, class: Class, zone: NSZonePtr) -> id {
     if class == env.objc.get_known_class("NSArray", &mut env.mem) {
         msg_class![env; _touchHLE_NSArray allocWithZone:zone]
     } else {
@@ -336,14 +345,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     let invoke = env.mem.read(block).invoke;
     assert_ne!(invoke.addr_without_thumb_bit(), 0);
     let stop = env.mem.alloc_and_write(false);
-    let count: NSUInteger = msg![env; this count];
-    for index in 0..count {
-        let object: id = msg![env; this objectAtIndex:index];
+    enumerate_objects_using(env, this, |env, object, index| {
         () = invoke.call_from_host(env, (block.cast_void(), object, index, stop));
-        if env.mem.read(stop) {
-            break;
-        }
-    }
+        env.mem.read(stop)
+    });
     env.mem.free(stop.cast());
 }
 
@@ -1401,8 +1406,7 @@ mod tests {
         let subclass = env
             .objc
             .get_known_class("_touchHLE_NSMutableArray_non_retaining", &mut env.mem);
-        let object =
-            alloc_mutable_array_class_cluster_member(env, subclass, MutVoidPtr::null());
+        let object = alloc_mutable_array_class_cluster_member(env, subclass, MutVoidPtr::null());
         let actual_class: Class = msg![env; object class];
         assert_eq!(actual_class, subclass);
         assert!(env
@@ -1417,13 +1421,10 @@ mod tests {
     #[test]
     fn development_255_mutable_array_inherits_sorted_array_selector() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let selector = env.objc.register_host_selector(
-            "sortedArrayUsingSelector:".to_owned(),
-            &mut env.mem,
-        );
-        let mutable_class = env
+        let selector = env
             .objc
-            .get_known_class("NSMutableArray", &mut env.mem);
+            .register_host_selector("sortedArrayUsingSelector:".to_owned(), &mut env.mem);
+        let mutable_class = env.objc.get_known_class("NSMutableArray", &mut env.mem);
         assert!(env.objc.class_has_method(mutable_class, selector));
     }
 
@@ -1445,12 +1446,28 @@ mod tests {
     #[test]
     fn development_255_array_block_enumeration_selector_is_exposed() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let selector = env.objc.register_host_selector(
-            "enumerateObjectsUsingBlock:".to_owned(),
-            &mut env.mem,
-        );
+        let selector = env
+            .objc
+            .register_host_selector("enumerateObjectsUsingBlock:".to_owned(), &mut env.mem);
         let class = env.objc.get_known_class("NSArray", &mut env.mem);
         assert!(env.objc.class_has_method(class, selector));
+    }
+
+    #[test]
+    fn development_255_array_block_enumeration_preserves_order_and_stop() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let first = ns_string::from_rust_string(&mut env, "first".to_owned());
+        let second = ns_string::from_rust_string(&mut env, "second".to_owned());
+        let third = ns_string::from_rust_string(&mut env, "third".to_owned());
+        let array = from_vec(&mut env, vec![first, second, third]);
+        let mut visited = Vec::new();
+
+        enumerate_objects_using(&mut env, array, |_env, object, index| {
+            visited.push((object, index));
+            index == 1
+        });
+
+        assert_eq!(visited, vec![(first, 0), (second, 1)]);
     }
 
     fn panic_text(payload: &(dyn std::any::Any + Send)) -> &str {
