@@ -104,11 +104,34 @@ fn thread_get_exception_ports(
     KERN_SUCCESS
 }
 
+fn thread_set_exception_ports(
+    _env: &mut Environment,
+    target_thread: thread_act_t,
+    exception_mask: exception_mask_t,
+    new_port: mach_port_t,
+    behavior: exception_behavior_t,
+    new_flavor: thread_state_flavor_t,
+) -> kern_return_t {
+    assert!(target_thread != MACH_PORT_NULL && target_thread != MACH_PORT_DEAD);
+    // As with task_set_exception_ports, guest exception handlers are not run
+    // by iDared. Accept the registration while retaining host crash handling.
+    log!(
+        "TODO: thread_set_exception_ports({:#x}, {}, {}, {}, {})",
+        target_thread,
+        exception_mask,
+        new_port,
+        behavior,
+        new_flavor
+    );
+    KERN_SUCCESS
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(thread_suspend(_)),
     export_c_func!(thread_resume(_)),
     export_c_func!(thread_get_state(_, _, _, _)),
     export_c_func!(thread_get_exception_ports(_, _, _, _, _, _, _)),
+    export_c_func!(thread_set_exception_ports(_, _, _, _, _)),
 ];
 
 #[cfg(test)]
@@ -144,5 +167,10 @@ mod tests {
         assert!(FUNCTIONS
             .iter()
             .any(|(name, _)| *name == "_thread_set_exception_ports"));
+        let mut env = Environment::new_fake_for_test();
+        assert_eq!(
+            thread_set_exception_ports(&mut env, 1, 1 << 1, 7, 1, 1),
+            KERN_SUCCESS
+        );
     }
 }
