@@ -1011,7 +1011,8 @@ mod tests {
         let output = env.mem.alloc(4).cast();
         () = msg![env; value getValue:output];
 
-        assert_eq!(env.mem.read::<u32>(output.cast()), 0x1234_5678);
+        let actual: u32 = env.mem.read(output.cast());
+        assert_eq!(actual, 0x1234_5678);
         let actual_encoding: ConstPtr<u8> = msg![env; value objCType];
         assert_eq!(env.mem.cstr_at(actual_encoding), b"I");
     }
