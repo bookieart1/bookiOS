@@ -63,16 +63,25 @@ pub const CONSTANTS: ConstantExports = &[(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::objc::msg;
+    use crate::objc::{msg, release};
 
     #[test]
     fn development_255_gamekit_offline_achievement_error_contract() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        // NSError's three-argument factory is a five-word Objective-C call
+        // after self and _cmd. Give host-to-guest dispatch the same synthetic
+        // stack space used by the other NSError contract fixtures.
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
         let error = not_authenticated_error(env);
         let code: NSInteger = msg![env; error code];
         let domain: id = msg![env; error domain];
         assert_eq!(code, GK_ERROR_NOT_AUTHENTICATED);
         assert_eq!(ns_string::to_rust_string(env, domain), GK_ERROR_DOMAIN);
+        release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }
