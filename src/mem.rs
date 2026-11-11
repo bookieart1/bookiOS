@@ -39,11 +39,21 @@ pub const fn guest_size_of<T: Sized>() -> GuestUSize {
 type VAddr = GuestUSize;
 
 const DIAGNOSTIC_GUEST_WRITES: usize = 128;
+const DIAGNOSTIC_GUEST_READS: usize = 64;
 
 #[derive(Clone, Copy, Default)]
 struct DiagnosticGuestWrite {
     elapsed_ms: u128,
     thread: usize,
+    address: u32,
+    size: u8,
+    value: u64,
+    raw_core_pc: u32,
+    lr: u32,
+}
+
+#[derive(Clone, Copy, Default)]
+struct DiagnosticGuestRead {
     address: u32,
     size: u8,
     value: u64,
@@ -281,6 +291,8 @@ pub struct Mem {
     diagnostic_watch_count: usize,
     diagnostic_guest_writes: [DiagnosticGuestWrite; DIAGNOSTIC_GUEST_WRITES],
     diagnostic_guest_writes_written: usize,
+    diagnostic_guest_reads: [DiagnosticGuestRead; DIAGNOSTIC_GUEST_READS],
+    diagnostic_guest_reads_written: usize,
     diagnostic_current_thread: usize,
     diagnostic_started: std::time::Instant,
 }
@@ -340,6 +352,8 @@ impl Mem {
             diagnostic_watch_count: 0,
             diagnostic_guest_writes: [DiagnosticGuestWrite::default(); DIAGNOSTIC_GUEST_WRITES],
             diagnostic_guest_writes_written: 0,
+            diagnostic_guest_reads: [DiagnosticGuestRead::default(); DIAGNOSTIC_GUEST_READS],
+            diagnostic_guest_reads_written: 0,
             diagnostic_current_thread: 0,
             diagnostic_started: std::time::Instant::now(),
         }
@@ -353,6 +367,58 @@ impl Mem {
 
     pub fn set_diagnostic_current_thread(&mut self, thread: usize) {
         self.diagnostic_current_thread = thread;
+    }
+
+    pub fn diagnostic_guest_watches_configured(&self) -> bool {
+        self.diagnostic_watch_count != 0
+    }
+
+    pub fn note_diagnostic_guest_read(
+        &mut self,
+        address: u32,
+        size: u8,
+        value: u64,
+        raw_core_pc: u32,
+        lr: u32,
+    ) {
+        if self.diagnostic_watch_count == 0 {
+            return;
+        }
+        self.diagnostic_guest_reads
+            [self.diagnostic_guest_reads_written % DIAGNOSTIC_GUEST_READS] = DiagnosticGuestRead {
+            address,
+            size,
+            value,
+            raw_core_pc,
+            lr,
+        };
+        self.diagnostic_guest_reads_written =
+            self.diagnostic_guest_reads_written.saturating_add(1);
+    }
+
+    pub fn dump_diagnostic_guest_reads(&self) {
+        if self.diagnostic_watch_count == 0 {
+            return;
+        }
+        let count = self.diagnostic_guest_reads_written.min(DIAGNOSTIC_GUEST_READS);
+        let start = self.diagnostic_guest_reads_written.saturating_sub(count);
+        echo_no_panic!(
+            "diagnostic recent guest reads: newest={} total={}",
+            DIAGNOSTIC_GUEST_READS,
+            self.diagnostic_guest_reads_written
+        );
+        for index in start..self.diagnostic_guest_reads_written {
+            let event = self.diagnostic_guest_reads[index % DIAGNOSTIC_GUEST_READS];
+            echo_no_panic!(
+                "diagnostic guest-read #{} address={:#010x} size={} value={:#018x} raw-core-pc={:#010x} lr={:#010x}",
+                index + 1,
+                event.address,
+                event.size,
+                event.value,
+                event.raw_core_pc,
+                event.lr
+            );
+        }
     }
 
     pub fn note_diagnostic_guest_write(

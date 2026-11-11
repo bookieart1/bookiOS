@@ -75,7 +75,8 @@ static uint32_t load32(struct ARMCore *cpu, uint32_t address, int *cycles) {
     return value;
   }
   bool error = false;
-  uint32_t value = touchHLE_cpu_read_u32(wrapper_of(cpu)->mem, address, &error);
+  uint32_t value = touchHLE_cpu_read_u32(wrapper_of(cpu)->mem, address, &error,
+                                         cpu->gprs[ARM_PC], cpu->gprs[ARM_LR]);
   if (error) {
     return fault(cpu);
   }
@@ -91,7 +92,8 @@ static uint32_t load16(struct ARMCore *cpu, uint32_t address, int *cycles) {
     return value;
   }
   bool error = false;
-  uint32_t value = touchHLE_cpu_read_u16(wrapper_of(cpu)->mem, address, &error);
+  uint32_t value = touchHLE_cpu_read_u16(wrapper_of(cpu)->mem, address, &error,
+                                         cpu->gprs[ARM_PC], cpu->gprs[ARM_LR]);
   if (error) {
     return fault(cpu);
   }
@@ -107,7 +109,8 @@ static uint32_t load8(struct ARMCore *cpu, uint32_t address, int *cycles) {
     return value;
   }
   bool error = false;
-  uint32_t value = touchHLE_cpu_read_u8(wrapper_of(cpu)->mem, address, &error);
+  uint32_t value = touchHLE_cpu_read_u8(wrapper_of(cpu)->mem, address, &error,
+                                        cpu->gprs[ARM_PC], cpu->gprs[ARM_LR]);
   if (error) {
     return fault(cpu);
   }

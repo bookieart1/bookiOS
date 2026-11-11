@@ -29,6 +29,8 @@ fn touchHLE_cpu_read_impl<T: SafeRead + Default>(
     mem: *mut touchHLE_Mem,
     addr: VAddr,
     error: *mut bool,
+    raw_core_pc: u32,
+    lr: u32,
 ) -> T {
     // If a panic occurs (probably due to a null-pointer access), we can't let
     // it keep unwinding as it will hit non-Rust stack frames (the
@@ -43,7 +45,18 @@ fn touchHLE_cpu_read_impl<T: SafeRead + Default>(
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mem = unsafe { &mut *mem.cast::<Mem>() };
         let ptr: ConstPtr<T> = Ptr::from_bits(addr);
-        mem.read(ptr)
+        let value = mem.read(ptr);
+        let mut raw = [0u8; 8];
+        let size = std::mem::size_of::<T>();
+        raw[..size].copy_from_slice(mem.bytes_at(ptr.cast(), size as GuestUSize));
+        mem.note_diagnostic_guest_read(
+            addr,
+            size as u8,
+            u64::from_le_bytes(raw),
+            raw_core_pc,
+            lr,
+        );
+        value
     }));
     unsafe {
         error.write(res.is_err());
@@ -76,20 +89,44 @@ fn touchHLE_cpu_write_impl<T: SafeWrite + Into<u64> + Copy>(
 
 // Export functions for use by C++
 #[no_mangle]
-extern "C" fn touchHLE_cpu_read_u8(mem: *mut touchHLE_Mem, addr: VAddr, error: *mut bool) -> u8 {
-    touchHLE_cpu_read_impl(mem, addr, error)
+extern "C" fn touchHLE_cpu_read_u8(
+    mem: *mut touchHLE_Mem,
+    addr: VAddr,
+    error: *mut bool,
+    pc: u32,
+    lr: u32,
+) -> u8 {
+    touchHLE_cpu_read_impl(mem, addr, error, pc, lr)
 }
 #[no_mangle]
-extern "C" fn touchHLE_cpu_read_u16(mem: *mut touchHLE_Mem, addr: VAddr, error: *mut bool) -> u16 {
-    touchHLE_cpu_read_impl(mem, addr, error)
+extern "C" fn touchHLE_cpu_read_u16(
+    mem: *mut touchHLE_Mem,
+    addr: VAddr,
+    error: *mut bool,
+    pc: u32,
+    lr: u32,
+) -> u16 {
+    touchHLE_cpu_read_impl(mem, addr, error, pc, lr)
 }
 #[no_mangle]
-extern "C" fn touchHLE_cpu_read_u32(mem: *mut touchHLE_Mem, addr: VAddr, error: *mut bool) -> u32 {
-    touchHLE_cpu_read_impl(mem, addr, error)
+extern "C" fn touchHLE_cpu_read_u32(
+    mem: *mut touchHLE_Mem,
+    addr: VAddr,
+    error: *mut bool,
+    pc: u32,
+    lr: u32,
+) -> u32 {
+    touchHLE_cpu_read_impl(mem, addr, error, pc, lr)
 }
 #[no_mangle]
-extern "C" fn touchHLE_cpu_read_u64(mem: *mut touchHLE_Mem, addr: VAddr, error: *mut bool) -> u64 {
-    touchHLE_cpu_read_impl(mem, addr, error)
+extern "C" fn touchHLE_cpu_read_u64(
+    mem: *mut touchHLE_Mem,
+    addr: VAddr,
+    error: *mut bool,
+    pc: u32,
+    lr: u32,
+) -> u64 {
+    touchHLE_cpu_read_impl(mem, addr, error, pc, lr)
 }
 #[no_mangle]
 extern "C" fn touchHLE_cpu_write_u8(
