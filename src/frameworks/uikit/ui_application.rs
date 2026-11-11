@@ -757,14 +757,7 @@ mod tests {
             .iter()
             .flat_map(|exports| exports.iter().map(|(name, _)| *name))
             .collect();
-        for required in [
-            "_UIBackgroundTaskInvalid",
-            "_UIScreenDidConnectNotification",
-            "_UIScreenDidDisconnectNotification",
-            "_UIScreenModeDidChangeNotification",
-        ] {
-            assert!(exported_names.contains(&required));
-        }
+        assert!(exported_names.contains(&"_UIBackgroundTaskInvalid"));
 
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
@@ -781,6 +774,19 @@ mod tests {
 
     #[test]
     fn dev_244_local_notification_registry_snapshots_and_cancels_by_identity() {
+        let exported_names: Vec<_> = crate::frameworks::uikit::DYLIB
+            .constant_exports
+            .iter()
+            .flat_map(|exports| exports.iter().map(|(name, _)| *name))
+            .collect();
+        for required in [
+            "_UIScreenDidConnectNotification",
+            "_UIScreenDidDisconnectNotification",
+            "_UIScreenModeDidChangeNotification",
+        ] {
+            assert!(exported_names.contains(&required));
+        }
+
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
         let pool: id = msg_class![env; NSAutoreleasePool new];
