@@ -130,3 +130,13 @@ fn fstatfs(env: &mut Environment, fd: FileDescriptor, buf: MutPtr<statfs>) -> i3
 
 pub const FUNCTIONS: FunctionExports =
     &[export_c_func!(statfs(_, _)), export_c_func!(fstatfs(_, _))];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn getfsstat_exports_the_single_guest_filesystem_contract() {
+        assert!(FUNCTIONS.iter().any(|(name, _)| *name == "getfsstat"));
+    }
+}
