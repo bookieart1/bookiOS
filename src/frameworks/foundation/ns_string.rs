@@ -3281,55 +3281,28 @@ pub fn get_bytes_buffer_inner(
     encoding: NSStringEncoding,
     include_null_terminator: bool,
 ) -> bool {
-    // TODO: other encodings
-    assert!(
-        C_STRING_FRIENDLY_ENCODINGS.contains(&encoding),
-        "unsupported C-string encoding {encoding:#x}"
-    );
-
     let src = to_rust_string(env, str);
-    if encoding == NSDOSKoreanStringEncoding {
-        let units: Vec<u16> = src.encode_utf16().collect();
-        let Some(mut encoded) = encode_utf16_units(&units, encoding, false, false) else {
-            return false;
+    let units: Vec<u16> = src.encode_utf16().collect();
+    let Some(mut encoded) = encode_utf16_units(&units, encoding, false, false) else {
+        return false;
+    };
+    if include_null_terminator {
+        let terminator_width = match encoding {
+            NSUTF16StringEncoding
+            | NSUTF16BigEndianStringEncoding
+            | NSUTF16LittleEndianStringEncoding => 2,
+            NSUTF32StringEncoding
+            | NSUTF32BigEndianStringEncoding
+            | NSUTF32LittleEndianStringEncoding => 4,
+            _ => 1,
         };
-        if include_null_terminator {
-            encoded.push(0);
-        }
-        let dest = env.mem.bytes_at_mut(buffer, buffer_size);
-        if dest.len() < encoded.len() {
-            return false;
-        }
-        dest[..encoded.len()].copy_from_slice(&encoded);
-        return true;
-    }
-    if encoding == NSASCIIStringEncoding
-        || encoding == NSMacOSRomanStringEncoding
-        || encoding == NSISOLatin1StringEncoding
-    {
-        // TODO: properly support Mac OS Roman and ISO Latin 1 encoding.
-        // The first 128 characters are identical to the ASCII
-        assert!(src.as_bytes().iter().all(|byte| byte.is_ascii()));
+        encoded.resize(encoded.len() + terminator_width, 0);
     }
     let dest = env.mem.bytes_at_mut(buffer, buffer_size);
-    let src_len = if include_null_terminator {
-        src.len() + 1
-    } else {
-        src.len()
-    };
-    if dest.len() < src_len {
+    if dest.len() < encoded.len() {
         return false;
     }
-
-    let iter: Box<dyn Iterator<Item = &u8>> = if include_null_terminator {
-        Box::new(src.as_bytes().iter().chain(b"\0".iter()))
-    } else {
-        Box::new(src.as_bytes().iter())
-    };
-    for (i, &byte) in iter.enumerate() {
-        dest[i] = byte;
-    }
-
+    dest[..encoded.len()].copy_from_slice(&encoded);
     true
 }
 
