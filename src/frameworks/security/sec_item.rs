@@ -652,6 +652,58 @@ mod tests {
         env.mem.bytes_at(bytes.cast(), length).to_vec()
     }
 
+    fn generic_password_query(
+        env: &mut Environment,
+        account: &str,
+        service: &str,
+        value: Option<&[u8]>,
+    ) -> id {
+        let dictionary = empty_dictionary(env);
+        let class_key = k(env, K_SEC_CLASS);
+        let class_value = k(env, K_SEC_CLASS_GENERIC_PASSWORD);
+        set_object(env, dictionary, class_value, class_key);
+        let account_key = k(env, K_SEC_ATTR_ACCOUNT);
+        let account_value = ns_string::from_rust_string(env, account.to_owned());
+        set_object(env, dictionary, account_value, account_key);
+        let service_key = k(env, K_SEC_ATTR_SERVICE);
+        let service_value = ns_string::from_rust_string(env, service.to_owned());
+        set_object(env, dictionary, service_value, service_key);
+        if let Some(value) = value {
+            let length = value.len() as u32;
+            let bytes = env.mem.alloc(length);
+            env.mem.bytes_at_mut(bytes.cast(), length).copy_from_slice(value);
+            let data: id = msg_class![env; NSData dataWithBytes:bytes length:length];
+            env.mem.free(bytes.cast());
+            let value_key = k(env, K_SEC_VALUE_DATA);
+            set_object(env, dictionary, data, value_key);
+        }
+        dictionary
+    }
+
+    #[test]
+    fn development_255_parapanic_generic_password_status_and_crud_contract() {
+        let root = test_root("generic-password");
+        let mut env = env_for(&root);
+        let find = generic_password_query(&mut env, "device", "parapanic", None);
+        request_data(&mut env, find);
+        let result = env.mem.alloc_and_write(nil);
+        assert_eq!(
+            SecItemCopyMatching(&mut env, find, result),
+            ERR_SEC_ITEM_NOT_FOUND
+        );
+        assert_eq!(env.mem.read(result), nil);
+
+        let add = generic_password_query(&mut env, "device", "parapanic", Some(b"payload"));
+        assert_eq!(SecItemAdd(&mut env, add, MutPtr::null()), ERR_SEC_SUCCESS);
+        assert_eq!(SecItemCopyMatching(&mut env, find, result), ERR_SEC_SUCCESS);
+        let returned = env.mem.read(result);
+        assert_eq!(copied_bytes(&mut env, returned), b"payload");
+        release(&mut env, returned);
+        assert_eq!(SecItemDelete(&mut env, find), ERR_SEC_SUCCESS);
+        env.mem.free(result.cast());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn constants_and_exports_cover_observed_keychain_surfaces() {
         assert_eq!(CONSTANTS.len(), 28);
