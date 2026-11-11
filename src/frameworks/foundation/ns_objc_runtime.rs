@@ -100,6 +100,13 @@ mod tests {
         assert!(NSClassFromString(&mut env, missing).is_null());
         assert!(NSClassFromString(&mut env, nil).is_null());
     }
+
+    #[test]
+    fn autoreleased_return_value_claim_is_exported() {
+        assert!(FUNCTIONS
+            .iter()
+            .any(|(name, _)| *name == "_objc_retainAutoreleasedReturnValue"));
+    }
 }
 
 pub const FUNCTIONS: FunctionExports = &[

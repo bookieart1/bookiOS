@@ -217,6 +217,13 @@ mod tests {
     use crate::frameworks::foundation::ns_string;
 
     #[test]
+    fn system_proxy_settings_function_is_exported() {
+        assert!(FUNCTIONS
+            .iter()
+            .any(|(name, _)| *name == "_CFNetworkCopySystemProxySettings"));
+    }
+
+    #[test]
     fn named_host_reports_bounded_offline_failure() {
         let mut env = Environment::new_fake_for_test();
         let name = ns_string::from_rust_string(&mut env, "analytics.example".to_string());
