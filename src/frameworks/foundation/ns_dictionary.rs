@@ -1533,6 +1533,24 @@ mod tests {
     }
 
     #[test]
+    fn objects_for_keys_preserves_order_and_uses_missing_marker() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let present = get_static_str(env, "present");
+        let missing = get_static_str(env, "missing");
+        let value = get_static_str(env, "value");
+        let marker = get_static_str(env, "marker");
+        let dictionary: id =
+            msg_class![env; NSDictionary dictionaryWithObject:value forKey:present];
+        let keys: id = msg_class![env; NSArray arrayWithObjects:present, missing, nil];
+
+        let values: id = msg![env; dictionary objectsForKeys:keys notFoundMarker:marker];
+
+        assert_eq!(msg![env; values objectAtIndex:0u32], value);
+        assert_eq!(msg![env; values objectAtIndex:1u32], marker);
+    }
+
+    #[test]
     fn mutable_singleton_factory_and_keyed_archive_preserve_mutability() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
