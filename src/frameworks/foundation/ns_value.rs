@@ -1004,11 +1004,15 @@ mod tests {
     fn arbitrary_value_preserves_bytes_and_type_encoding() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
-        let input = env.mem.alloc_and_write(0x1234_5678u32).cast_const().cast();
+        let input: ConstVoidPtr = env
+            .mem
+            .alloc_and_write(0x1234_5678u32)
+            .cast_const()
+            .cast();
         let encoding = env.mem.alloc_and_write_cstr(b"I").cast_const();
 
         let value: id = msg_class![env; NSValue valueWithBytes:input objCType:encoding];
-        let output = env.mem.alloc(4).cast();
+        let output: MutVoidPtr = env.mem.alloc(4).cast();
         () = msg![env; value getValue:output];
 
         let actual: u32 = env.mem.read(output.cast());
