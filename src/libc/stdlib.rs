@@ -38,6 +38,8 @@ pub const CONSTANTS: ConstantExports = &[(
 pub struct State {
     rand: u32,
     random: u32,
+    random_state: Option<MutPtr<u8>>,
+    default_random_state: Option<MutPtr<u8>>,
     arc4random: u32,
     rand48: u64,
     fcvt_buf: Option<MutPtr<u8>>,
@@ -339,6 +341,9 @@ fn srandom(env: &mut Environment, seed: u32) {
     set_errno(env, 0);
 
     env.libc_state.stdlib.random = seed;
+    if let Some(state) = env.libc_state.stdlib.random_state {
+        env.mem.write(state.cast::<u32>(), seed);
+    }
 }
 fn srandomdev(env: &mut Environment) {
     let time = SystemTime::now()
@@ -352,7 +357,40 @@ fn random(env: &mut Environment) -> i32 {
     set_errno(env, 0);
 
     env.libc_state.stdlib.random = prng(env.libc_state.stdlib.random);
+    if let Some(state) = env.libc_state.stdlib.random_state {
+        env.mem
+            .write(state.cast::<u32>(), env.libc_state.stdlib.random);
+    }
     (env.libc_state.stdlib.random as i32) & RAND_MAX
+}
+
+fn initstate(
+    env: &mut Environment,
+    seed: u32,
+    state: MutPtr<u8>,
+    state_size: GuestUSize,
+) -> MutPtr<u8> {
+    if state.is_null() || state_size < 8 {
+        set_errno(env, EINVAL);
+        return Ptr::null();
+    }
+    if env.libc_state.stdlib.default_random_state.is_none() {
+        let default = env.mem.calloc(128).cast();
+        env.mem
+            .write(default.cast::<u32>(), env.libc_state.stdlib.random);
+        env.libc_state.stdlib.default_random_state = Some(default);
+    }
+    let previous = env
+        .libc_state
+        .stdlib
+        .random_state
+        .unwrap_or(env.libc_state.stdlib.default_random_state.unwrap());
+    env.mem.bytes_at_mut(state, state_size).fill(0);
+    env.mem.write(state.cast::<u32>(), seed);
+    env.libc_state.stdlib.random_state = Some(state);
+    env.libc_state.stdlib.random = seed;
+    set_errno(env, 0);
+    previous
 }
 
 fn arc4random(env: &mut Environment) -> u32 {
@@ -851,6 +889,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(lrand48()),
     export_c_func!(mrand48()),
     export_c_func!(srandom(_)),
+    export_c_func!(initstate(_, _, _)),
     export_c_func!(srandomdev()),
     export_c_func!(random()),
     export_c_func!(arc4random()),
