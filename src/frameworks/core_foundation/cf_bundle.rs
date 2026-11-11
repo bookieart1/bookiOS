@@ -17,7 +17,7 @@ use super::CFTypeRef;
 use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
 use crate::frameworks::foundation::ns_bundle::NSBundleHostObject;
 use crate::frameworks::foundation::{ns_array, ns_string, NSUInteger};
-use crate::objc::{id, msg, msg_class, retain};
+use crate::objc::{id, msg, msg_class, nil, retain};
 use crate::Environment;
 
 const kCFBundleVersionKey: &str = "CFBundleVersion";
@@ -202,6 +202,37 @@ pub fn CFBundleCopyPreferredLocalizationsFromArray(
     result
 }
 
+pub fn CFBundleCopyLocalizationsForPreferences(
+    env: &mut Environment,
+    loc_array: CFArrayRef,
+    pref_array: CFArrayRef,
+) -> CFArrayRef {
+    if pref_array == nil {
+        return CFBundleCopyPreferredLocalizationsFromArray(env, loc_array);
+    }
+
+    let loc_count: NSUInteger = msg![env; loc_array count];
+    let pref_count: NSUInteger = msg![env; pref_array count];
+    for pref_index in 0..pref_count {
+        let preference: id = msg![env; pref_array objectAtIndex:pref_index];
+        for loc_index in 0..loc_count {
+            let localization: id = msg![env; loc_array objectAtIndex:loc_index];
+            if msg![env; localization isEqualToString:preference] {
+                retain(env, localization);
+                return ns_array::from_vec(env, vec![localization]);
+            }
+        }
+    }
+
+    let fallback = if loc_count > 0 {
+        let first: id = msg![env; loc_array objectAtIndex:(0 as NSUInteger)];
+        retain(env, first)
+    } else {
+        ns_string::get_static_str(env, "en")
+    };
+    ns_array::from_vec(env, vec![fallback])
+}
+
 fn CFBundleCopyLocalizedString(
     env: &mut Environment,
     bundle: CFBundleRef,
@@ -225,5 +256,6 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFBundleCopyResourceURL(_, _, _, _)),
     export_c_func!(CFBundleCopyBundleLocalizations(_)),
     export_c_func!(CFBundleCopyPreferredLocalizationsFromArray(_)),
+    export_c_func!(CFBundleCopyLocalizationsForPreferences(_, _)),
     export_c_func!(CFBundleCopyLocalizedString(_, _, _, _)),
 ];

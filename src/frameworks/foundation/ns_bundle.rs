@@ -8,7 +8,8 @@
 use super::{ns_array, ns_data, ns_string, NSUInteger};
 use crate::bundle::Bundle;
 use crate::frameworks::core_foundation::cf_bundle::{
-    CFBundleCopyBundleLocalizations, CFBundleCopyPreferredLocalizationsFromArray,
+    CFBundleCopyBundleLocalizations, CFBundleCopyLocalizationsForPreferences,
+    CFBundleCopyPreferredLocalizationsFromArray,
 };
 use crate::frameworks::foundation::ns_string::{from_rust_string, to_rust_string};
 use crate::objc::{
@@ -263,6 +264,16 @@ pub const CLASSES: ClassExports = objc_classes! {
 + (id)preferredLocalizationsFromArray:(id)localizations_array { // NSArray<NSString *> *
     let preferredLocalizations = CFBundleCopyPreferredLocalizationsFromArray(env, localizations_array);
     autorelease(env, preferredLocalizations)
+}
+
++ (id)preferredLocalizationsFromArray:(id)localizations_array // NSArray<NSString *> *
+                      forPreferences:(id)preferences { // NSArray<NSString *> *
+    let preferred_localizations = CFBundleCopyLocalizationsForPreferences(
+        env,
+        localizations_array,
+        preferences,
+    );
+    autorelease(env, preferred_localizations)
 }
 
 - (id)initWithPath:(id)path { // NSString*
