@@ -38,11 +38,71 @@ pub const CONSTANTS: ConstantExports = &[(
 pub struct State {
     rand: u32,
     random: u32,
-    random_state: Option<MutPtr<u8>>,
+    random_state: Option<RandomState>,
     default_random_state: Option<MutPtr<u8>>,
     arc4random: u32,
     rand48: u64,
     fcvt_buf: Option<MutPtr<u8>>,
+}
+
+#[derive(Clone, Copy)]
+struct RandomState {
+    buffer: MutPtr<u8>,
+    kind: u32,
+    degree: u32,
+    separation: u32,
+    front: u32,
+    rear: u32,
+}
+
+const RANDOM_STATE_KINDS: [(u32, u32, u32); 5] = [
+    (8, 0, 0),
+    (32, 7, 3),
+    (64, 15, 1),
+    (128, 31, 3),
+    (256, 63, 1),
+];
+
+fn random_state_word(state: RandomState, index: u32) -> MutPtr<u32> {
+    (state.buffer + 4).cast::<u32>() + index
+}
+
+fn good_random(value: u32) -> u32 {
+    let value = if value == 0 { 123_459_876 } else { value } as i64;
+    let hi = value / 127_773;
+    let lo = value % 127_773;
+    let next = 16_807 * lo - 2_836 * hi;
+    if next < 0 {
+        (next + 0x7fff_ffff) as u32
+    } else {
+        next as u32
+    }
+}
+
+fn next_random_state(env: &mut Environment, state: &mut RandomState) -> u32 {
+    if state.kind == 0 {
+        let word = random_state_word(*state, 0);
+        let value = good_random(env.mem.read(word)) & RAND_MAX as u32;
+        env.mem.write(word, value);
+        return value;
+    }
+
+    let front = random_state_word(*state, state.front);
+    let rear = random_state_word(*state, state.rear);
+    let sum = env.mem.read(front).wrapping_add(env.mem.read(rear));
+    env.mem.write(front, sum);
+    state.front = (state.front + 1) % state.degree;
+    state.rear = (state.rear + 1) % state.degree;
+    (sum >> 1) & RAND_MAX as u32
+}
+
+fn save_random_state_header(env: &mut Environment, state: RandomState) {
+    let header = if state.kind == 0 {
+        0
+    } else {
+        5 * state.rear + state.kind
+    };
+    env.mem.write(state.buffer.cast::<u32>(), header);
 }
 // Sizes of zero are implementation-defined. macOS will happily give you back
 // an allocation for any of these, so presumably iPhone OS does too.
@@ -224,11 +284,7 @@ fn strtod(env: &mut Environment, nptr: ConstPtr<u8>, endptr: MutPtr<MutPtr<u8>>)
     res
 }
 
-fn wcstod(
-    env: &mut Environment,
-    nptr: ConstPtr<wchar_t>,
-    endptr: MutPtr<MutPtr<wchar_t>>,
-) -> f64 {
+fn wcstod(env: &mut Environment, nptr: ConstPtr<wchar_t>, endptr: MutPtr<MutPtr<wchar_t>>) -> f64 {
     set_errno(env, 0);
     let wide = env.mem.wcstr_at(nptr);
     let ascii: Vec<u8> = wide
@@ -341,8 +397,26 @@ fn srandom(env: &mut Environment, seed: u32) {
     set_errno(env, 0);
 
     env.libc_state.stdlib.random = seed;
-    if let Some(state) = env.libc_state.stdlib.random_state {
-        env.mem.write(state.cast::<u32>(), seed);
+    if let Some(mut state) = env.libc_state.stdlib.random_state.take() {
+        env.mem.write(random_state_word(state, 0), seed);
+        if state.kind == 0 {
+            for _ in 0..50 {
+                next_random_state(env, &mut state);
+            }
+        } else {
+            for index in 1..state.degree {
+                let previous = env.mem.read(random_state_word(state, index - 1));
+                env.mem
+                    .write(random_state_word(state, index), good_random(previous));
+            }
+            state.front = state.separation;
+            state.rear = 0;
+            for _ in 0..(10 * state.degree) {
+                next_random_state(env, &mut state);
+            }
+        }
+        save_random_state_header(env, state);
+        env.libc_state.stdlib.random_state = Some(state);
     }
 }
 fn srandomdev(env: &mut Environment) {
@@ -356,11 +430,13 @@ fn random(env: &mut Environment) -> i32 {
     // TODO: handle errno properly
     set_errno(env, 0);
 
-    env.libc_state.stdlib.random = prng(env.libc_state.stdlib.random);
-    if let Some(state) = env.libc_state.stdlib.random_state {
-        env.mem
-            .write(state.cast::<u32>(), env.libc_state.stdlib.random);
+    if let Some(mut state) = env.libc_state.stdlib.random_state.take() {
+        let value = next_random_state(env, &mut state);
+        env.libc_state.stdlib.random = value;
+        env.libc_state.stdlib.random_state = Some(state);
+        return value as i32;
     }
+    env.libc_state.stdlib.random = prng(env.libc_state.stdlib.random);
     (env.libc_state.stdlib.random as i32) & RAND_MAX
 }
 
@@ -376,19 +452,35 @@ fn initstate(
     }
     if env.libc_state.stdlib.default_random_state.is_none() {
         let default = env.mem.calloc(128).cast();
+        env.mem.write(default.cast::<u32>(), 0u32);
         env.mem
-            .write(default.cast::<u32>(), env.libc_state.stdlib.random);
+            .write((default + 4).cast::<u32>(), env.libc_state.stdlib.random);
         env.libc_state.stdlib.default_random_state = Some(default);
+    }
+    if let Some(previous) = env.libc_state.stdlib.random_state {
+        save_random_state_header(env, previous);
     }
     let previous = env
         .libc_state
         .stdlib
         .random_state
+        .map(|state| state.buffer)
         .unwrap_or(env.libc_state.stdlib.default_random_state.unwrap());
+    let kind = RANDOM_STATE_KINDS
+        .iter()
+        .rposition(|(minimum, _, _)| state_size >= *minimum)
+        .unwrap() as u32;
+    let (_, degree, separation) = RANDOM_STATE_KINDS[kind as usize];
     env.mem.bytes_at_mut(state, state_size).fill(0);
-    env.mem.write(state.cast::<u32>(), seed);
-    env.libc_state.stdlib.random_state = Some(state);
-    env.libc_state.stdlib.random = seed;
+    env.libc_state.stdlib.random_state = Some(RandomState {
+        buffer: state,
+        kind,
+        degree,
+        separation,
+        front: separation,
+        rear: 0,
+    });
+    srandom(env, seed);
     set_errno(env, 0);
     previous
 }
@@ -517,9 +609,7 @@ fn __assert_rtn(
         "Guest assertion: function={function:?} file={file:?} line={line} expression={expression:?}"
     );
     env.diagnostic_control_flow_snapshot("guest-assertion", env.cpu.regs()[crate::cpu::Cpu::PC]);
-    panic!(
-        "Guest assertion failed: {expression} ({function}, {file}:{line})"
-    );
+    panic!("Guest assertion failed: {expression} ({function}, {file}:{line})");
 }
 
 fn bsearch(
@@ -925,8 +1015,47 @@ mod tests {
     }
 
     #[test]
+    fn development_255_wide_string_double_conversion_tracks_the_end_pointer() {
+        let mut env = Environment::new_fake_for_test();
+        let input: MutPtr<wchar_t> = env.mem.alloc(12 * 4).cast();
+        for (index, value) in "  -12.5tail\0".chars().enumerate() {
+            env.mem.write(input + index as u32, value as wchar_t);
+        }
+        let end = env.mem.alloc_and_write(MutPtr::<wchar_t>::null());
+        assert_eq!(wcstod(&mut env, input.cast_const(), end), -12.5);
+        assert_eq!(env.mem.read(end), input + 7);
+
+        let invalid: MutPtr<wchar_t> = env.mem.alloc(4 * 4).cast();
+        for (index, value) in "nope\0".chars().enumerate() {
+            env.mem.write(invalid + index as u32, value as wchar_t);
+        }
+        assert_eq!(wcstod(&mut env, invalid.cast_const(), end), 0.0);
+        assert_eq!(env.mem.read(end), invalid);
+    }
+
+    #[test]
     fn development_255_random_state_initialization_is_exported() {
         assert!(FUNCTIONS.iter().any(|(name, _)| *name == "_initstate"));
+    }
+
+    #[test]
+    fn development_255_random_state_initialization_switches_deterministically() {
+        let mut env = Environment::new_fake_for_test();
+        let too_small: MutPtr<u8> = env.mem.calloc(4).cast();
+        assert!(initstate(&mut env, 7, too_small, 4).is_null());
+        assert_eq!(crate::libc::errno::get_errno(&mut env), EINVAL);
+
+        let first: MutPtr<u8> = env.mem.calloc(128).cast();
+        let default = initstate(&mut env, 0x1234, first, 128);
+        assert!(!default.is_null());
+        assert_eq!(env.mem.read(first.cast::<u32>()) % 5, 3);
+        let first_sequence = [random(&mut env), random(&mut env), random(&mut env)];
+
+        let second: MutPtr<u8> = env.mem.calloc(128).cast();
+        assert_eq!(initstate(&mut env, 0x1234, second, 128), first);
+        let second_sequence = [random(&mut env), random(&mut env), random(&mut env)];
+        assert_eq!(first_sequence, second_sequence);
+        assert_ne!(first_sequence, [0; 3]);
     }
 
     #[test]
