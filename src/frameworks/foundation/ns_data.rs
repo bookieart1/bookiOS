@@ -388,6 +388,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     decode_current_data(env, coder, /* is_mutable: */ true)
 }
 
+- (())encodeWithCoder:(id)coder {
+    let &NSDataHostObject { bytes, length, .. } = env.objc.borrow(this);
+    let key = get_static_str(env, "NS.data");
+    let bytes: ConstPtr<u8> = bytes.cast_const().cast();
+    () = msg![env; coder encodeBytes:bytes length:length forKey:key];
+}
+
 - (id)mutableCopyWithZone:(NSZonePtr)_zone {
     let bytes: ConstVoidPtr = msg![env; this bytes];
     let length: NSUInteger = msg![env; this length];
@@ -689,6 +696,26 @@ mod tests {
         assert_ne!(empty, nil);
         let length: NSUInteger = msg![env; empty length];
         assert_eq!(length, 0);
+    }
+
+    #[test]
+    fn development_255_data_keyed_archive_round_trip_preserves_bytes() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let bytes = env.mem.alloc(4);
+        env.mem
+            .bytes_at_mut(bytes.cast(), 4)
+            .copy_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+        let bytes_const = bytes.cast_const();
+        let data: id = msg_class![env; NSData dataWithBytes:bytes_const length:4u32];
+        let archive: id = msg_class![env; NSKeyedArchiver archivedDataWithRootObject:data];
+        let decoded: id = msg_class![env; NSKeyedUnarchiver unarchiveObjectWithData:archive];
+        assert_eq!(to_rust_slice(env, decoded), &[0xde, 0xad, 0xbe, 0xef]);
+        env.mem.free(bytes.cast());
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack.cast());
     }
 
     #[test]
