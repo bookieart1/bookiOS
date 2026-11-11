@@ -72,15 +72,6 @@ extern "C" {
     /// The encoding that last came back undefined. Only meaningful right
     /// after `run_or_step` returned -3.
     pub fn touchHLE_MgbaWrapper_last_undefined_opcode(cpu: *const touchHLE_MgbaWrapper) -> u32;
-    pub fn touchHLE_MgbaWrapper_last_memory_fault(
-        cpu: *const touchHLE_MgbaWrapper,
-        address: *mut u32,
-        size: *mut u8,
-        write: *mut bool,
-        value: *mut u32,
-        pc: *mut u32,
-        lr: *mut u32,
-    ) -> bool;
     /// The last CP15 access the core does not model, or zero, clearing it.
     pub fn touchHLE_MgbaWrapper_take_unknown_cp15(cpu: *mut touchHLE_MgbaWrapper) -> u32;
     /// Points instruction fetch at the guest's memory. Must be called with a

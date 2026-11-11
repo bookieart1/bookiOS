@@ -168,16 +168,6 @@ pub enum CpuError {
     Breakpoint,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct MemoryFaultAccess {
-    pub address: u32,
-    pub size: u8,
-    pub write: bool,
-    pub value: u32,
-    pub pc: u32,
-    pub lr: u32,
-}
-
 impl Cpu {
     /// The register number of the stack pointer.
     pub const SP: usize = 13;
@@ -242,29 +232,6 @@ impl Cpu {
     pub fn dump_regs(&self) {
         let regs = self.regs();
         Self::echo_regs(regs);
-    }
-
-    pub fn last_memory_fault(&self) -> Option<MemoryFaultAccess> {
-        let mut access = MemoryFaultAccess {
-            address: 0,
-            size: 0,
-            write: false,
-            value: 0,
-            pc: 0,
-            lr: 0,
-        };
-        let valid = unsafe {
-            touchHLE_MgbaWrapper_last_memory_fault(
-                self.mgba_wrapper,
-                &mut access.address,
-                &mut access.size,
-                &mut access.write,
-                &mut access.value,
-                &mut access.pc,
-                &mut access.lr,
-            )
-        };
-        valid.then_some(access)
     }
 
     pub fn echo_regs(regs: &[u32; 16]) {
@@ -945,38 +912,7 @@ mod tests {
                 cpu.run_or_step(&mut mem, Some(&mut ticks)),
                 CpuState::Error(CpuError::MemoryError)
             ));
-            assert_eq!(
-                cpu.last_memory_fault(),
-                Some(MemoryFaultAccess {
-                    address: bad_addr,
-                    size: 4,
-                    write: false,
-                    value: 0,
-                    pc: code_addr + 24,
-                    lr: 0,
-                })
-            );
         }
-
-        cpu.branch(GuestFunction::from_addr_and_thumb_flag(code_addr, false));
-        cpu.regs_mut()[0] = 0x10;
-        cpu.regs_mut()[1] = 0x12345678;
-        let mut ticks = 100u64;
-        assert!(matches!(
-            cpu.run_or_step(&mut mem, Some(&mut ticks)),
-            CpuState::Error(CpuError::MemoryError)
-        ));
-        assert_eq!(
-            cpu.last_memory_fault(),
-            Some(MemoryFaultAccess {
-                address: 0x10,
-                size: 4,
-                write: true,
-                value: 0x12345678,
-                pc: code_addr + 8,
-                lr: 0,
-            })
-        );
     }
 
     /// UNPREDICTABLE encodings have defined behaviour (see "UNPREDICTABLE

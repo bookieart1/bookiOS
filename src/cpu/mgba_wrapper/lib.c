@@ -38,18 +38,7 @@ static void halt(struct ARMCore *cpu, int32_t result) {
  * after the current instruction. The faulting access yields zero and the
  * instruction runs to completion on that garbage, which is tolerable because
  * touchHLE treats a memory error as fatal anyway. */
-static uint32_t fault(struct ARMCore *cpu, uint32_t address, uint8_t size,
-                      bool write, uint32_t value) {
-  struct touchHLE_MgbaWrapper *w = wrapper_of(cpu);
-  if (!w->fault_valid) {
-    w->fault_valid = true;
-    w->fault_write = write;
-    w->fault_size = size;
-    w->fault_address = address;
-    w->fault_value = value;
-    w->fault_pc = (uint32_t)cpu->gprs[ARM_PC];
-    w->fault_lr = (uint32_t)cpu->gprs[ARM_LR];
-  }
+static uint32_t fault(struct ARMCore *cpu) {
   halt(cpu, RESULT_MEMORY_ERROR);
   return 0;
 }
@@ -88,7 +77,7 @@ static uint32_t load32(struct ARMCore *cpu, uint32_t address, int *cycles) {
   bool error = false;
   uint32_t value = touchHLE_cpu_read_u32(wrapper_of(cpu)->mem, address, &error);
   if (error) {
-    return fault(cpu, address, 4, false, 0);
+    return fault(cpu);
   }
   return value;
 }
@@ -104,7 +93,7 @@ static uint32_t load16(struct ARMCore *cpu, uint32_t address, int *cycles) {
   bool error = false;
   uint32_t value = touchHLE_cpu_read_u16(wrapper_of(cpu)->mem, address, &error);
   if (error) {
-    return fault(cpu, address, 2, false, 0);
+    return fault(cpu);
   }
   return value;
 }
@@ -120,7 +109,7 @@ static uint32_t load8(struct ARMCore *cpu, uint32_t address, int *cycles) {
   bool error = false;
   uint32_t value = touchHLE_cpu_read_u8(wrapper_of(cpu)->mem, address, &error);
   if (error) {
-    return fault(cpu, address, 1, false, 0);
+    return fault(cpu);
   }
   return value;
 }
@@ -136,7 +125,7 @@ static void store32(struct ARMCore *cpu, uint32_t address, int32_t value,
   }
   if (touchHLE_cpu_write_u32(wrapper_of(cpu)->mem, address, (uint32_t)value,
                              cpu->gprs[ARM_PC], cpu->gprs[ARM_LR])) {
-    fault(cpu, address, 4, true, (uint32_t)value);
+    halt(cpu, RESULT_MEMORY_ERROR);
   }
 }
 
@@ -151,7 +140,7 @@ static void store16(struct ARMCore *cpu, uint32_t address, int16_t value,
   }
   if (touchHLE_cpu_write_u16(wrapper_of(cpu)->mem, address, (uint16_t)value,
                              cpu->gprs[ARM_PC], cpu->gprs[ARM_LR])) {
-    fault(cpu, address, 2, true, (uint16_t)value);
+    halt(cpu, RESULT_MEMORY_ERROR);
   }
 }
 
@@ -166,7 +155,7 @@ static void store8(struct ARMCore *cpu, uint32_t address, int8_t value,
   }
   if (touchHLE_cpu_write_u8(wrapper_of(cpu)->mem, address, (uint8_t)value,
                             cpu->gprs[ARM_PC], cpu->gprs[ARM_LR])) {
-    fault(cpu, address, 1, true, (uint8_t)value);
+    halt(cpu, RESULT_MEMORY_ERROR);
   }
 }
 
@@ -430,21 +419,6 @@ uint32_t touchHLE_MgbaWrapper_last_undefined_opcode(
   return w->last_undefined_opcode;
 }
 
-bool touchHLE_MgbaWrapper_last_memory_fault(
-    const struct touchHLE_MgbaWrapper *w, uint32_t *address, uint8_t *size,
-    bool *write, uint32_t *value, uint32_t *pc, uint32_t *lr) {
-  if (!w->fault_valid) {
-    return false;
-  }
-  *address = w->fault_address;
-  *size = w->fault_size;
-  *write = w->fault_write;
-  *value = w->fault_value;
-  *pc = w->fault_pc;
-  *lr = w->fault_lr;
-  return true;
-}
-
 /* The last unmodelled CP15 access since this was last called, or zero. */
 uint32_t
 touchHLE_MgbaWrapper_take_unknown_cp15(struct touchHLE_MgbaWrapper *w) {
@@ -502,7 +476,6 @@ int32_t touchHLE_MgbaWrapper_run_or_step(struct touchHLE_MgbaWrapper *w,
   w->mem = mem;
   w->result = RESULT_NORMAL;
   w->halted = false;
-  w->fault_valid = false;
   /* The caller may have changed the registers -- above all r15, which
    * Cpu::branch writes directly -- since the last run. */
   sync_in(w);
