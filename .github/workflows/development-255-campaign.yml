@@ -79,3 +79,52 @@ jobs:
           name: development-255-focused-${{ github.sha }}
           path: development-255-focused.log
           if-no-files-found: error
+
+  focused-contracts-windows:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}\target
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Verify exact source identity
+        shell: pwsh
+        run: |
+          if ((git rev-parse HEAD) -ne '${{ github.sha }}') { throw 'Checkout identity mismatch.' }
+          git diff --check 82727c48c747252e3dd5ad301bb1423f55dbf2b5..HEAD
+
+      - name: Restore CMake 3.31.6
+        id: cmake
+        uses: actions/cache/restore@v4
+        with:
+          path: vendor/cmake
+          key: cmake_3_31_6_windows
+
+      - name: Acquire CMake on cache miss
+        if: steps.cmake.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri 'https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-windows-x86_64.zip' -OutFile "$env:RUNNER_TEMP\cmake.zip"
+          7z -ovendor x "$env:RUNNER_TEMP\cmake.zip"
+          Rename-Item -LiteralPath 'vendor\cmake-3.31.6-windows-x86_64' -NewName 'cmake'
+
+      - name: Run selected focused contracts sequentially
+        shell: pwsh
+        env:
+          CMAKE: ${{ github.workspace }}\vendor\cmake\bin\cmake
+        run: |
+          cargo test --locked --lib development_255_ --jobs 1 -- --test-threads=1 --nocapture 2>&1 | Tee-Object -FilePath development-255-focused-windows.log
+          if ($LASTEXITCODE -ne 0) { throw "Focused contracts failed with exit code $LASTEXITCODE." }
+
+      - name: Upload focused Windows evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: development-255-focused-windows-${{ github.sha }}
+          path: development-255-focused-windows.log
+          if-no-files-found: error
