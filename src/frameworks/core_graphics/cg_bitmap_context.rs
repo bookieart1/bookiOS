@@ -145,6 +145,7 @@ pub fn CGBitmapContextCreate(
         state_stack: Vec::new(),
         line_cap: kCGLineCapButt,
         line_join: super::cg_path::kCGLineJoinMiter,
+        miter_limit: 10.0,
         line_width: 1.0,
         rendering_intent: 0,
         path: Ptr::null(),

@@ -268,6 +268,7 @@ type ContextState = (
     CGBlendMode,                          // blend mode
     CGLineCap,                            // line cap
     CGLineJoin,                           // line join
+    CGFloat,                              // miter limit
     CGColorRenderingIntent,               // rendering intent
     (CGFloat, CGFloat, CGFloat, CGFloat), // RGB stroke color
     Vec<ClipPath>,                        // clipping path intersections
@@ -294,6 +295,7 @@ pub(super) struct CGContextHostObject {
     /// Line/Path data
     pub(super) line_cap: CGLineCap,
     pub(super) line_join: CGLineJoin,
+    pub(super) miter_limit: CGFloat,
     pub(super) line_width: CGFloat,
     pub(super) rendering_intent: CGColorRenderingIntent,
     pub(super) state_stack: Vec<ContextState>,
@@ -726,6 +728,7 @@ pub fn CGContextSaveGState(env: &mut Environment, context: CGContextRef) {
         host_obj.blend_mode,
         host_obj.line_cap,
         host_obj.line_join,
+        host_obj.miter_limit,
         host_obj.rendering_intent,
         host_obj.rgb_stroke_color,
         host_obj.clip_paths.clone(),
@@ -752,12 +755,13 @@ pub fn CGContextRestoreGState(env: &mut Environment, context: CGContextRef) {
     host_obj.blend_mode = state.4;
     host_obj.line_cap = state.5;
     host_obj.line_join = state.6;
-    host_obj.rendering_intent = state.7;
-    host_obj.rgb_stroke_color = state.8;
-    host_obj.clip_paths = state.9;
-    host_obj.text_drawing_mode = state.10;
-    host_obj.text_encoding = state.11;
-    host_obj.should_antialias = state.12;
+    host_obj.miter_limit = state.7;
+    host_obj.rendering_intent = state.8;
+    host_obj.rgb_stroke_color = state.9;
+    host_obj.clip_paths = state.10;
+    host_obj.text_drawing_mode = state.11;
+    host_obj.text_encoding = state.12;
+    host_obj.should_antialias = state.13;
 }
 
 fn CGContextSetInterpolationQuality(
@@ -1132,6 +1136,13 @@ fn CGContextSetLineJoin(env: &mut Environment, context: CGContextRef, join: CGLi
         .line_join = join;
 }
 
+fn CGContextSetMiterLimit(env: &mut Environment, context: CGContextRef, limit: CGFloat) {
+    assert!(limit > 0.0 && limit.is_finite());
+    env.objc
+        .borrow_mut::<CGContextHostObject>(context)
+        .miter_limit = limit;
+}
+
 fn CGContextSetRenderingIntent(
     env: &mut Environment,
     context: CGContextRef,
@@ -1444,6 +1455,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CGContextShowTextAtPoint(_, _, _, _, _)),
     export_c_func!(CGContextSetLineCap(_, _)),
     export_c_func!(CGContextSetLineJoin(_, _)),
+    export_c_func!(CGContextSetMiterLimit(_, _)),
     export_c_func!(CGContextSetRenderingIntent(_, _)),
     export_c_func!(CGContextSetLineWidth(_, _)),
     export_c_func!(CGContextMoveToPoint(_, _, _)),
