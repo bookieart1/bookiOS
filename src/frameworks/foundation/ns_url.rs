@@ -264,14 +264,47 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (id)URLByAppendingPathComponent:(id)path_component // NSString *
                       isDirectory:(bool)is_directory {
-    let &NSURLHostObject::FileURL { ns_string, .. } = env.objc.borrow(this) else {
-        unimplemented!(); // TODO
+    let stored_string = match *env.objc.borrow(this) {
+        NSURLHostObject::FileURL { ns_string, .. } => {
+            let mut path: id = msg![env; ns_string stringByAppendingPathComponent:path_component];
+            if is_directory {
+                path = msg![env; path stringByAppendingString:(get_static_str(env, "/"))];
+            }
+            return msg_class![env; NSURL fileURLWithPath:path];
+        }
+        NSURLHostObject::OtherURL { ns_string } => ns_string,
     };
-    let mut path: id = msg![env; ns_string stringByAppendingPathComponent:path_component];
-    if is_directory {
-        path = msg![env; path stringByAppendingString:(get_static_str(env, "/"))];
+
+    let base = to_rust_string(env, stored_string).into_owned();
+    let component = to_rust_string(env, path_component).into_owned();
+    let (scheme, authority, path, query, fragment) = split_url(&base);
+    let mut appended = String::new();
+    if let Some(scheme) = scheme {
+        appended.push_str(scheme);
+        appended.push(':');
     }
-    msg_class![env; NSURL fileURLWithPath:path]
+    if let Some(authority) = authority {
+        appended.push_str("//");
+        appended.push_str(authority);
+    }
+    appended.push_str(path);
+    if !appended.ends_with('/') {
+        appended.push('/');
+    }
+    appended.push_str(component.trim_start_matches('/'));
+    if is_directory && !appended.ends_with('/') {
+        appended.push('/');
+    }
+    if let Some(query) = query {
+        appended.push('?');
+        appended.push_str(query);
+    }
+    if let Some(fragment) = fragment {
+        appended.push('#');
+        appended.push_str(fragment);
+    }
+    let appended = from_rust_string(env, appended);
+    msg_class![env; NSURL URLWithString:appended]
 }
 
 - (id)URLByAppendingPathComponent:(id)path_component { // NSString *
