@@ -459,6 +459,23 @@ mod tests {
     }
 
     #[test]
+    fn development_255_parapanic_currency_symbol_round_trips_and_formats() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let formatter: id = msg_class![env; NSNumberFormatter new];
+        () = msg![env; formatter setNumberStyle:NSNumberFormatterCurrencyStyle];
+        let symbol = ns_string::from_rust_string(env, "CR".to_owned());
+        () = msg![env; formatter setCurrencySymbol:symbol];
+        release(env, symbol);
+        let stored: id = msg![env; formatter currencySymbol];
+        assert_eq!(ns_string::to_rust_string(env, stored), "CR");
+        let number: id = msg_class![env; NSNumber numberWithDouble:12.0f64];
+        let output: id = msg![env; formatter stringFromNumber:number];
+        assert_eq!(ns_string::to_rust_string(env, output), "CR12");
+        release(env, formatter);
+    }
+
+    #[test]
     fn decimal_formatter_round_trips_bounded_number_state() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
