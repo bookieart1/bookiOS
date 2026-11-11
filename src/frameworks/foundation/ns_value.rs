@@ -33,6 +33,8 @@ use std::collections::HashMap;
 pub struct State {
     /// Permanently allocated, null-terminated Objective-C type encodings.
     objc_type_encodings: HashMap<u8, ConstPtr<u8>>,
+    /// Process-lifetime encodings used by arbitrary NSValue payloads.
+    raw_objc_type_encodings: HashMap<Vec<u8>, ConstPtr<u8>>,
     /// Apple's Core Foundation keeps canonical integer objects for -1...12.
     /// NSNumber and CFNumber are toll-free bridged, so Foundation factory and
     /// initializer paths must share the same process-lifetime objects.
@@ -46,7 +48,7 @@ pub struct State {
 pub(super) enum NSValueHostObject {
     Raw {
         bytes: Vec<u8>,
-        obj_c_type: crate::mem::MutPtr<u8>,
+        obj_c_type: ConstPtr<u8>,
     },
     NonretainedObject(id),
     CGPoint(CGPoint),
@@ -271,7 +273,23 @@ pub const CLASSES: ClassExports = objc_classes! {
     let (_, size, _) = super::ns_method_signature::parse_type_layout(env, obj_c_type);
     let stored_bytes = env.mem.bytes_at(bytes.cast(), size).to_vec();
     let type_bytes = env.mem.cstr_at(obj_c_type).to_vec();
-    let stored_type = env.mem.alloc_and_write_cstr(&type_bytes);
+    let stored_type = if let Some(&stored) = env
+        .framework_state
+        .foundation
+        .ns_value
+        .raw_objc_type_encodings
+        .get(&type_bytes)
+    {
+        stored
+    } else {
+        let stored = env.mem.alloc_and_write_cstr(&type_bytes).cast_const();
+        env.framework_state
+            .foundation
+            .ns_value
+            .raw_objc_type_encodings
+            .insert(type_bytes, stored);
+        stored
+    };
     let host_object = Box::new(NSValueHostObject::Raw {
         bytes: stored_bytes,
         obj_c_type: stored_type,
@@ -340,20 +358,9 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (ConstPtr<u8>)objCType {
     match env.objc.borrow::<NSValueHostObject>(this) {
-        NSValueHostObject::Raw { obj_c_type, .. } => obj_c_type.cast_const(),
+        NSValueHostObject::Raw { obj_c_type, .. } => *obj_c_type,
         _ => unimplemented!("objCType for specialized NSValue"),
     }
-}
-
-- (())dealloc {
-    let host = std::mem::replace(
-        env.objc.borrow_mut::<NSValueHostObject>(this),
-        NSValueHostObject::NonretainedObject(nil),
-    );
-    if let NSValueHostObject::Raw { obj_c_type, .. } = host {
-        env.mem.free(obj_c_type.cast());
-    }
-    env.objc.dealloc_object(this, &mut env.mem)
 }
 
 - (CGPoint)CGPointValue {
