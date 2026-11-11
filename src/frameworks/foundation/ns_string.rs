@@ -3504,13 +3504,17 @@ fn get_bytes_range_inner(
     let end = start
         .checked_add(requested)
         .expect("NSString byte-conversion range overflow");
-    assert!(
-        end <= all_units.len(),
-        "NSString byte-conversion range out of bounds: start={start} requested={requested} end={end} actual={} max_length={max_length} encoding={encoding:#x} options={options:#x} buffer={buffer:?} used_length={used_length:?} remaining_range={remaining_range:?} text={:?}",
-        all_units.len(),
-        String::from_utf16_lossy(&all_units)
-    );
-    let units = &all_units[start..end];
+    let available_start = start.min(all_units.len());
+    let available_end = end.min(all_units.len()).max(available_start);
+    if start != available_start || end != available_end {
+        log!(
+            "Warning: legacy NSString byte conversion clips range {{{}, {}}} to string length {}",
+            range.location,
+            range.length,
+            all_units.len()
+        );
+    }
+    let units = &all_units[available_start..available_end];
     let lossy = options & NSStringEncodingConversionAllowLossy != 0;
     let external = options & NSStringEncodingConversionExternalRepresentation != 0;
     let max_length = max_length as usize;
@@ -3557,7 +3561,7 @@ fn get_bytes_range_inner(
         );
     }
 
-    converted_units == units.len()
+    requested == 0 || (converted_units != 0 && converted_units == units.len())
 }
 
 /// Helper function used by
