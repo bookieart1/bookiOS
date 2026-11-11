@@ -159,20 +159,38 @@ struct InternetPasswordRecord {
     value_data: Vec<u8>,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+struct GenericPasswordRecord {
+    account: Option<String>,
+    service: Option<String>,
+    generic: Option<Vec<u8>>,
+    value_data: Vec<u8>,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum PasswordClass {
+    Internet,
+    Generic,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct StoreFile {
     schema: u32,
     generation: u64,
     records: Vec<InternetPasswordRecord>,
+    #[serde(default)]
+    generic_password_records: Vec<GenericPasswordRecord>,
 }
 
-#[derive(Default)]
 struct Query {
+    class: PasswordClass,
     account: Option<String>,
     authentication_type: Option<String>,
     security_domain: Option<String>,
     server: Option<String>,
     item_type: Option<InternetPasswordItemType>,
+    service: Option<String>,
+    generic: Option<Vec<u8>>,
     value_data: Option<Vec<u8>>,
     return_data: bool,
 }
@@ -268,10 +286,16 @@ fn parse_query(env: &mut Environment, dictionary: id) -> Result<Query, OSStatus>
         return Err(ERR_SEC_PARAM);
     }
     let internet_password = k(env, K_SEC_CLASS_INTERNET_PASSWORD);
-    let class_matches: bool = msg![env; class isEqual:internet_password];
-    if !class_matches {
+    let generic_password = k(env, K_SEC_CLASS_GENERIC_PASSWORD);
+    let internet_matches: bool = msg![env; class isEqual:internet_password];
+    let generic_matches: bool = msg![env; class isEqual:generic_password];
+    let class = if internet_matches {
+        PasswordClass::Internet
+    } else if generic_matches {
+        PasswordClass::Generic
+    } else {
         return Err(ERR_SEC_UNIMPLEMENTED);
-    }
+    };
 
     let match_limit = get(env, dictionary, K_SEC_MATCH_LIMIT);
     if match_limit != nil {
@@ -296,11 +320,14 @@ fn parse_query(env: &mut Environment, dictionary: id) -> Result<Query, OSStatus>
     };
 
     Ok(Query {
+        class,
         account: optional_string(env, dictionary, K_SEC_ATTR_ACCOUNT)?,
         authentication_type: optional_string(env, dictionary, K_SEC_ATTR_AUTHENTICATION_TYPE)?,
         security_domain: optional_string(env, dictionary, K_SEC_ATTR_SECURITY_DOMAIN)?,
         server: optional_string(env, dictionary, K_SEC_ATTR_SERVER)?,
         item_type: optional_item_type(env, dictionary)?,
+        service: optional_string(env, dictionary, K_SEC_ATTR_SERVICE)?,
+        generic: optional_data(env, dictionary, K_SEC_ATTR_GENERIC)?,
         value_data: optional_data(env, dictionary, K_SEC_VALUE_DATA)?,
         return_data,
     })
@@ -331,6 +358,16 @@ fn record_identity_matches(a: &InternetPasswordRecord, b: &InternetPasswordRecor
         && a.item_type == b.item_type
 }
 
+fn generic_record_matches(record: &GenericPasswordRecord, query: &Query) -> bool {
+    query.account.as_ref().is_none_or(|value| record.account.as_ref() == Some(value))
+        && query.service.as_ref().is_none_or(|value| record.service.as_ref() == Some(value))
+        && query.generic.as_ref().is_none_or(|value| record.generic.as_ref() == Some(value))
+}
+
+fn generic_record_identity_matches(a: &GenericPasswordRecord, b: &GenericPasswordRecord) -> bool {
+    a.account == b.account && a.service == b.service && a.generic == b.generic
+}
+
 fn store_directory(env: &Environment) -> GuestPathBuf {
     env.fs.home_directory().join("Library").join("Preferences")
 }
@@ -358,6 +395,7 @@ fn load_store(env: &Environment) -> StoreFile {
             schema: STORE_SCHEMA,
             generation: 0,
             records: Vec::new(),
+            generic_password_records: Vec::new(),
         };
     };
     let path = store_path(&directory, generation);
@@ -366,6 +404,7 @@ fn load_store(env: &Environment) -> StoreFile {
             schema: STORE_SCHEMA,
             generation: 0,
             records: Vec::new(),
+            generic_password_records: Vec::new(),
         };
     };
     match plist::from_bytes::<StoreFile>(&bytes) {
@@ -374,6 +413,7 @@ fn load_store(env: &Environment) -> StoreFile {
             schema: STORE_SCHEMA,
             generation: 0,
             records: Vec::new(),
+            generic_password_records: Vec::new(),
         },
     }
 }
@@ -420,23 +460,37 @@ fn SecItemAdd(env: &mut Environment, attributes: id, result: MutPtr<id>) -> OSSt
     let Some(value_data) = query.value_data else {
         return ERR_SEC_PARAM;
     };
-    let record = InternetPasswordRecord {
-        account: query.account,
-        authentication_type: query.authentication_type,
-        security_domain: query.security_domain,
-        server: query.server,
-        item_type: query.item_type,
-        value_data,
-    };
     let mut store = load_store(env);
-    if store
-        .records
-        .iter()
-        .any(|existing| record_identity_matches(existing, &record))
-    {
-        return ERR_SEC_DUPLICATE_ITEM;
+    match query.class {
+        PasswordClass::Internet => {
+            let record = InternetPasswordRecord {
+                account: query.account,
+                authentication_type: query.authentication_type,
+                security_domain: query.security_domain,
+                server: query.server,
+                item_type: query.item_type,
+                value_data,
+            };
+            if store.records.iter().any(|existing| record_identity_matches(existing, &record)) {
+                return ERR_SEC_DUPLICATE_ITEM;
+            }
+            store.records.push(record);
+        }
+        PasswordClass::Generic => {
+            let record = GenericPasswordRecord {
+                account: query.account,
+                service: query.service,
+                generic: query.generic,
+                value_data,
+            };
+            if store.generic_password_records.iter().any(|existing| {
+                generic_record_identity_matches(existing, &record)
+            }) {
+                return ERR_SEC_DUPLICATE_ITEM;
+            }
+            store.generic_password_records.push(record);
+        }
     }
-    store.records.push(record);
     match save_store(env, &mut store) {
         Ok(()) => ERR_SEC_SUCCESS,
         Err(status) => status,
@@ -459,17 +513,25 @@ fn SecItemCopyMatching(
         return ERR_SEC_PARAM;
     }
     let store = load_store(env);
-    let Some(record) = store.records.iter().find(|record| record_matches(record, &query)) else {
+    let value_data = match query.class {
+        PasswordClass::Internet => store.records.iter()
+            .find(|record| record_matches(record, &query))
+            .map(|record| record.value_data.clone()),
+        PasswordClass::Generic => store.generic_password_records.iter()
+            .find(|record| generic_record_matches(record, &query))
+            .map(|record| record.value_data.clone()),
+    };
+    let Some(value_data) = value_data else {
         return ERR_SEC_ITEM_NOT_FOUND;
     };
-    let length: NSUInteger = record.value_data.len().try_into().unwrap();
+    let length: NSUInteger = value_data.len().try_into().unwrap();
     let bytes = if length == 0 {
         ConstVoidPtr::null()
     } else {
         let guest_bytes = env.mem.alloc(length);
         env.mem
             .bytes_at_mut(guest_bytes.cast(), length)
-            .copy_from_slice(&record.value_data);
+            .copy_from_slice(&value_data);
         guest_bytes.cast_const()
     };
     let data: id = msg_class![env; NSData dataWithBytes:bytes length:length];
@@ -490,9 +552,19 @@ fn SecItemDelete(env: &mut Environment, query_dictionary: id) -> OSStatus {
         return ERR_SEC_PARAM;
     }
     let mut store = load_store(env);
-    let original_len = store.records.len();
-    store.records.retain(|record| !record_matches(record, &query));
-    if store.records.len() == original_len {
+    let removed = match query.class {
+        PasswordClass::Internet => {
+            let original_len = store.records.len();
+            store.records.retain(|record| !record_matches(record, &query));
+            store.records.len() != original_len
+        }
+        PasswordClass::Generic => {
+            let original_len = store.generic_password_records.len();
+            store.generic_password_records.retain(|record| !generic_record_matches(record, &query));
+            store.generic_password_records.len() != original_len
+        }
+    };
+    if !removed {
         return ERR_SEC_ITEM_NOT_FOUND;
     }
     match save_store(env, &mut store) {
@@ -672,7 +744,8 @@ mod tests {
             let length = value.len() as u32;
             let bytes = env.mem.alloc(length);
             env.mem.bytes_at_mut(bytes.cast(), length).copy_from_slice(value);
-            let data: id = msg_class![env; NSData dataWithBytes:bytes length:length];
+            let const_bytes = bytes.cast_const();
+            let data: id = msg_class![env; NSData dataWithBytes:const_bytes length:length];
             env.mem.free(bytes.cast());
             let value_key = k(env, K_SEC_VALUE_DATA);
             set_object(env, dictionary, data, value_key);
@@ -699,7 +772,8 @@ mod tests {
         let returned = env.mem.read(result);
         assert_eq!(copied_bytes(&mut env, returned), b"payload");
         release(&mut env, returned);
-        assert_eq!(SecItemDelete(&mut env, find), ERR_SEC_SUCCESS);
+        let delete = generic_password_query(&mut env, "device", "parapanic", None);
+        assert_eq!(SecItemDelete(&mut env, delete), ERR_SEC_SUCCESS);
         env.mem.free(result.cast());
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -913,6 +987,7 @@ mod tests {
                 )),
                 value_data: b"typed-value".to_vec(),
             }],
+            generic_password_records: Vec::new(),
         };
         let mut typed_bytes = Vec::new();
         plist::to_writer_binary(&mut typed_bytes, &typed).unwrap();
