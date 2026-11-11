@@ -141,6 +141,21 @@ pub fn sem_wait(env: &mut Environment, sem: MutPtr<sem_t>) -> i32 {
     0 // success
 }
 
+fn sem_getvalue(env: &mut Environment, sem: MutPtr<sem_t>, value: MutPtr<i32>) -> i32 {
+    if value.is_null() {
+        set_errno(env, EINVAL);
+        return -1;
+    }
+    let Some(host_sem) = State::get(env).open_semaphores.get(&sem) else {
+        set_errno(env, EINVAL);
+        return -1;
+    };
+    let current = host_sem.borrow().value.max(0);
+    env.mem.write(value, current);
+    set_errno(env, 0);
+    0
+}
+
 fn sem_trywait(env: &mut Environment, sem: MutPtr<sem_t>) -> i32 {
     // TODO: handle errno properly
     set_errno(env, 0);
@@ -196,6 +211,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(sem_open(_, _, _, _)),
     export_c_func!(sem_post(_)),
     export_c_func!(sem_wait(_)),
+    export_c_func!(sem_getvalue(_, _)),
     export_c_func!(sem_trywait(_)),
     export_c_func!(sem_close(_)),
     export_c_func!(sem_unlink(_)),
