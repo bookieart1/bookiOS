@@ -3,7 +3,7 @@
 use super::ns_string;
 use crate::dyld::{export_c_func, FunctionExports};
 use crate::mem::{ConstPtr, SafeRead};
-use crate::objc::{id, nil, Class, SEL};
+use crate::objc::{id, nil, retain, Class, SEL};
 use crate::Environment;
 
 /// Prefix of the 32-bit Objective-C 2 runtime's protocol_t structure. The
@@ -83,6 +83,11 @@ fn NSClassFromString(env: &mut Environment, string: id) -> Class {
     result
 }
 
+fn objc_retainAutoreleasedReturnValue(env: &mut Environment, object: id) -> id {
+    // ARC's optimized return-value handshake transfers the caller a +1 claim.
+    retain(env, object)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,4 +120,5 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(NSClassFromString(_)),
     export_c_func!(NSStringFromClass(_)),
     export_c_func!(NSStringFromProtocol(_)),
+    export_c_func!(objc_retainAutoreleasedReturnValue(_)),
 ];
