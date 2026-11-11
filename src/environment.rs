@@ -1880,6 +1880,17 @@ impl Environment {
 
     #[cold]
     fn log_memory_fault_context(&self, source: &str) {
+        if let Some(access) = self.cpu.last_memory_fault() {
+            log_no_panic!(
+                "{source} first rejected access: operation={} size={} address={:#010x} value={:#010x} core-pc={:#010x} core-lr={:#010x}",
+                if access.write { "write" } else { "read" },
+                access.size,
+                access.address,
+                access.value,
+                access.pc,
+                access.lr,
+            );
+        }
         // A CPU fault reports the instruction after the fault. A panic from a
         // guest-to-host API call instead leaves PC in the host-call stub and
         // LR at the guest caller, so report both addresses.

@@ -90,6 +90,15 @@ struct touchHLE_MgbaWrapper {
   uint32_t data_floor;
   int32_t result;
   bool halted;
+  /* First rejected data access in the current run. Diagnostic-only state:
+   * recording it does not alter the fault or make the address readable. */
+  bool fault_valid;
+  bool fault_write;
+  uint8_t fault_size;
+  uint32_t fault_address;
+  uint32_t fault_value;
+  uint32_t fault_pc;
+  uint32_t fault_lr;
   /* The opcode that last hit an undefined encoding, for diagnostics. */
   uint32_t last_undefined_opcode;
 
