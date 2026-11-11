@@ -845,6 +845,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn development_255_real_racing_timezone_globals_are_guest_values() {
+        use crate::dyld::{search_host_dylibs, HostConstant};
+
+        let mut env = Environment::new_fake_for_test();
+        for symbol in ["_timezone", "_daylight"] {
+            let (_, HostConstant::Custom(export)) = search_host_dylibs(
+                |dylib| dylib.constant_exports,
+                symbol,
+            )
+            .unwrap_or_else(|| panic!("missing {symbol} data export"))
+            else {
+                panic!("{symbol} must be a guest-addressable data export")
+            };
+            let address = export(&mut env);
+            assert_ne!(address.to_bits(), 0);
+            assert_eq!(env.mem.read(address.cast::<i32>()), 0);
+        }
+    }
+
+    #[test]
     fn difftime_uses_double_precision_and_signed_order() {
         let mut env = Environment::new_fake_for_test_with_thread();
         assert_eq!(difftime(&mut env, 10, 4), 6.0);
