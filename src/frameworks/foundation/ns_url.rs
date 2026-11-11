@@ -561,14 +561,15 @@ mod tests {
     #[test]
     fn non_file_url_appends_a_path_component() {
         let mut env = Environment::new_fake_for_test_with_thread();
-        let base = from_rust_string(&mut env, "https://example.com/base".to_owned());
-        let component = from_rust_string(&mut env, "child".to_owned());
-        let url: id = msg_class![&mut env; NSURL URLWithString:base];
+        let env = &mut env;
+        let base = from_rust_string(env, "https://example.com/base".to_owned());
+        let component = from_rust_string(env, "child".to_owned());
+        let url: id = msg_class![env; NSURL URLWithString:base];
 
-        let appended: id = msg![&mut env; url URLByAppendingPathComponent:component];
-        let absolute: id = msg![&mut env; appended absoluteString];
+        let appended: id = msg![env; url URLByAppendingPathComponent:component];
+        let absolute: id = msg![env; appended absoluteString];
 
-        assert_eq!(to_rust_string(&mut env, absolute), "https://example.com/base/child");
+        assert_eq!(to_rust_string(env, absolute), "https://example.com/base/child");
     }
 
     #[test]
