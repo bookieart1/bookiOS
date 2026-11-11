@@ -516,6 +516,23 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, array)
 }
 
+- (())exchangeObjectAtIndex:(NSUInteger)first_index
+          withObjectAtIndex:(NSUInteger)second_index {
+    let count: NSUInteger = msg![env; this count];
+    assert!(first_index < count && second_index < count, "exchangeObjectAtIndex: index out of bounds");
+    if first_index == second_index {
+        return;
+    }
+    let first: id = msg![env; this objectAtIndex:first_index];
+    let second: id = msg![env; this objectAtIndex:second_index];
+    retain(env, first);
+    retain(env, second);
+    () = msg![env; this replaceObjectAtIndex:first_index withObject:second];
+    () = msg![env; this replaceObjectAtIndex:second_index withObject:first];
+    release(env, second);
+    release(env, first);
+}
+
 // These probably comes from some category related to plists.
 - (id)initWithContentsOfFile:(id)path { // NSString*
     release(env, this);
