@@ -679,6 +679,10 @@ const UIApplicationStatusBarFrameUserInfoKey: &str = "UIApplicationStatusBarFram
 /// (Both types are strings)
 pub const CONSTANTS: ConstantExports = &[
     (
+        "_UIBackgroundTaskInvalid",
+        HostConstant::Custom(|env| env.mem.alloc_and_write(u32::MAX).cast().cast_const()),
+    ),
+    (
         "_UIApplicationDidFinishLaunchingNotification",
         HostConstant::NSString(UIApplicationDidFinishLaunchingNotification),
     ),
