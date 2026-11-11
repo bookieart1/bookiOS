@@ -139,6 +139,27 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(NSSearchPathForDirectoriesInDomains(_, _, _)),
 ];
 
+#[cfg(test)]
+mod file_attribute_constant_tests {
+    use super::*;
+
+    #[test]
+    fn historical_file_attribute_keys_are_exported() {
+        let names: Vec<_> = CONSTANTS.iter().map(|(name, _)| *name).collect();
+        for required in [
+            "_NSFileOwnerAccountName",
+            "_NSFileOwnerAccountID",
+            "_NSFileGroupOwnerAccountName",
+            "_NSFileGroupOwnerAccountID",
+            "_NSFileHFSCreatorCode",
+            "_NSFileSystemSize",
+            "_NSFileTypeSymbolicLink",
+        ] {
+            assert!(names.contains(&required));
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct State {
     default_manager: Option<id>,
