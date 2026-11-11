@@ -225,4 +225,26 @@ mod development_255_tests {
     fn development_255_semaphore_value_query_is_exported() {
         assert!(FUNCTIONS.iter().any(|(name, _)| *name == "_sem_getvalue"));
     }
+
+    #[test]
+    fn development_255_semaphore_value_query_tracks_wait_and_post() {
+        let mut env = Environment::new_fake_for_test();
+        let sem: MutPtr<sem_t> = env.mem.alloc_and_write(0);
+        let value: MutPtr<i32> = env.mem.alloc_and_write(-1);
+        assert_eq!(sem_init(&mut env, sem, 0, 2), 0);
+        assert_eq!(sem_getvalue(&mut env, sem, value), 0);
+        assert_eq!(env.mem.read(value), 2);
+
+        assert_eq!(sem_trywait(&mut env, sem), 0);
+        assert_eq!(sem_getvalue(&mut env, sem, value), 0);
+        assert_eq!(env.mem.read(value), 1);
+        assert_eq!(sem_post(&mut env, sem), 0);
+        assert_eq!(sem_getvalue(&mut env, sem, value), 0);
+        assert_eq!(env.mem.read(value), 2);
+
+        assert_eq!(sem_getvalue(&mut env, MutPtr::null(), value), -1);
+        assert_eq!(crate::libc::errno::get_errno(&mut env), EINVAL);
+        assert_eq!(sem_getvalue(&mut env, sem, MutPtr::null()), -1);
+        assert_eq!(crate::libc::errno::get_errno(&mut env), EINVAL);
+    }
 }
