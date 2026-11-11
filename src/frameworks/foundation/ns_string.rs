@@ -1138,7 +1138,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     // TODO: OR'ing of compare options
     match mask {
-        NSCaseInsensitiveSearch => {
+        value if value == NSCaseInsensitiveSearch
+            || value == (NSCaseInsensitiveSearch | NSLiteralSearch) => {
             loop {
                 let a_next = a_iter.next();
                 let b_next = b_iter.next();
