@@ -40,8 +40,8 @@ struct NSXMLParserHostObject {
 }
 impl HostObject for NSXMLParserHostObject {}
 
-fn cdata_payload(_event: BytesCData<'_>) -> Vec<u8> {
-    Vec::new()
+fn cdata_payload(event: BytesCData<'_>) -> Vec<u8> {
+    event.into_inner().into_owned()
 }
 
 pub const CLASSES: ClassExports = objc_classes! {
@@ -284,7 +284,21 @@ pub const CLASSES: ClassExports = objc_classes! {
                     .register_host_selector("parser:foundCDATA:".to_string(), &mut env.mem);
                 let responds: bool = msg![env; delegate respondsToSelector:sel];
                 if responds {
-                    todo!("Implement parser:foundCDATA: delegate call");
+                    let payload = cdata_payload(e);
+                    let data: id = if payload.is_empty() {
+                        msg_class![env; NSData data]
+                    } else {
+                        let length: NSUInteger = payload.len().try_into().unwrap();
+                        let bytes = env.mem.alloc(length);
+                        env.mem
+                            .bytes_at_mut(bytes.cast(), length)
+                            .copy_from_slice(&payload);
+                        let bytes_const = bytes.cast_const();
+                        let data: id = msg_class![env; NSData dataWithBytes:bytes_const length:length];
+                        env.mem.free(bytes.cast());
+                        data
+                    };
+                    () = msg![env; delegate parser:this foundCDATA:data];
                 } else {
                     let sel: SEL = env
                         .objc
