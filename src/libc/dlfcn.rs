@@ -243,7 +243,7 @@ fn register_add_image_callback(
     existing_images
 }
 
-fn __dyld_register_func_for_add_image(env: &mut Environment, callback: GuestFunction) {
+fn _dyld_register_func_for_add_image(env: &mut Environment, callback: GuestFunction) {
     // Registration is synchronous: dyld first reports every image already in
     // the process, in load order. Collect the headers before entering guest
     // code so the callback can safely inspect or patch the images reentrantly.
@@ -261,7 +261,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(_dyld_image_count()),
     export_c_func!(_dyld_get_image_name(_)),
     export_c_func!(_dyld_get_image_vmaddr_slide(_)),
-    export_c_func!(__dyld_register_func_for_add_image(_)),
+    export_c_func!(_dyld_register_func_for_add_image(_)),
 ];
 
 #[cfg(test)]
