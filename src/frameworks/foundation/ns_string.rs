@@ -3170,6 +3170,33 @@ mod ns_string_tests {
     }
 
     #[test]
+    fn development_255_null_file_path_initializer_fails_cleanly() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let out_error = env.mem.alloc_and_write(nil);
+        let string: id = msg_class![env; NSString alloc];
+        let result: id = msg![env; string initWithContentsOfFile:nil
+                                                  encoding:NSUTF8StringEncoding
+                                                     error:out_error];
+        assert_eq!(result, nil);
+
+        let error = env.mem.read(out_error);
+        assert_ne!(error, nil);
+        let code: NSInteger = msg![env; error code];
+        assert_eq!(code, NSFileReadNoSuchFileError);
+        let domain: id = msg![env; error domain];
+        assert_eq!(to_rust_string(env, domain), NSCocoaErrorDomain);
+
+        env.mem.free(out_error.cast());
+        release(env, pool);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
+
+    #[test]
     fn unavailable_url_initializer_populates_requested_error() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
