@@ -352,6 +352,14 @@ fn objc_autoreleasePoolPop(env: &mut Environment, token: id) {
     () = msg![env; token drain];
 }
 
+fn objc_storeStrong(env: &mut Environment, location: MutPtr<id>, value: id) {
+    assert!(!location.is_null());
+    let value = retain(env, value);
+    let old_value = env.mem.read(location);
+    env.mem.write(location, value);
+    release(env, old_value);
+}
+
 const FUNCTIONS: FunctionExports = &[
     export_c_func!(class_createInstance(_, _)),
     export_c_func!(class_copyPropertyList(_, _)),
@@ -389,6 +397,7 @@ const FUNCTIONS: FunctionExports = &[
     export_c_func!(objc_sync_exit(_)),
     export_c_func!(objc_autoreleasePoolPush()),
     export_c_func!(objc_autoreleasePoolPop(_)),
+    export_c_func!(objc_storeStrong(_, _)),
     export_c_func!(object_getClass(_)),
     export_c_func!(object_getInstanceVariable(_, _, _)),
     export_c_func!(object_setInstanceVariable(_, _, _)),
@@ -440,6 +449,28 @@ mod dev_239_tests {
 
         objc_autoreleasePoolPop(env, token);
         assert_eq!(env.objc.live_object_count(), after_push - 1);
+    }
+
+    #[test]
+    fn development_255_arc_store_strong_balances_old_and_new_ownership() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let old_value: id = msg_class![env; NSObject new];
+        let new_value: id = msg_class![env; NSObject new];
+        let location = env.mem.alloc(4).cast::<id>();
+        env.mem.write(location, old_value);
+        let before = env.objc.live_object_count();
+
+        objc_storeStrong(env, location, new_value);
+        assert_eq!(env.mem.read(location), new_value);
+        assert_eq!(env.objc.get_refcount(new_value).get(), 2);
+        assert_eq!(env.objc.live_object_count(), before - 1);
+
+        objc_storeStrong(env, location, nil);
+        assert_eq!(env.mem.read(location), nil);
+        assert_eq!(env.objc.get_refcount(new_value).get(), 1);
+        release(env, new_value);
+        env.mem.free(location.cast());
     }
 
     #[test]
