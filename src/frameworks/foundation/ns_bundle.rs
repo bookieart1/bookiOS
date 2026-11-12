@@ -19,7 +19,7 @@ use crate::objc::{
 use crate::Environment;
 use std::collections::{HashMap, HashSet};
 
-use crate::fs::{FsNodeType, GuestPath};
+use crate::fs::{FsNodeType, GuestPath, GuestPathBuf};
 use crate::window::DeviceFamily;
 
 // Should be ISO 639-1 (or ISO 639-2) compliant
@@ -760,6 +760,32 @@ mod tests {
         assert_eq!(count, 1);
         assert!(msg![env; first isEqualToString:en]);
     }
+
+    #[test]
+    fn development_255_accessible_bundle_directory_does_not_require_info_plist() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        env.bundle.set_fake_identity_for_test();
+        let env = &mut env;
+        let path = ns_string::from_rust_string(env, "/".to_owned());
+        let bundle: id = msg_class![env; NSBundle bundleWithPath:path];
+        assert_ne!(bundle, nil);
+        let info: id = msg![env; bundle infoDictionary];
+        let count: NSUInteger = msg![env; info count];
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn development_255_legacy_bundle_layout_uses_contents_resources() {
+        let root = GuestPath::new("/Legacy.bundle");
+        assert_eq!(
+            bundle_resource_root_for_layout(root, true).as_str(),
+            "/Legacy.bundle/Contents/Resources"
+        );
+        assert_eq!(
+            bundle_resource_root_for_layout(root, false).as_str(),
+            "/Legacy.bundle"
+        );
+    }
 }
 
 fn path_for_device_resource_helper(
@@ -807,6 +833,13 @@ fn path_for_device_resource_helper(
     }
     release(env, specialized_name);
     path
+}
+
+fn bundle_resource_root_for_layout(
+    bundle_path: &GuestPath,
+    _has_contents_resources: bool,
+) -> GuestPathBuf {
+    bundle_path.to_owned()
 }
 
 fn path_for_resource_helper(
