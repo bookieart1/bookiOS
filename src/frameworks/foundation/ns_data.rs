@@ -699,6 +699,15 @@ mod tests {
     }
 
     #[test]
+    fn development_255_empty_data_converts_to_empty_host_slice() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let data: id = msg_class![env; NSData data];
+
+        assert_eq!(to_rust_slice(env, data), &[]);
+    }
+
+    #[test]
     fn development_255_data_keyed_archive_round_trip_preserves_bytes() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
