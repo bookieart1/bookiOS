@@ -16,7 +16,7 @@ use crate::frameworks::foundation::ns_string::get_static_str;
 use crate::fs::{FsError, FsNodeType, GuestPath, GuestPathBuf};
 use crate::mem::{ConstPtr, MutPtr, Ptr};
 use crate::objc::{
-    autorelease, id, msg, msg_class, nil, objc_classes, release, ClassExports, HostObject,
+    autorelease, id, msg, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject,
 };
 use crate::Environment;
 
@@ -487,7 +487,10 @@ pub const CLASSES: ClassExports = objc_classes! {
         if subpath == nil {
             break;
         }
-        subpaths.push(subpath);
+        // NSDirectoryEnumerator returns an autoreleased object. `from_vec`
+        // adopts already-owned elements, so retain the string while
+        // transferring it into the returned NSArray.
+        subpaths.push(retain(env, subpath));
     }
     let result = ns_array::from_vec(env, subpaths);
     autorelease(env, result)
