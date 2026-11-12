@@ -983,19 +983,17 @@ mod tests {
     fn development_255_subpaths_keep_enumerated_strings_alive_after_pool_drain() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
-        env.fs
-            .create_dir_all(GuestPath::new("/tmp/subpaths-ownership"))
-            .unwrap();
-        env.fs
-            .write(
-                GuestPath::new("/tmp/subpaths-ownership/entry.txt"),
-                b"fixture",
-            )
-            .unwrap();
+        let directory = env
+            .fs
+            .home_directory()
+            .join("tmp")
+            .join("subpaths-ownership");
+        env.fs.create_dir_all(&directory).unwrap();
+        env.fs.write(&directory.join("entry.txt"), b"fixture").unwrap();
 
         let outer_pool: id = msg_class![env; NSAutoreleasePool new];
         let manager: id = msg_class![env; NSFileManager defaultManager];
-        let path = ns_string::from_rust_string(env, "/tmp/subpaths-ownership".to_owned());
+        let path = ns_string::from_rust_string(env, directory.as_str().to_owned());
         let paths: id = msg![env; manager subpathsOfDirectoryAtPath:path
                                           error:(MutPtr::<id>::null())];
         let paths: id = msg![env; paths retain];
