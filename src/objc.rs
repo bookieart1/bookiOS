@@ -343,6 +343,15 @@ fn class_createInstance(env: &mut Environment, class: Class, extra_bytes: GuestU
     )
 }
 
+fn objc_autoreleasePoolPush(env: &mut Environment) -> id {
+    msg_class![env; NSAutoreleasePool new]
+}
+
+fn objc_autoreleasePoolPop(env: &mut Environment, token: id) {
+    assert_ne!(token, nil);
+    () = msg![env; token drain];
+}
+
 const FUNCTIONS: FunctionExports = &[
     export_c_func!(class_createInstance(_, _)),
     export_c_func!(class_copyPropertyList(_, _)),
@@ -378,6 +387,8 @@ const FUNCTIONS: FunctionExports = &[
     export_c_func!(objc_copyStruct(_, _, _, _, _)),
     export_c_func!(objc_sync_enter(_)),
     export_c_func!(objc_sync_exit(_)),
+    export_c_func!(objc_autoreleasePoolPush()),
+    export_c_func!(objc_autoreleasePoolPop(_)),
     export_c_func!(object_getClass(_)),
     export_c_func!(object_getInstanceVariable(_, _, _)),
     export_c_func!(object_setInstanceVariable(_, _, _)),
@@ -409,6 +420,21 @@ mod dev_239_tests {
                 .iter()
                 .any(|(name, _)| *name == "_objc_autoreleasePoolPop")
         );
+    }
+
+    #[test]
+    fn development_255_arc_autorelease_pool_push_pop_drains_owned_objects() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let token = objc_autoreleasePoolPush(env);
+        assert_ne!(token, nil);
+        let after_push = env.objc.live_object_count();
+        let object: id = msg_class![env; NSObject new];
+        autorelease(env, object);
+        assert_eq!(env.objc.live_object_count(), after_push + 1);
+
+        objc_autoreleasePoolPop(env, token);
+        assert_eq!(env.objc.live_object_count(), after_push - 1);
     }
 
     #[test]
