@@ -19,10 +19,6 @@ use crate::frameworks::uikit::ui_application::{
     UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight,
     UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown,
 };
-use crate::frameworks::uikit::ui_device::{
-    UIDeviceOrientationLandscapeLeft, UIDeviceOrientationLandscapeRight,
-    UIDeviceOrientationPortraitUpsideDown,
-};
 use crate::objc::{
     id, msg, msg_class, msg_super, nil, objc_classes, release, retain, ClassExports,
 };
@@ -50,13 +46,21 @@ fn choose_initial_controller_orientation(
     current: UIInterfaceOrientation,
     supports: [bool; 4],
 ) -> Option<UIInterfaceOrientation> {
-    match current {
-        UIInterfaceOrientationPortrait => None,
-        UIInterfaceOrientationPortraitUpsideDown if supports[1] => Some(current),
-        UIInterfaceOrientationLandscapeLeft if supports[2] => Some(current),
-        UIInterfaceOrientationLandscapeRight if supports[3] => Some(current),
-        _ => None,
+    let supports_orientation = |orientation: UIInterfaceOrientation| {
+        let index = orientation.checked_sub(1).and_then(|value| usize::try_from(value).ok());
+        index.and_then(|index| supports.get(index)).copied().unwrap_or(false)
+    };
+    if supports_orientation(current) {
+        return Some(current);
     }
+    [
+        UIInterfaceOrientationLandscapeLeft,
+        UIInterfaceOrientationLandscapeRight,
+        UIInterfaceOrientationPortrait,
+        UIInterfaceOrientationPortraitUpsideDown,
+    ]
+    .into_iter()
+    .find(|&orientation| supports_orientation(orientation))
 }
 
 fn log_startup_window_transition(
@@ -323,9 +327,10 @@ pub const CLASSES: ClassExports = objc_classes! {
     () = msg_super![env; this addSubview:view];
     () = msg![env; vc viewDidAppear:false];
 
-    // Support auto-rotation. This is currently only for apps that request a
-    // non-portrait interface orientation via Info.plist, as we do not yet
-    // support changes of orientation caused by device rotation (TODO).
+    // Support initial auto-rotation. UIKit starts launch layout in portrait,
+    // then, on iOS 5 and below, asks the visible controller which interface
+    // orientations it accepts before showing the window. The Info.plist
+    // orientation remains a launch hint, not the controller's final answer.
     // FIXME: It's unclear when and where this auto-rotation is supposed to
     //        happen. It must have something to do with mounting the view
     //        controller to a window, so we do it here. QA1688 (see top of file)
@@ -333,24 +338,30 @@ pub const CLASSES: ClassExports = objc_classes! {
     //        auto-rotation rely on rootViewController (a property only found in
     //        iOS 6), so the current implementation is specific to iOS <= 5.
     // FIXME: Are we supposed to notify the view somehow of the rotation?
-    // FIXME: What do we do if shouldAutorotateToInterfaceOrientation:
-    //        returns false? The status bar has already been rotated…
     // FIXME: The device orientation stored on env.window can come from one of
     //        three places (user/default options, setStatusBarOrientation: etc,
     //        Info.plist UIInterfaceOrientation etc). It's not clear if these
     //        are really equivalent and should all trigger autorotation.
-    if let Some(orientation) = match env.window.as_ref().unwrap().current_rotation() {
-        crate::window::DeviceOrientation::PortraitUpsideDown => Some(UIDeviceOrientationPortraitUpsideDown),
-        crate::window::DeviceOrientation::LandscapeLeft => Some(UIDeviceOrientationLandscapeLeft),
-        crate::window::DeviceOrientation::LandscapeRight => Some(UIDeviceOrientationLandscapeRight),
-        // Portrait is the default so we don't do anything here.
-        crate::window::DeviceOrientation::Portrait => None,
-    } {
-        // (UIInterfaceOrientation and UIDeviceOrientation are compatible enums,
-        //  here we use whichever is clearer contextually.)
-        let should = msg![env; vc shouldAutorotateToInterfaceOrientation:orientation];
-        log_dbg!("[{:?} shouldAutorotateToInterfaceOrientation:{:?}] => {:?}", vc, orientation, should);
-        if should {
+    let current_orientation = match env.window.as_ref().unwrap().current_rotation() {
+        crate::window::DeviceOrientation::Portrait => UIInterfaceOrientationPortrait,
+        crate::window::DeviceOrientation::PortraitUpsideDown => UIInterfaceOrientationPortraitUpsideDown,
+        crate::window::DeviceOrientation::LandscapeLeft => UIInterfaceOrientationLandscapeLeft,
+        crate::window::DeviceOrientation::LandscapeRight => UIInterfaceOrientationLandscapeRight,
+    };
+    let supports = [
+        msg![env; vc shouldAutorotateToInterfaceOrientation:UIInterfaceOrientationPortrait],
+        msg![env; vc shouldAutorotateToInterfaceOrientation:UIInterfaceOrientationPortraitUpsideDown],
+        msg![env; vc shouldAutorotateToInterfaceOrientation:UIInterfaceOrientationLandscapeRight],
+        msg![env; vc shouldAutorotateToInterfaceOrientation:UIInterfaceOrientationLandscapeLeft],
+    ];
+    if let Some(orientation) =
+        choose_initial_controller_orientation(current_orientation, supports)
+    {
+        if orientation != current_orientation {
+            let application: id = msg_class![env; UIApplication sharedApplication];
+            () = msg![env; application setStatusBarOrientation:orientation];
+        }
+        if orientation != UIInterfaceOrientationPortrait {
             log_dbg!("App requested autorotation; applying orientation transform to view {:?}.", view);
             let transform = match orientation {
                 UIInterfaceOrientationPortraitUpsideDown => CGAffineTransform::make_rotation(-std::f32::consts::PI),
