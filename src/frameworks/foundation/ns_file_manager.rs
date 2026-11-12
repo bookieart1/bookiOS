@@ -644,6 +644,17 @@ includingPropertiesForKeys:(id)_keys // NSArray*, only prefetching
         env.mem.write(error, nil);
     }
 
+    if path == nil {
+        if !error.is_null() {
+            let domain = get_static_str(env, NSCocoaErrorDomain);
+            let file_error: id = msg_class![env; NSError errorWithDomain:domain
+                                                             code:NSFileReadInvalidFileNameError
+                                                         userInfo:nil];
+            env.mem.write(error, file_error);
+        }
+        return nil;
+    }
+
     // The guest filesystem currently resolves host links while constructing
     // its node tree and cannot contain a symbolic-link node. Preserve the
     // historical Cocoa result for a path that is not a symbolic link: nil and
