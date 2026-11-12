@@ -8,8 +8,9 @@
 use super::{ns_array, ns_string, NSInteger, NSUInteger};
 use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
 use crate::frameworks::foundation::ns_error::{
-    NSCocoaErrorDomain, NSFilePathErrorKey, NSFileReadNoSuchFileError, NSFileReadUnknownError,
-    NSFileWriteFileExistsError, NSFileWriteUnknownError,
+    NSCocoaErrorDomain, NSFilePathErrorKey, NSFileReadInvalidFileNameError,
+    NSFileReadNoSuchFileError, NSFileReadUnknownError, NSFileWriteFileExistsError,
+    NSFileWriteUnknownError,
 };
 use crate::frameworks::foundation::ns_string::get_static_str;
 use crate::fs::{FsError, FsNodeType, GuestPath, GuestPathBuf};
@@ -976,6 +977,15 @@ mod tests {
         assert_ne!(error, nil);
         let code: NSInteger = msg![env; error code];
         assert_eq!(code, NSFileReadUnknownError);
+
+        env.mem.write(error_out, id::from_bits(0x1234));
+        let destination: id = msg![env; manager destinationOfSymbolicLinkAtPath:nil
+                                                       error:error_out];
+        assert_eq!(destination, nil);
+        let error = env.mem.read(error_out);
+        assert_ne!(error, nil);
+        let code: NSInteger = msg![env; error code];
+        assert_eq!(code, NSFileReadInvalidFileNameError);
 
         // A caller that declines error details still gets the same nil result.
         let destination: id = msg![env; manager destinationOfSymbolicLinkAtPath:ordinary
