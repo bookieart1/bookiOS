@@ -2044,6 +2044,9 @@ impl Window {
             return;
         }
 
+        let old_window_size = self.window.size();
+        let old_drawable_size = self.window.drawable_size();
+
         if !self.fullscreen && !Self::rotatable_fullscreen() {
             let (width, height) = if Self::rotatable_fullscreen() {
                 set_sdl2_orientation(new_orientation);
@@ -2068,6 +2071,16 @@ impl Window {
 
             self.window.set_size(width, height).unwrap();
         }
+
+        log!(
+            "Bounded orientation presentation diagnostic: {:?}->{:?}, window {:?}->{:?}, drawable {:?}->{:?}",
+            self.device_orientation,
+            new_orientation,
+            old_window_size,
+            self.window.size(),
+            old_drawable_size,
+            self.window.drawable_size(),
+        );
 
         if Self::rotatable_fullscreen() {
             set_sdl2_orientation(new_orientation);
