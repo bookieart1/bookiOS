@@ -182,6 +182,11 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (id)target {
     env.objc.borrow::<NSInvocationHostObject>(this).target
 }
+
+- (id)methodSignature {
+    env.objc.borrow::<NSInvocationHostObject>(this).sig
+}
+
 - (())setTarget:(id)target {
     let old_target = env.objc.borrow::<NSInvocationHostObject>(this).target;
     let arguments_retained = env.objc.borrow::<NSInvocationHostObject>(this).arguments_retained;
