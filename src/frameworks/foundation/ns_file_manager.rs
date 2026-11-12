@@ -10,7 +10,7 @@ use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant}
 use crate::frameworks::foundation::ns_error::{
     NSCocoaErrorDomain, NSFilePathErrorKey, NSFileReadInvalidFileNameError,
     NSFileReadNoSuchFileError, NSFileReadUnknownError, NSFileWriteFileExistsError,
-    NSFileWriteUnknownError,
+    NSFileWriteInvalidFileNameError, NSFileWriteUnknownError,
 };
 use crate::frameworks::foundation::ns_string::get_static_str;
 use crate::fs::{FsError, FsNodeType, GuestPath, GuestPathBuf};
@@ -1002,6 +1002,34 @@ mod tests {
         let destination: id = msg![env; manager destinationOfSymbolicLinkAtPath:ordinary
                                                        error:(MutPtr::<id>::null())];
         assert_eq!(destination, nil);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+    }
+
+    #[test]
+    fn development_255_file_copy_rejects_nil_paths_with_errors() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let manager: id = msg_class![env; NSFileManager defaultManager];
+        let ordinary = ns_string::from_rust_string(env, "/".to_owned());
+        let error_out: MutPtr<id> = env.mem.alloc(guest_size_of::<id>()).cast();
+
+        let copied: bool = msg![env; manager copyItemAtPath:nil
+                                                  toPath:ordinary
+                                                   error:error_out];
+        assert!(!copied);
+        let error = env.mem.read(error_out);
+        let code: NSInteger = msg![env; error code];
+        assert_eq!(code, NSFileReadInvalidFileNameError);
+
+        let copied: bool = msg![env; manager copyItemAtPath:ordinary
+                                                  toPath:nil
+                                                   error:error_out];
+        assert!(!copied);
+        let error = env.mem.read(error_out);
+        let code: NSInteger = msg![env; error code];
+        assert_eq!(code, NSFileWriteInvalidFileNameError);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
     }
 }

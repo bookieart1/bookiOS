@@ -25,6 +25,7 @@ pub const NSFileReadUnknownError: NSInteger = 256;
 pub const NSFileReadInvalidFileNameError: NSInteger = 258;
 pub const NSFileReadInapplicableStringEncodingError: NSInteger = 261;
 pub const NSFileWriteUnknownError: NSInteger = 512;
+pub const NSFileWriteInvalidFileNameError: NSInteger = 514;
 pub const NSFileWriteFileExistsError: NSInteger = 516;
 
 struct ErrorHostObject {
