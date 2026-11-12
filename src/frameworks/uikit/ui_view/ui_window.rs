@@ -15,8 +15,9 @@ use crate::frameworks::core_graphics::cg_affine_transform::CGAffineTransform;
 use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect};
 use crate::frameworks::foundation::ns_string;
 use crate::frameworks::uikit::ui_application::{
+    UIInterfaceOrientation,
     UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight,
-    UIInterfaceOrientationPortraitUpsideDown,
+    UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown,
 };
 use crate::frameworks::uikit::ui_device::{
     UIDeviceOrientationLandscapeLeft, UIDeviceOrientationLandscapeRight,
@@ -43,6 +44,19 @@ pub struct State {
     /// Bounded launch-time evidence for games which create a window but never
     /// produce a visible frame. This is diagnostic only.
     diagnostic_transition_count: u8,
+}
+
+fn choose_initial_controller_orientation(
+    current: UIInterfaceOrientation,
+    supports: [bool; 4],
+) -> Option<UIInterfaceOrientation> {
+    match current {
+        UIInterfaceOrientationPortrait => None,
+        UIInterfaceOrientationPortraitUpsideDown if supports[1] => Some(current),
+        UIInterfaceOrientationLandscapeLeft if supports[2] => Some(current),
+        UIInterfaceOrientationLandscapeRight if supports[3] => Some(current),
+        _ => None,
+    }
 }
 
 fn log_startup_window_transition(
@@ -476,3 +490,19 @@ pub const CONSTANTS: ConstantExports = &[
         HostConstant::Custom(|env| env.mem.alloc_and_write(2000.0f32).cast().cast_const()),
     ),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn development_255_landscape_only_controller_selects_landscape_at_launch() {
+        assert_eq!(
+            choose_initial_controller_orientation(
+                UIInterfaceOrientationPortrait,
+                [false, false, true, true],
+            ),
+            Some(UIInterfaceOrientationLandscapeLeft)
+        );
+    }
+}
