@@ -101,6 +101,14 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 }
 
+- (())setCurrentMode:(id)_mode {
+    // The emulated display exposes exactly one UIScreenMode. UIKit callers
+    // may still write that mode back through the currentMode property (SDL
+    // does this while applying a selected display mode). Accept the write as
+    // an idempotent operation: there is no alternate resolution to select,
+    // and display-mode selection is independent of interface orientation.
+}
+
 - (id)preferredMode {
     // A single-screen, single-mode environment has the same preferred and
     // current mode. Keep object identity stable, as UIKit does for its mode
