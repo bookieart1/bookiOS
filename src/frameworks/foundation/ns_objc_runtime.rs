@@ -88,6 +88,14 @@ fn objc_retainAutoreleasedReturnValue(env: &mut Environment, object: id) -> id {
     retain(env, object)
 }
 
+fn objc_retainAutoreleaseReturnValue(env: &mut Environment, object: id) -> id {
+    // Used when a retained object crosses a +0 return boundary. The retain
+    // keeps it alive through the return and the active pool balances that
+    // claim at the normal autorelease point.
+    let object = retain(env, object);
+    autorelease(env, object)
+}
+
 fn objc_release(env: &mut Environment, object: id) {
     release(env, object)
 }
@@ -104,6 +112,7 @@ fn objc_retain(env: &mut Environment, object: id) -> id {
 mod tests {
     use super::*;
     use crate::frameworks::foundation::ns_string;
+    use crate::{msg, msg_class};
 
     #[test]
     fn class_from_string_returns_known_class_or_nil() {
@@ -148,6 +157,23 @@ mod tests {
             .iter()
             .any(|(name, _)| *name == "_objc_retainAutoreleaseReturnValue"));
     }
+
+    #[test]
+    fn development_255_osmos_retain_autorelease_return_value_balances_at_pool_drain() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let after_pool = env.objc.live_object_count();
+        let object: id = msg_class![env; NSObject new];
+
+        let returned = objc_retainAutoreleaseReturnValue(env, object);
+        assert_eq!(returned, object);
+        assert_eq!(env.objc.get_refcount(object).get(), 2);
+
+        release(env, object);
+        () = msg![env; pool drain];
+        assert_eq!(env.objc.live_object_count(), after_pool - 1);
+    }
 }
 
 pub const FUNCTIONS: FunctionExports = &[
@@ -157,6 +183,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(NSStringFromClass(_)),
     export_c_func!(NSStringFromProtocol(_)),
     export_c_func!(objc_retainAutoreleasedReturnValue(_)),
+    export_c_func!(objc_retainAutoreleaseReturnValue(_)),
     export_c_func!(objc_release(_)),
     export_c_func!(objc_autoreleaseReturnValue(_)),
     export_c_func!(objc_retain(_)),
