@@ -61,9 +61,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     let host_object = Box::new(UIColorHostObject {
         cg_color: nil,
     });
-    let object = env.objc.alloc_object(this, host_object, &mut env.mem);
-    log!("Development 2.55 UIColor producer trace: alloc object={object:?} class={this:?}");
-    object
+    env.objc.alloc_object(this, host_object, &mut env.mem)
 }
 
 + (id)colorWithCGColor:(CGColorRef)cg_color {
@@ -121,19 +119,12 @@ pub const CLASSES: ClassExports = objc_classes! {
 // TODO: more initializers, set methods, more accessors
 
 - (id)initWithCGColor:(CGColorRef)cg_color {
-    let registers = env.cpu.regs();
-    log!(
-        "Development 2.55 UIColor producer trace: initWithCGColor object={this:?} color={cg_color:?} pc={:#x} lr={:#x}",
-        registers[crate::cpu::Cpu::PC],
-        registers[crate::cpu::Cpu::LR],
-    );
     CGColorRetain(env, cg_color);
     env.objc.borrow_mut::<UIColorHostObject>(this).cg_color = cg_color;
     this
 }
 
 - (id)initWithWhite:(CGFloat)w alpha:(CGFloat)a {
-    log!("Development 2.55 UIColor producer trace: initWithWhite object={this:?} white={w} alpha={a}");
     let w = w.clamp(0.0, 1.0);
     let a = a.clamp(0.0, 1.0);
 
@@ -146,7 +137,6 @@ pub const CLASSES: ClassExports = objc_classes! {
             green:(CGFloat)g
              blue:(CGFloat)b
             alpha:(CGFloat)a {
-    log!("Development 2.55 UIColor producer trace: initWithRed object={this:?} red={r} green={g} blue={b} alpha={a}");
     env.objc.borrow_mut::<UIColorHostObject>(this).cg_color = cg_color::from_rgba(env, (r, g, b, a));
     this
 }
@@ -155,7 +145,6 @@ pub const CLASSES: ClassExports = objc_classes! {
         saturation:(CGFloat)s
         brightness:(CGFloat)b
              alpha:(CGFloat)a {
-    log!("Development 2.55 UIColor producer trace: initWithHue object={this:?} hue={h} saturation={s} brightness={b} alpha={a}");
     let h = h.rem_euclid(1.0) * 6.0;
     let s = s.clamp(0.0, 1.0);
     let b = b.clamp(0.0, 1.0);
@@ -270,16 +259,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (CGColorRef)CGColor {
-    let cg_color = env.objc.borrow::<UIColorHostObject>(this).cg_color;
-    if cg_color == nil {
-        let registers = env.cpu.regs();
-        log!(
-            "Development 2.55 UIColor producer trace: CGColor returned null object={this:?} pc={:#x} lr={:#x}",
-            registers[crate::cpu::Cpu::PC],
-            registers[crate::cpu::Cpu::LR],
-        );
-    }
-    cg_color
+    env.objc.borrow::<UIColorHostObject>(this).cg_color
 }
 
 - (())dealloc {
