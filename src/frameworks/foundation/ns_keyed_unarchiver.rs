@@ -481,25 +481,33 @@ pub fn decode_current_data(env: &mut Environment, unarchiver: id, is_mutable: bo
 /// Shortcut for use by `[NSString initWithCoder:]`.
 /// TODO: mutability
 pub fn decode_current_string(env: &mut Environment, unarchiver: id) -> id {
-    let key = get_static_str(env, "NS.bytes");
-    // TODO: avoid copying (twice!)
-    let bytes = get_value_to_decode_for_key(env, unarchiver, key)
-        .unwrap()
-        .as_data()
-        .unwrap()
-        .to_vec();
+    let bytes_key = get_static_str(env, "NS.bytes");
+    if let Some(bytes) = get_value_to_decode_for_key(env, unarchiver, bytes_key)
+        .and_then(Value::as_data)
+        .map(ToOwned::to_owned)
+    {
+        // TODO: avoid copying (twice!)
+        let len: GuestUSize = bytes.len().try_into().unwrap();
+        let guest_bytes: ConstPtr<u8> = env.mem.alloc(len).cast().cast_const();
+        env.mem
+            .bytes_at_mut(guest_bytes.cast_mut(), len)
+            .copy_from_slice(bytes.as_slice());
 
-    let len: GuestUSize = bytes.len().try_into().unwrap();
-    let guest_bytes: ConstPtr<u8> = env.mem.alloc(len).cast().cast_const();
-    env.mem
-        .bytes_at_mut(guest_bytes.cast_mut(), len)
-        .copy_from_slice(bytes.as_slice());
+        let str: id = msg_class![env; NSString alloc];
+        // TODO: use initWithBytesNoCopy: once implemented
+        let res = msg![env; str initWithBytes:guest_bytes length:len encoding:NSUTF8StringEncoding];
+        env.mem.free(guest_bytes.cast().cast_mut());
+        return res;
+    }
 
-    let str: id = msg_class![env; NSString alloc];
-    // TODO: use initWithBytesNoCopy: once implemented
-    let res = msg![env; str initWithBytes:guest_bytes length:len encoding:NSUTF8StringEncoding];
-    env.mem.free(guest_bytes.cast().cast_mut());
-    res
+    // Older keyed UIKit archives encode mutable strings directly under
+    // `NS.string` rather than as UTF-8 bytes.
+    let string_key = get_static_str(env, "NS.string");
+    let string = get_value_to_decode_for_key(env, unarchiver, string_key)
+        .and_then(Value::as_string)
+        .expect("archived NSString has neither NS.bytes nor NS.string")
+        .to_owned();
+    from_rust_string(env, string)
 }
 
 /// Shortcut for use by `[NSNumber initWithCoder:]`.
