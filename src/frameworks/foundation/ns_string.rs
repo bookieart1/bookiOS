@@ -1760,6 +1760,26 @@ pub const CLASSES: ClassExports = objc_classes! {
     success
 }
 
+// NSString's data initializer belongs to the public class-cluster surface so
+// both immutable and mutable concrete strings inherit the same decoding
+// contract. The concrete receiver's initWithBytes:length:encoding: performs
+// the actual storage mutation.
+- (id)initWithData:(id)data // NSData *
+          encoding:(NSStringEncoding)encoding {
+    if data == nil {
+        release(env, this);
+        return nil;
+    }
+    let bytes: ConstVoidPtr = msg![env; data bytes];
+    let bytes: ConstPtr<u8> = bytes.cast();
+    let length: NSUInteger = msg![env; data length];
+    let new = msg![env; this initWithBytes:bytes length:length encoding:encoding];
+    if new != nil {
+        log_dbg!("initWithData:encoding: {}", to_rust_string(env, new));
+    }
+    new
+}
+
 - (f32)floatValue {
     float_value_common(env, this)
 }
@@ -1938,8 +1958,6 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.alloc_object(this, host_object, &mut env.mem)
 }
 
-// TODO: more init methods
-
 // NSCoding implementation
 - (id)initWithCoder:(id)coder {
     let new_str = decode_string_with_coder(env, coder);
@@ -1948,22 +1966,6 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (())encodeWithCoder:(id)coder {
     encode_with_coder_inner(env, this, coder)
-}
-
-- (id)initWithData:(id)data // NSData *
-          encoding:(NSStringEncoding)encoding {
-    if data == nil {
-        release(env, this);
-        return nil;
-    }
-    let bytes: ConstVoidPtr = msg![env; data bytes];
-    let bytes: ConstPtr<u8> = bytes.cast();
-    let length: NSUInteger = msg![env; data length];
-    let new = msg![env; this initWithBytes:bytes length:length encoding:encoding];
-    if new != nil {
-        log_dbg!("initWithData:encoding: {}", to_rust_string(env, new));
-    }
-    new
 }
 
 - (id)initWithFormat:(id)format, // NSString*
@@ -2961,6 +2963,10 @@ mod ns_string_tests {
     fn development_255_mutable_string_initializes_from_data_and_encoding() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        // initWithData:encoding: dispatches to an initializer with a fifth ARM
+        // argument, so provide synthetic guest stack space for that call.
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let mutable: id = msg_class![env; NSMutableString alloc];
         let selector = env.objc.register_host_selector(
             "initWithData:encoding:".to_owned(),
@@ -2981,6 +2987,8 @@ mod ns_string_tests {
 
         release(env, mutable);
         env.mem.free(bytes.cast());
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack.cast());
     }
 
     #[test]
