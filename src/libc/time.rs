@@ -19,6 +19,8 @@ pub struct State {
     /// Temporary static storage for the return value of `gmtime` or
     /// `localtime`. The standard allows calls to either to overwrite it.
     gmtime_tmp: Option<MutPtr<tm>>,
+    /// Static 26-byte C string returned by `ctime`. Each call overwrites it.
+    ctime_tmp: Option<MutPtr<u8>>,
 }
 
 // time.h (C)
@@ -497,6 +499,42 @@ fn localtime(env: &mut Environment, timestamp: ConstPtr<time_t>) -> MutPtr<tm> {
     gmtime(env, timestamp)
 }
 
+fn ctime(env: &mut Environment, timestamp: ConstPtr<time_t>) -> MutPtr<u8> {
+    const WEEKDAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+
+    // ISO C defines ctime as the textual form of localtime, including the
+    // trailing newline. The time_t range used by legacy iOS stays within
+    // four-digit years, so the result occupies the traditional 26-byte
+    // static buffer including its NUL terminator.
+    let local_ptr = localtime(env, timestamp);
+    let local = env.mem.read(local_ptr);
+    let weekday = WEEKDAYS[usize::try_from(local.tm_wday).unwrap()];
+    let month = MONTHS[usize::try_from(local.tm_mon).unwrap()];
+    let mday = local.tm_mday;
+    let hour = local.tm_hour;
+    let minute = local.tm_min;
+    let second = local.tm_sec;
+    let year = local.tm_year + 1900;
+    let text = format!(
+        "{} {} {:>2} {:02}:{:02}:{:02} {:04}\n",
+        weekday, month, mday, hour, minute, second, year
+    );
+    assert_eq!(text.len(), 25);
+
+    let tmp = *env
+        .libc_state
+        .time
+        .ctime_tmp
+        .get_or_insert_with(|| env.mem.alloc(26).cast());
+    let output = env.mem.bytes_at_mut(tmp, 26);
+    output[..25].copy_from_slice(text.as_bytes());
+    output[25] = 0;
+    tmp
+}
+
 fn mktime(env: &mut Environment, tm: MutPtr<tm>) -> time_t {
     // TODO: respect the current timezone setting
     let tm_value = env.mem.read(tm);
@@ -849,6 +887,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(mktime(_)),
     export_c_func!(localtime_r(_, _)),
     export_c_func!(localtime(_)),
+    export_c_func!(ctime(_)),
     export_c_func!(gettimeofday(_, _)),
     export_c_func!(nanosleep(_, _)),
     export_c_func!(strptime(_, _, _)),
@@ -867,6 +906,20 @@ mod tests {
             search_host_dylibs(|dylib| dylib.function_exports, "_ctime").is_some(),
             "ctime must be available to legacy applications"
         );
+    }
+
+    #[test]
+    fn development_255_osmos_ctime_formats_and_reuses_static_storage() {
+        let mut env = Environment::new_fake_for_test();
+        let epoch = env.mem.alloc_and_write(0 as time_t).cast_const();
+        let next_day = env.mem.alloc_and_write(86_400 as time_t).cast_const();
+
+        let first = ctime(&mut env, epoch);
+        assert_eq!(env.mem.cstr_at(first), b"Thu Jan  1 00:00:00 1970\n");
+
+        let second = ctime(&mut env, next_day);
+        assert_eq!(second, first);
+        assert_eq!(env.mem.cstr_at(first), b"Fri Jan  2 00:00:00 1970\n");
     }
 
     #[test]
