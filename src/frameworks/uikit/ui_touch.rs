@@ -28,6 +28,7 @@ pub const UITouchPhaseEnded: UITouchPhase = 3;
 pub struct State {
     pub(super) current_touches: HashMap<FingerId, id>,
     implode_coordinate_events: u8,
+    pzs_coordinate_events: u8,
 }
 
 pub(super) struct UITouchHostObject {
@@ -103,6 +104,44 @@ pub const CLASSES: ClassExports = objc_classes! {
         let converted_y = converted.y;
         log!(
             "Implode bounded touch-coordinate diagnostic: sequence={sequence} touch={this:?} view={that_view:?} target={:?} phase={} timestamp={:.6} screen=({:.3},{:.3}) previous=({:.3},{:.3}) window=({:.3},{:.3}) converted=({:.3},{:.3})",
+            target,
+            phase,
+            timestamp,
+            screen_x,
+            screen_y,
+            previous_x,
+            previous_y,
+            window_x,
+            window_y,
+            converted_x,
+            converted_y
+        );
+    }
+    if env.options.diagnostic_campaign.is_enabled()
+        && env.bundle.bundle_identifier_optional() == Some("com.chilingo.PZS")
+    {
+        let sequence = {
+            let state = &mut env.framework_state.uikit.ui_touch;
+            if state.pzs_coordinate_events >= 64 {
+                return converted;
+            }
+            state.pzs_coordinate_events += 1;
+            state.pzs_coordinate_events
+        };
+        let host = env.objc.borrow::<UITouchHostObject>(this);
+        let target = host.view;
+        let phase = host.phase;
+        let timestamp = host.timestamp;
+        let screen_x = host.location.x;
+        let screen_y = host.location.y;
+        let previous_x = host.previous_location.x;
+        let previous_y = host.previous_location.y;
+        let window_x = location_in_window.x;
+        let window_y = location_in_window.y;
+        let converted_x = converted.x;
+        let converted_y = converted.y;
+        log!(
+            "PZS bounded touch-coordinate diagnostic: sequence={sequence} touch={this:?} view={that_view:?} target={:?} phase={} timestamp={:.6} screen=({:.3},{:.3}) previous=({:.3},{:.3}) window=({:.3},{:.3}) converted=({:.3},{:.3})",
             target,
             phase,
             timestamp,

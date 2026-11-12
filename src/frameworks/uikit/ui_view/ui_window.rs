@@ -16,7 +16,7 @@ use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect};
 use crate::frameworks::foundation::ns_string;
 use crate::frameworks::uikit::ui_application::{
     UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight,
-    UIInterfaceOrientationPortraitUpsideDown,
+    UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown,
 };
 use crate::frameworks::uikit::ui_device::{
     UIDeviceOrientationLandscapeLeft, UIDeviceOrientationLandscapeRight,
@@ -43,6 +43,7 @@ pub struct State {
     /// Bounded launch-time evidence for games which create a window but never
     /// produce a visible frame. This is diagnostic only.
     diagnostic_transition_count: u8,
+    pzs_orientation_logged: bool,
 }
 
 fn log_startup_window_transition(
@@ -305,6 +306,24 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 
     let vc = view_controller;
+    if env.options.diagnostic_campaign.is_enabled()
+        && env.bundle.bundle_identifier_optional() == Some("com.chilingo.PZS")
+        && !env.framework_state.uikit.ui_view.ui_window.pzs_orientation_logged
+    {
+        env.framework_state.uikit.ui_view.ui_window.pzs_orientation_logged = true;
+        let window_frame: CGRect = msg![env; this frame];
+        let view_frame: CGRect = msg![env; view frame];
+        let view_bounds: CGRect = msg![env; view bounds];
+        let view_transform: CGAffineTransform = msg![env; view transform];
+        let portrait: bool = msg![env; vc shouldAutorotateToInterfaceOrientation:UIInterfaceOrientationPortrait];
+        let portrait_upside_down: bool = msg![env; vc shouldAutorotateToInterfaceOrientation:UIInterfaceOrientationPortraitUpsideDown];
+        let landscape_left: bool = msg![env; vc shouldAutorotateToInterfaceOrientation:UIInterfaceOrientationLandscapeLeft];
+        let landscape_right: bool = msg![env; vc shouldAutorotateToInterfaceOrientation:UIInterfaceOrientationLandscapeRight];
+        log!(
+            "PZS bounded orientation diagnostic: window={this:?} view={view:?} controller={vc:?} window-frame={window_frame:?} view-frame={view_frame:?} view-bounds={view_bounds:?} transform={view_transform:?} accepts=[portrait:{portrait},portrait-upside-down:{portrait_upside_down},landscape-left:{landscape_left},landscape-right:{landscape_right}] current-rotation={:?}",
+            env.window().current_rotation()
+        );
+    }
     () = msg![env; vc viewWillAppear:false];
     () = msg_super![env; this addSubview:view];
     () = msg![env; vc viewDidAppear:false];
