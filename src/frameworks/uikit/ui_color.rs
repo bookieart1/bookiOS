@@ -270,7 +270,16 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (CGColorRef)CGColor {
-    env.objc.borrow::<UIColorHostObject>(this).cg_color
+    let cg_color = env.objc.borrow::<UIColorHostObject>(this).cg_color;
+    if cg_color == nil {
+        let registers = env.cpu.regs();
+        log!(
+            "Development 2.55 UIColor producer trace: CGColor returned null object={this:?} pc={:#x} lr={:#x}",
+            registers[crate::cpu::Cpu::PC],
+            registers[crate::cpu::Cpu::LR],
+        );
+    }
+    cg_color
 }
 
 - (())dealloc {
