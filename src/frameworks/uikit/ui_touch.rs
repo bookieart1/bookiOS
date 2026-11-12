@@ -28,6 +28,7 @@ pub const UITouchPhaseEnded: UITouchPhase = 3;
 pub struct State {
     pub(super) current_touches: HashMap<FingerId, id>,
     implode_coordinate_events: u8,
+    pzs_coordinate_events: u8,
 }
 
 pub(super) struct UITouchHostObject {
@@ -114,6 +115,30 @@ pub const CLASSES: ClassExports = objc_classes! {
             window_y,
             converted_x,
             converted_y
+        );
+    }
+    if env.options.diagnostic_campaign.is_enabled()
+        && env.bundle.bundle_identifier_optional() == Some("com.chilingo.PZS")
+    {
+        let sequence = {
+            let state = &mut env.framework_state.uikit.ui_touch;
+            if state.pzs_coordinate_events >= 64 {
+                return converted;
+            }
+            state.pzs_coordinate_events += 1;
+            state.pzs_coordinate_events
+        };
+        let host = env.objc.borrow::<UITouchHostObject>(this);
+        log!(
+            "PZS post-orientation touch diagnostic: sequence={sequence} touch={this:?} requested-view={that_view:?} target={:?} phase={} screen=({:.3},{:.3}) window=({:.3},{:.3}) converted=({:.3},{:.3})",
+            host.view,
+            host.phase,
+            host.location.x,
+            host.location.y,
+            location_in_window.x,
+            location_in_window.y,
+            converted.x,
+            converted.y,
         );
     }
     converted
