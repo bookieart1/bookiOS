@@ -982,12 +982,16 @@ mod tests {
     #[test]
     fn development_255_subpaths_keep_enumerated_strings_alive_after_pool_drain() {
         let mut env = Environment::new_fake_for_test_with_thread();
+        let host_root = std::env::temp_dir().join(format!(
+            "idared-subpaths-ownership-test-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&host_root);
+        std::fs::create_dir_all(&host_root).unwrap();
+        *env.fs = crate::fs::Fs::new_fake_fs_with_writable_host_root(&host_root);
         let env = &mut env;
-        let directory = env
-            .fs
-            .home_directory()
-            .join("tmp")
-            .join("subpaths-ownership");
+        let directory = GuestPathBuf::from("/subpaths-ownership".to_owned());
         env.fs.create_dir_all(&directory).unwrap();
         env.fs.write(&directory.join("entry.txt"), b"fixture").unwrap();
 
