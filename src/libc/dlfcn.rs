@@ -247,8 +247,24 @@ fn _dyld_register_func_for_add_image(env: &mut Environment, callback: GuestFunct
     // Registration is synchronous: dyld first reports every image already in
     // the process, in load order. Collect the headers before entering guest
     // code so the callback can safely inspect or patch the images reentrantly.
-    for (header, slide) in register_add_image_callback(env, callback) {
+    let existing_images = register_add_image_callback(env, callback);
+    log!(
+        "bounded dyld add-image diagnostic: callback={:?} existing-images={}",
+        callback,
+        existing_images.len()
+    );
+    for (header, slide) in existing_images {
+        log!(
+            "bounded dyld add-image diagnostic: invoking callback={:?} header={:?} slide={}",
+            callback,
+            header,
+            slide
+        );
         () = callback.call_from_host(env, (header, slide));
+        log!(
+            "bounded dyld add-image diagnostic: callback returned header={:?}",
+            header
+        );
     }
 }
 
