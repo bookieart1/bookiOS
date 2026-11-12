@@ -637,6 +637,29 @@ includingPropertiesForKeys:(id)_keys // NSArray*, only prefetching
     msg![env; path UTF8String]
 }
 
+- (id)destinationOfSymbolicLinkAtPath:(id)path // NSString*
+                                error:(MutPtr<id>)error { // NSError**
+    if !error.is_null() {
+        env.mem.write(error, nil);
+    }
+
+    // The guest filesystem currently resolves host links while constructing
+    // its node tree and cannot contain a symbolic-link node. Preserve the
+    // historical Cocoa result for a path that is not a symbolic link: nil and
+    // an NSError, rather than treating the resolved file as its own target or
+    // terminating on the selector. Once link nodes are represented, the
+    // success case can return their stored destination without changing this
+    // failure contract.
+    let path_string = ns_string::to_rust_string(env, path);
+    let code = if env.fs.exists(GuestPath::new(path_string.as_ref())) {
+        NSFileReadUnknownError
+    } else {
+        NSFileReadNoSuchFileError
+    };
+    populate_copy_error(env, error, path, code);
+    nil
+}
+
 - (id)fileAttributesAtPath:(id)path // NSString *
               traverseLink:(bool)traverse {
     // TODO: other attributes
@@ -929,6 +952,8 @@ mod tests {
     fn development_255_symbolic_link_destination_reports_bounded_errors_for_unrepresented_links() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let manager: id = msg_class![env; NSFileManager defaultManager];
         let error_out: MutPtr<id> = env.mem.alloc(guest_size_of::<id>()).cast();
 
@@ -942,9 +967,7 @@ mod tests {
         let code: NSInteger = msg![env; error code];
         assert_eq!(code, NSFileReadNoSuchFileError);
 
-        let home = env.fs.home_directory().join("Documents").join("ordinary-file");
-        env.fs.write(&home, b"not a link").unwrap();
-        let ordinary = ns_string::from_rust_string(env, home.as_str().to_owned());
+        let ordinary = ns_string::from_rust_string(env, "/".to_owned());
         env.mem.write(error_out, id::from_bits(0x1234));
         let destination: id = msg![env; manager destinationOfSymbolicLinkAtPath:ordinary
                                                        error:error_out];
@@ -958,5 +981,6 @@ mod tests {
         let destination: id = msg![env; manager destinationOfSymbolicLinkAtPath:ordinary
                                                        error:(MutPtr::<id>::null())];
         assert_eq!(destination, nil);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
     }
 }
