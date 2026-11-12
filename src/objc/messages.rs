@@ -344,16 +344,6 @@ fn objc_msgSend_inner(
     }
 
     let orig_class = super2.unwrap_or_else(|| ObjC::read_isa(receiver, &env.mem));
-    if env.objc.try_get_class_name(orig_class) == Some("NSFileManager")
-        && env.cpu.regs()[2] == 0
-    {
-        log!(
-            "bounded Ragdoll NSFileManager nil-argument diagnostic: selector=\"{}\" pc={:#010x} lr={:#010x}",
-            selector.as_str(&env.mem),
-            env.cpu.regs()[15],
-            env.cpu.regs()[14],
-        );
-    }
     if orig_class == nil {
         let selector_name = selector.as_str(&env.mem).to_owned();
         env.diagnostic_dispatch_failure(receiver, orig_class, &selector_name);
