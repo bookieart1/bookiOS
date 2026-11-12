@@ -1040,7 +1040,7 @@ mod tests {
         assert_eq!(SecItemAdd(&mut env, nil, MutPtr::null()), ERR_SEC_PARAM);
         let dictionary = empty_dictionary(&mut env);
         let class_key = k(&mut env, K_SEC_CLASS);
-        let unsupported = ns_string::from_rust_string(&mut env, "genp".to_owned());
+        let unsupported = ns_string::from_rust_string(&mut env, "cert".to_owned());
         set_object(&mut env, dictionary, unsupported, class_key);
         assert_eq!(
             SecItemAdd(&mut env, dictionary, MutPtr::null()),
