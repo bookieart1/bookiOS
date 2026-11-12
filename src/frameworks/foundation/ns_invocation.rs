@@ -59,6 +59,25 @@ mod tests {
         env.cpu.regs_mut()[Cpu::SP] = 0;
         env.mem.free(stack);
     }
+
+    #[test]
+    fn development_255_riddim_invocation_method_signature_round_trips() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let target: id = msg_class![env; NSObject new];
+        let description = env
+            .objc
+            .register_host_selector("description".to_owned(), &mut env.mem);
+        let signature: id = msg![env; target methodSignatureForSelector:description];
+        let invocation: id = msg_class![env; NSInvocation invocationWithMethodSignature:signature];
+
+        let returned: id = msg![env; invocation methodSignature];
+        assert_eq!(returned, signature);
+
+        release(env, target);
+        release(env, pool);
+    }
 }
 
 struct NSInvocationHostObject {
