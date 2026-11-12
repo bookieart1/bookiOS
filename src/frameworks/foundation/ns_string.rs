@@ -2958,6 +2958,32 @@ mod ns_string_tests {
     }
 
     #[test]
+    fn development_255_mutable_string_initializes_from_data_and_encoding() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let mutable: id = msg_class![env; NSMutableString alloc];
+        let selector = env.objc.register_host_selector(
+            "initWithData:encoding:".to_owned(),
+            &mut env.mem,
+        );
+        let responds: bool = msg![env; mutable respondsToSelector:selector];
+        assert!(responds);
+
+        let bytes = env.mem.alloc(6);
+        env.mem
+            .bytes_at_mut(bytes.cast(), 6)
+            .copy_from_slice(b"Potty!");
+        let bytes_const = bytes.cast_const();
+        let data: id = msg_class![env; NSData dataWithBytes:bytes_const length:6u32];
+        let mutable: id = msg![env; mutable initWithData:data encoding:NSUTF8StringEncoding];
+        assert_ne!(mutable, nil);
+        assert_eq!(to_rust_string(env, mutable), "Potty!");
+
+        release(env, mutable);
+        env.mem.free(bytes.cast());
+    }
+
+    #[test]
     fn strings_file_parser_handles_comments_escapes_and_bare_values() {
         let parsed = StringsFileParser::new(
             r#"/* header */ "hello" = "line\nvalue"; // comment
