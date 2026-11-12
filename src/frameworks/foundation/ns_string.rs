@@ -2093,6 +2093,11 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (id)initWithContentsOfFile:(id)path // NSString*
                     encoding:(NSStringEncoding)encoding
                        error:(MutPtr<id>)error { // NSError**
+    if path == nil {
+        populate_file_read_error(env, path, error);
+        release(env, this);
+        return nil;
+    }
     // TODO: avoid copy?
     let path_string = to_rust_string(env, path);
     let Ok(bytes) = env.fs.read(GuestPath::new(&path_string)) else {
