@@ -40,7 +40,6 @@ pub struct State {
     /// Bounded launch-time evidence for games which create a window but never
     /// produce a visible frame. This is diagnostic only.
     diagnostic_transition_count: u8,
-    pzs_post_orientation_logged: bool,
 }
 
 fn choose_initial_controller_orientation(
@@ -390,31 +389,6 @@ pub const CLASSES: ClassExports = objc_classes! {
 
             let view_frame: CGRect = msg![env; view frame];
             log_dbg!("New view frame after re-applying old view frame: {view_frame:?}");
-        }
-
-        if env.options.diagnostic_campaign.is_enabled()
-            && env.bundle.bundle_identifier_optional() == Some("com.chilingo.PZS")
-            && !env
-                .framework_state
-                .uikit
-                .ui_view
-                .ui_window
-                .pzs_post_orientation_logged
-        {
-            env.framework_state
-                .uikit
-                .ui_view
-                .ui_window
-                .pzs_post_orientation_logged = true;
-            let window_frame: CGRect = msg![env; this frame];
-            let window_bounds: CGRect = msg![env; this bounds];
-            let view_frame: CGRect = msg![env; view frame];
-            let view_bounds: CGRect = msg![env; view bounds];
-            let view_transform: CGAffineTransform = msg![env; view transform];
-            log!(
-                "PZS post-orientation geometry diagnostic: selected={} window-frame={window_frame:?} window-bounds={window_bounds:?} view-frame={view_frame:?} view-bounds={view_bounds:?} transform={view_transform:?}",
-                orientation,
-            );
         }
     }
 }
