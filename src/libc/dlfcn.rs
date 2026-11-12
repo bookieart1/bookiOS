@@ -5,6 +5,7 @@
  */
 //! `dlfcn.h` (`dlopen()` and friends)
 
+use crate::abi::{CallFromHost, GuestFunction};
 use crate::cpu::Cpu;
 use crate::dyld::{export_c_func, FunctionExports};
 use crate::mem::{ConstPtr, ConstVoidPtr, MutPtr, MutVoidPtr, Ptr, SafeRead};
@@ -18,6 +19,10 @@ pub struct State {
     /// C strings returned by `dladdr()`, which the caller doesn't free, so
     /// that each one is only allocated once.
     dladdr_strings: HashMap<String, ConstPtr<u8>>,
+    /// Callbacks registered through `__dyld_register_func_for_add_image`.
+    /// Dynamic guest loading is not implemented yet, but retaining these
+    /// registrations preserves the contract for that future path.
+    add_image_callbacks: Vec<GuestFunction>,
 }
 
 #[allow(non_camel_case_types)]
@@ -222,6 +227,31 @@ fn _dyld_get_image_vmaddr_slide(_env: &mut Environment, _image_index: u32) -> i3
     0
 }
 
+fn register_add_image_callback(
+    env: &mut Environment,
+    callback: GuestFunction,
+) -> Vec<(ConstVoidPtr, i32)> {
+    assert!(!callback.to_ptr().is_null());
+
+    let existing_images = env
+        .bins
+        .iter()
+        .filter_map(|bin| bin.text_segment_base)
+        .map(|header| (Ptr::from_bits(header), 0i32))
+        .collect();
+    env.libc_state.dlfcn.add_image_callbacks.push(callback);
+    existing_images
+}
+
+fn __dyld_register_func_for_add_image(env: &mut Environment, callback: GuestFunction) {
+    // Registration is synchronous: dyld first reports every image already in
+    // the process, in load order. Collect the headers before entering guest
+    // code so the callback can safely inspect or patch the images reentrantly.
+    for (header, slide) in register_add_image_callback(env, callback) {
+        () = callback.call_from_host(env, (header, slide));
+    }
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(dlopen(_, _)),
     export_c_func!(dlsym(_, _)),
@@ -231,6 +261,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(_dyld_image_count()),
     export_c_func!(_dyld_get_image_name(_)),
     export_c_func!(_dyld_get_image_vmaddr_slide(_)),
+    export_c_func!(__dyld_register_func_for_add_image(_)),
 ];
 
 #[cfg(test)]
@@ -244,5 +275,28 @@ mod tests {
                 .iter()
                 .any(|(name, _)| *name == "___dyld_register_func_for_add_image")
         );
+    }
+
+    #[test]
+    fn development_255_dyld_add_image_registration_reports_existing_images() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        env.bins.push(crate::mach_o::MachO {
+            name: "fixture".to_owned(),
+            dynamic_libraries: Vec::new(),
+            sections: Vec::new(),
+            exported_symbols: HashMap::new(),
+            external_relocations: Vec::new(),
+            entry_point_pc: None,
+            text_segment_base: Some(0x1234_5000),
+            last_segment_end: 0x1234_6000,
+        });
+
+        let callback = GuestFunction::from_addr_with_thumb_bit(0x2000);
+        let notifications = register_add_image_callback(&mut env, callback);
+
+        assert_eq!(notifications.len(), 1);
+        assert_eq!(notifications[0].0.to_bits(), 0x1234_5000);
+        assert_eq!(notifications[0].1, 0);
+        assert_eq!(env.libc_state.dlfcn.add_image_callbacks.len(), 1);
     }
 }
