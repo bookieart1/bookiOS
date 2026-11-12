@@ -440,4 +440,28 @@ mod tests {
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);
     }
+
+    #[test]
+    fn development_255_send_actions_for_control_events_dispatches_matching_actions() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+
+        let control: id = msg_class![env; UIControl new];
+        let action = env
+            .objc
+            .register_host_selector("setSelected:".to_owned(), &mut env.mem);
+        () = msg![env; control addTarget:control
+                            action:action
+                  forControlEvents:UIControlEventTouchUpInside];
+        assert!(!msg![env; control isSelected]);
+
+        () = msg![env; control sendActionsForControlEvents:UIControlEventTouchUpInside];
+        assert!(msg![env; control isSelected]);
+
+        release(env, control);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
 }
