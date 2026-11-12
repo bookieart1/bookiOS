@@ -129,16 +129,22 @@ pub const CLASSES: ClassExports = objc_classes! {
             state.pzs_coordinate_events
         };
         let host = env.objc.borrow::<UITouchHostObject>(this);
+        let screen_x = host.location.x;
+        let screen_y = host.location.y;
+        let window_x = location_in_window.x;
+        let window_y = location_in_window.y;
+        let converted_x = converted.x;
+        let converted_y = converted.y;
         log!(
             "PZS post-orientation touch diagnostic: sequence={sequence} touch={this:?} requested-view={that_view:?} target={:?} phase={} screen=({:.3},{:.3}) window=({:.3},{:.3}) converted=({:.3},{:.3})",
             host.view,
             host.phase,
-            host.location.x,
-            host.location.y,
-            location_in_window.x,
-            location_in_window.y,
-            converted.x,
-            converted.y,
+            screen_x,
+            screen_y,
+            window_x,
+            window_y,
+            converted_x,
+            converted_y,
         );
     }
     converted
