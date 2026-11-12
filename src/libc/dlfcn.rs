@@ -273,7 +273,7 @@ mod tests {
         assert!(
             FUNCTIONS
                 .iter()
-                .any(|(name, _)| *name == "___dyld_register_func_for_add_image")
+                .any(|(name, _)| *name == "__dyld_register_func_for_add_image")
         );
     }
 
