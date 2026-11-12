@@ -131,3 +131,23 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+#[cfg(test)]
+mod development_255_tests {
+    use super::*;
+
+    #[test]
+    fn development_255_single_screen_preferred_mode_matches_current_mode() {
+        let mut env = crate::Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let screen: id = msg_class![env; UIScreen mainScreen];
+        let current: id = msg![env; screen currentMode];
+        let preferred: id = msg![env; screen preferredMode];
+        let available: id = msg![env; screen availableModes];
+        let count: u32 = msg![env; available count];
+        let first: id = msg![env; available objectAtIndex:0u32];
+        assert_eq!(preferred, current);
+        assert_eq!(count, 1);
+        assert_eq!(first, current);
+    }
+}
