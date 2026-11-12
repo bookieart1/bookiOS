@@ -398,6 +398,20 @@ mod dev_239_tests {
     use crate::objc::release;
 
     #[test]
+    fn development_255_arc_autorelease_pool_entry_points_are_exported() {
+        assert!(
+            FUNCTIONS
+                .iter()
+                .any(|(name, _)| *name == "_objc_autoreleasePoolPush")
+        );
+        assert!(
+            FUNCTIONS
+                .iter()
+                .any(|(name, _)| *name == "_objc_autoreleasePoolPop")
+        );
+    }
+
+    #[test]
     fn dev_239_class_is_meta_class_distinguishes_class_objects_and_nil() {
         let mut env = Environment::new_fake_for_test();
         let class = env.objc.get_known_class("NSObject", &mut env.mem);
