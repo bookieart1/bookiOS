@@ -21,7 +21,7 @@ use crate::objc::{
     autorelease, id, msg, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject,
     NSZonePtr, SEL,
 };
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::events::{BytesCData, BytesStart, Event};
 use quick_xml::reader::Reader;
 
 struct NSXMLParserHostObject {
@@ -39,6 +39,10 @@ struct NSXMLParserHostObject {
     parser_error: id,
 }
 impl HostObject for NSXMLParserHostObject {}
+
+fn cdata_payload(_event: BytesCData<'_>) -> Vec<u8> {
+    Vec::new()
+}
 
 pub const CLASSES: ClassExports = objc_classes! {
 
@@ -396,6 +400,21 @@ fn build_attributes_dict(env: &mut Environment, e: BytesStart) -> id {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn development_255_cdata_delegate_payload_preserves_raw_bytes() {
+        let mut reader = Reader::from_str("<root><![CDATA[Potty <&> Racers]]></root>");
+        loop {
+            match reader.read_event().unwrap() {
+                Event::CData(event) => {
+                    assert_eq!(cdata_payload(event), b"Potty <&> Racers");
+                    break;
+                }
+                Event::Eof => panic!("CDATA event was not produced"),
+                _ => {}
+            }
+        }
+    }
 
     #[test]
     fn namespace_configuration_is_stable_per_parser() {
