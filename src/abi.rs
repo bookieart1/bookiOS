@@ -433,6 +433,11 @@ impl DotDotDot {
     pub fn start(&self) -> VaList {
         self.0
     }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(reg_offset: usize, stack_pointer: ConstVoidPtr) -> Self {
+        Self(VaList::for_test(reg_offset, stack_pointer))
+    }
 }
 
 /// Calling convention translation for a variable arguments list (like C

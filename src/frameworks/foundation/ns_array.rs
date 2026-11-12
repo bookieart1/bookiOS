@@ -1378,7 +1378,27 @@ fn init_with_objects_inner(env: &mut Environment, arr: id, first_obj: id, args: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cpu::Cpu;
     use crate::frameworks::foundation::ns_string::to_rust_string;
+    use crate::mem::ConstVoidPtr;
+
+    #[test]
+    fn development_255_init_with_objects_stops_when_first_object_is_nil() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let array: id = msg_class![env; NSArray alloc];
+
+        // A nil first object terminates the Objective-C varargs list. The next
+        // register is deliberately not an object and must never be inspected.
+        env.cpu.regs_mut()[3] = 0x0003_0144;
+        let stack_pointer = ConstVoidPtr::from_bits(env.cpu.regs()[Cpu::SP]);
+        let args = DotDotDot::for_test(3, stack_pointer);
+        init_with_objects_inner(env, array, nil, args);
+
+        let count: NSUInteger = msg![env; array count];
+        assert_eq!(count, 0);
+        release(env, array);
+    }
 
     #[test]
     fn development_255_array_subclass_allocation_preserves_requested_identity() {
