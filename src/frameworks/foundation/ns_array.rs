@@ -170,22 +170,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, array)
 }
 + (id)arrayWithObjects:(id)first_obj, ...args {
-    let objects = if first_obj == nil {
-        vec![]
-    } else {
-        retain(env, first_obj);
-        let mut objects = vec![first_obj];
-        let mut varargs = args.start();
-        loop {
-            let next_arg: id = varargs.next(env);
-            if next_arg.is_null() {
-                break;
-            }
-            retain(env, next_arg);
-            objects.push(next_arg);
-        }
-        objects
-    };
+    let objects = collect_nil_terminated_objects(env, first_obj, args);
     let array = from_vec(env, objects);
     autorelease(env, array)
 }
@@ -556,17 +541,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 + (id)arrayWithObjects:(id)firstObj, ...args {
-    retain(env, firstObj);
-    let mut objects = vec![firstObj];
-    let mut varargs = args.start();
-    loop {
-        let next_arg: id = varargs.next(env);
-        if next_arg.is_null() {
-            break;
-        }
-        retain(env, next_arg);
-        objects.push(next_arg);
-    }
+    let objects = collect_nil_terminated_objects(env, firstObj, args);
     let array = mutable_from_vec(env, objects);
     autorelease(env, array)
 }
@@ -1361,6 +1336,18 @@ fn encode_with_coder_inner(env: &mut Environment, arr: id, coder: id) {
 
 /// Helper for initWithObjects.
 fn init_with_objects_inner(env: &mut Environment, arr: id, first_obj: id, args: DotDotDot) {
+    let objects = collect_nil_terminated_objects(env, first_obj, args);
+    env.objc.borrow_mut::<ArrayHostObject>(arr).array = objects;
+}
+
+fn collect_nil_terminated_objects(
+    env: &mut Environment,
+    first_obj: id,
+    args: DotDotDot,
+) -> Vec<id> {
+    if first_obj.is_null() {
+        return Vec::new();
+    }
     retain(env, first_obj);
     let mut objects = vec![first_obj];
     let mut varargs = args.start();
@@ -1372,7 +1359,7 @@ fn init_with_objects_inner(env: &mut Environment, arr: id, first_obj: id, args: 
         retain(env, next_arg);
         objects.push(next_arg);
     }
-    env.objc.borrow_mut::<ArrayHostObject>(arr).array = objects;
+    objects
 }
 
 #[cfg(test)]
