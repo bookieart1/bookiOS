@@ -101,6 +101,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 }
 
+- (id)preferredMode {
+    // A single-screen, single-mode environment has the same preferred and
+    // current mode. Keep object identity stable, as UIKit does for its mode
+    // objects, instead of fabricating an independent display description.
+    msg![env; this currentMode]
+}
+
 - (id)availableModes {
     let mode: id = msg![env; this currentMode];
     msg_class![env; NSArray arrayWithObject:mode]
