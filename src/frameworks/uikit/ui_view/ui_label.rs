@@ -41,10 +41,14 @@ mod development_255_tests {
     fn development_255_label_init_supplies_historical_text_color() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
         let label: id = msg_class![env; UILabel new];
         let color: id = msg![env; label textColor];
         assert_ne!(color, nil);
         assert_eq!(ui_color::get_rgba(&env.objc, color), (0.0, 0.0, 0.0, 1.0));
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
     }
 }
 use crate::frameworks::uikit::ui_graphics::UIGraphicsGetCurrentContext;
