@@ -593,6 +593,25 @@ includingPropertiesForKeys:(id)_keys // NSArray*, only prefetching
     if !error.is_null() {
         env.mem.write(error, nil);
     }
+    if src == nil || dst == nil {
+        let code = if src == nil {
+            NSFileReadInvalidFileNameError
+        } else {
+            NSFileWriteInvalidFileNameError
+        };
+        if !error.is_null() {
+            let domain = get_static_str(env, NSCocoaErrorDomain);
+            let file_error: id = msg_class![env; NSError errorWithDomain:domain
+                                                             code:code
+                                                         userInfo:nil];
+            env.mem.write(error, file_error);
+        }
+        env.diagnostic_campaign_event(
+            "file-copy", "invalid-nil-path manager,source,destination,error-code",
+            [this.to_bits(), src.to_bits(), dst.to_bits(), code as u32, 0, 0, 0, 0]
+        );
+        return false;
+    }
     let src_object = src;
     let dst_object = dst;
     let src = ns_string::to_rust_string(env, src_object);
