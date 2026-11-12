@@ -320,6 +320,12 @@ forControlEvents:(UIControlEvents)events {
     env.objc.borrow_mut::<UIControlHostObject>(this).action_targets.push((target, action, events));
 }
 
+- (())sendActionsForControlEvents:(UIControlEvents)events {
+    // Programmatic action dispatch has no originating UIEvent. Deliver every
+    // registered target whose event mask intersects the requested mask.
+    send_actions(env, this, nil, events);
+}
+
 - (())sendAction:(SEL)action
               to:(id)target
         forEvent:(id)event { // UIEvent*
@@ -448,19 +454,24 @@ mod tests {
         let stack = env.mem.alloc(0x1000);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
 
+        let parent: id = msg_class![env; UIView new];
         let control: id = msg_class![env; UIControl new];
+        () = msg![env; parent addSubview:control];
         let action = env
             .objc
-            .register_host_selector("setSelected:".to_owned(), &mut env.mem);
+            .register_host_selector("removeFromSuperview".to_owned(), &mut env.mem);
         () = msg![env; control addTarget:control
                             action:action
                   forControlEvents:UIControlEventTouchUpInside];
-        assert!(!msg![env; control isSelected]);
+        let superview: id = msg![env; control superview];
+        assert_eq!(superview, parent);
 
         () = msg![env; control sendActionsForControlEvents:UIControlEventTouchUpInside];
-        assert!(msg![env; control isSelected]);
+        let superview: id = msg![env; control superview];
+        assert_eq!(superview, nil);
 
         release(env, control);
+        release(env, parent);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);
     }
