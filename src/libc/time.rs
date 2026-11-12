@@ -860,6 +860,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn development_255_osmos_ctime_is_exported() {
+        use crate::dyld::search_host_dylibs;
+
+        assert!(
+            search_host_dylibs(|dylib| dylib.function_exports, "_ctime").is_some(),
+            "ctime must be available to legacy applications"
+        );
+    }
+
+    #[test]
     fn development_255_real_racing_timezone_globals_are_guest_values() {
         use crate::dyld::{search_host_dylibs, HostConstant};
 
