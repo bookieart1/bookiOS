@@ -288,6 +288,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frameworks::foundation::NSUInteger;
 
     #[test]
     fn begins_from_current_state_is_scoped_to_the_current_transaction() {
@@ -313,6 +314,31 @@ mod tests {
             .unwrap()
             .begins_from_current_state());
         ThreadLocalState::pop_explicit_transaction(&mut env).commit(&mut env);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
+
+    #[test]
+    fn development_255_transaction_owns_default_timing_function() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack_size = 0x1000;
+        let stack = env.mem.alloc(stack_size);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + stack_size;
+
+        let name = get_static_str(env, kCAMediaTimingFunctionDefault);
+        let timing_function: id =
+            msg_class![env; CAMediaTimingFunction functionWithName:name];
+        let before: NSUInteger = msg![env; timing_function retainCount];
+
+        let transaction = Transaction::new(env);
+        let during: NSUInteger = msg![env; timing_function retainCount];
+        assert_eq!(during, before + 1);
+
+        transaction.commit(env);
+        let after: NSUInteger = msg![env; timing_function retainCount];
+        assert_eq!(after, before);
+
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);
     }
