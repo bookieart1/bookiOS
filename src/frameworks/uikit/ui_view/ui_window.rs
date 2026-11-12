@@ -516,4 +516,26 @@ mod tests {
             Some(UIInterfaceOrientationLandscapeLeft)
         );
     }
+
+    #[test]
+    fn development_255_portrait_controller_keeps_portrait_at_launch() {
+        assert_eq!(
+            choose_initial_controller_orientation(
+                UIInterfaceOrientationPortrait,
+                [true, false, false, false],
+            ),
+            Some(UIInterfaceOrientationPortrait)
+        );
+    }
+
+    #[test]
+    fn development_255_current_accepted_landscape_orientation_is_preserved() {
+        assert_eq!(
+            choose_initial_controller_orientation(
+                UIInterfaceOrientationLandscapeRight,
+                [false, false, true, false],
+            ),
+            Some(UIInterfaceOrientationLandscapeRight)
+        );
+    }
 }
