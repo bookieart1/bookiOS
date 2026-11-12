@@ -291,15 +291,24 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     let info_name = ns_string::get_static_str(env, "Info.plist");
     let info_path: id = msg![env; path stringByAppendingPathComponent:info_name];
-    let info: id = msg_class![env; NSDictionary dictionaryWithContentsOfFile:info_path];
+    let mut info: id = msg_class![env; NSDictionary dictionaryWithContentsOfFile:info_path];
     if info == nil {
+        let path_string = ns_string::to_rust_string(env, path);
+        if !env.fs.is_dir(GuestPath::new(path_string.as_ref())) {
+            log!(
+                "Warning: [(NSBundle*) {:?} initWithPath:{:?}] path is not an accessible bundle directory",
+                this,
+                path_string,
+            );
+            release(env, this);
+            return nil;
+        }
         log!(
-            "Warning: [(NSBundle*) {:?} initWithPath:{:?}] could not find a valid Info.plist",
+            "[(NSBundle*) {:?} initWithPath:{:?}] using an empty information dictionary",
             this,
-            ns_string::to_rust_string(env, path)
+            path_string,
         );
-        release(env, this);
-        return nil;
+        info = msg_class![env; NSDictionary dictionary];
     }
 
     let identifier_key = ns_string::get_static_str(env, "CFBundleIdentifier");
@@ -396,9 +405,20 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)resourcePath {
-    // This seems to be the same as the bundle path. The iPhone OS bundle
-    // structure is a lot flatter than the macOS one.
-    let path: id = msg![env; this bundlePath];
+    let bundle_path: id = msg![env; this bundlePath];
+    let bundle_path_string = ns_string::to_rust_string(env, bundle_path);
+    let bundle_guest_path = GuestPath::new(bundle_path_string.as_ref());
+    let contents_resources = bundle_guest_path.join("Contents").join("Resources");
+    let root = bundle_resource_root_for_layout(
+        bundle_guest_path,
+        env.fs.is_dir(&contents_resources),
+    );
+    let path = if root.as_str() == bundle_guest_path.as_str() {
+        bundle_path
+    } else {
+        let path = ns_string::from_rust_string(env, root.as_str().to_owned());
+        autorelease(env, path)
+    };
     record_bundle_path_return(env, this, "resourcePath", path)
 }
 - (id)resourceURL {
@@ -837,9 +857,13 @@ fn path_for_device_resource_helper(
 
 fn bundle_resource_root_for_layout(
     bundle_path: &GuestPath,
-    _has_contents_resources: bool,
+    has_contents_resources: bool,
 ) -> GuestPathBuf {
-    bundle_path.to_owned()
+    if has_contents_resources {
+        bundle_path.join("Contents").join("Resources")
+    } else {
+        bundle_path.to_owned()
+    }
 }
 
 fn path_for_resource_helper(
