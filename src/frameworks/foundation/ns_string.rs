@@ -2933,6 +2933,19 @@ mod ns_string_tests {
     }
 
     #[test]
+    fn development_255_mutable_string_exposes_coder_initializer() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let original = mutable_from_rust_string(env, "Pipe".to_owned());
+        let selector = env
+            .objc
+            .register_host_selector("initWithCoder:".to_owned(), &mut env.mem);
+        let responds: bool = msg![env; original respondsToSelector:selector];
+        assert!(responds);
+        release(env, original);
+    }
+
+    #[test]
     fn strings_file_parser_handles_comments_escapes_and_bare_values() {
         let parsed = StringsFileParser::new(
             r#"/* header */ "hello" = "line\nvalue"; // comment
