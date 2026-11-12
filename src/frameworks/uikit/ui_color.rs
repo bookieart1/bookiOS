@@ -121,7 +121,12 @@ pub const CLASSES: ClassExports = objc_classes! {
 // TODO: more initializers, set methods, more accessors
 
 - (id)initWithCGColor:(CGColorRef)cg_color {
-    log!("Development 2.55 UIColor producer trace: initWithCGColor object={this:?} color={cg_color:?}");
+    let registers = env.cpu.regs();
+    log!(
+        "Development 2.55 UIColor producer trace: initWithCGColor object={this:?} color={cg_color:?} pc={:#x} lr={:#x}",
+        registers[crate::cpu::Cpu::PC],
+        registers[crate::cpu::Cpu::LR],
+    );
     CGColorRetain(env, cg_color);
     env.objc.borrow_mut::<UIColorHostObject>(this).cg_color = cg_color;
     this
