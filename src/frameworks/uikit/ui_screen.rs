@@ -157,4 +157,27 @@ mod development_255_tests {
         assert_eq!(count, 1);
         assert_eq!(first, current);
     }
+
+    #[test]
+    fn development_255_single_screen_current_mode_setter_preserves_mode_contract() {
+        let mut env = crate::Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let screen: id = msg_class![env; UIScreen mainScreen];
+        let current: id = msg![env; screen currentMode];
+        let preferred: id = msg![env; screen preferredMode];
+
+        // SDL and other callers set a mode obtained from UIScreen's own mode
+        // APIs. In a single-mode environment this is a valid, idempotent
+        // property write. Launch orientation remains covered independently by
+        // the focused UIWindow tests and is not coupled to this property.
+        () = msg![env; screen setCurrentMode:preferred];
+
+        let current_after: id = msg![env; screen currentMode];
+        let preferred_after: id = msg![env; screen preferredMode];
+        let retained: id = msg![env; current_after retain];
+        () = msg![env; retained release];
+        assert_eq!(current_after, current);
+        assert_eq!(preferred_after, current);
+        assert_eq!(retained, current);
+    }
 }
