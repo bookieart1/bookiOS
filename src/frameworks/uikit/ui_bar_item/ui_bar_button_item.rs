@@ -443,4 +443,28 @@ mod tests {
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
         env.mem.free(stack);
     }
+
+    #[test]
+    fn development_255_cancel_system_item_has_historical_title_and_plain_style() {
+        let mut env = crate::Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let target: id = msg_class![env; NSObject new];
+        let action = env
+            .objc
+            .register_host_selector("cancel:".to_owned(), &mut env.mem);
+        let item: id = msg_class![env; UIBarButtonItem alloc];
+        let item: id = msg![env; item initWithBarButtonSystemItem:1_i32
+                                           target:target
+                                           action:action];
+        let title: id = msg![env; item title];
+        let style: UIBarButtonItemStyle = msg![env; item style];
+        assert_eq!(to_rust_string(env, title), "Cancel");
+        assert_eq!(style, UIBarButtonItemStylePlain);
+        release(env, item);
+        release(env, target);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
 }
