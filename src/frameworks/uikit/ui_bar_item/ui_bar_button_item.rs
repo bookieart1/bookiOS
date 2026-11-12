@@ -23,6 +23,7 @@ pub const UIBarButtonItemStyleDone: UIBarButtonItemStyle = 2;
 
 pub type UIBarButtonSystemItem = NSInteger;
 pub const UIBarButtonSystemItemDone: UIBarButtonSystemItem = 0;
+pub const UIBarButtonSystemItemCancel: UIBarButtonSystemItem = 1;
 pub const UIBarButtonSystemItemFlexibleSpace: UIBarButtonSystemItem = 5;
 pub const UIBarButtonSystemItemFixedSpace: UIBarButtonSystemItem = 6;
 
@@ -243,6 +244,12 @@ pub const CLASSES: ClassExports = objc_classes! {
             let title = get_static_str(env, "Done");
             let label = make_label(env, title);
             (title, label, UIBarButtonItemStyleDone)
+        }
+
+        UIBarButtonSystemItemCancel => {
+            let title = get_static_str(env, "Cancel");
+            let label = make_label(env, title);
+            (title, label, UIBarButtonItemStylePlain)
         }
 
         UIBarButtonSystemItemFlexibleSpace
