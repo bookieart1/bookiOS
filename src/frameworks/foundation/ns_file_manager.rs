@@ -8,8 +8,8 @@
 use super::{ns_array, ns_string, NSInteger, NSUInteger};
 use crate::dyld::{export_c_func, ConstantExports, FunctionExports, HostConstant};
 use crate::frameworks::foundation::ns_error::{
-    NSCocoaErrorDomain, NSFilePathErrorKey, NSFileReadNoSuchFileError, NSFileWriteFileExistsError,
-    NSFileWriteUnknownError,
+    NSCocoaErrorDomain, NSFilePathErrorKey, NSFileReadNoSuchFileError, NSFileReadUnknownError,
+    NSFileWriteFileExistsError, NSFileWriteUnknownError,
 };
 use crate::frameworks::foundation::ns_string::get_static_str;
 use crate::fs::{FsError, FsNodeType, GuestPath, GuestPathBuf};
@@ -896,6 +896,7 @@ fn file_attributes_common(env: &mut Environment, guest_path: &GuestPath) -> id {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mem::guest_size_of;
 
     #[test]
     fn application_support_search_path_uses_the_user_library() {
@@ -922,5 +923,40 @@ mod tests {
             NSSearchPathForDirectoriesInDomains(&mut env, NSDocumentDirectory, 1 << 3, true);
         let count: NSUInteger = msg![&mut env; system_only count];
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn development_255_symbolic_link_destination_reports_bounded_errors_for_unrepresented_links() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let manager: id = msg_class![env; NSFileManager defaultManager];
+        let error_out: MutPtr<id> = env.mem.alloc(guest_size_of::<id>()).cast();
+
+        let missing = ns_string::from_rust_string(env, "/definitely/missing/link".to_owned());
+        env.mem.write(error_out, id::from_bits(0x1234));
+        let destination: id = msg![env; manager destinationOfSymbolicLinkAtPath:missing
+                                                       error:error_out];
+        assert_eq!(destination, nil);
+        let error = env.mem.read(error_out);
+        assert_ne!(error, nil);
+        let code: NSInteger = msg![env; error code];
+        assert_eq!(code, NSFileReadNoSuchFileError);
+
+        let home = env.fs.home_directory().join("Documents").join("ordinary-file");
+        env.fs.write(&home, b"not a link").unwrap();
+        let ordinary = ns_string::from_rust_string(env, home.as_str().to_owned());
+        env.mem.write(error_out, id::from_bits(0x1234));
+        let destination: id = msg![env; manager destinationOfSymbolicLinkAtPath:ordinary
+                                                       error:error_out];
+        assert_eq!(destination, nil);
+        let error = env.mem.read(error_out);
+        assert_ne!(error, nil);
+        let code: NSInteger = msg![env; error code];
+        assert_eq!(code, NSFileReadUnknownError);
+
+        // A caller that declines error details still gets the same nil result.
+        let destination: id = msg![env; manager destinationOfSymbolicLinkAtPath:ordinary
+                                                       error:(MutPtr::<id>::null())];
+        assert_eq!(destination, nil);
     }
 }
