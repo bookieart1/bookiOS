@@ -420,6 +420,11 @@ mod dev_239_tests {
                 .iter()
                 .any(|(name, _)| *name == "_objc_autoreleasePoolPop")
         );
+        assert!(
+            FUNCTIONS
+                .iter()
+                .any(|(name, _)| *name == "_objc_storeStrong")
+        );
     }
 
     #[test]
