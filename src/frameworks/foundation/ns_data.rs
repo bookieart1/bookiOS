@@ -649,7 +649,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 pub fn to_rust_slice(env: &mut Environment, data: id) -> &[u8] {
     let borrowed_data = env.objc.borrow::<NSDataHostObject>(data);
-    assert!(!borrowed_data.bytes.is_null() && borrowed_data.length != 0);
+    if borrowed_data.length == 0 {
+        return &[];
+    }
+    assert!(!borrowed_data.bytes.is_null());
     env.mem
         .bytes_at(borrowed_data.bytes.cast(), borrowed_data.length)
 }
