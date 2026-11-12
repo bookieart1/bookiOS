@@ -232,3 +232,17 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(_dyld_get_image_name(_)),
     export_c_func!(_dyld_get_image_vmaddr_slide(_)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn development_255_dyld_add_image_callback_is_exported() {
+        assert!(
+            FUNCTIONS
+                .iter()
+                .any(|(name, _)| *name == "___dyld_register_func_for_add_image")
+        );
+    }
+}
