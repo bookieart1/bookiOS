@@ -141,6 +141,13 @@ mod tests {
     fn arc_retain_helper_is_exported() {
         assert!(FUNCTIONS.iter().any(|(name, _)| *name == "_objc_retain"));
     }
+
+    #[test]
+    fn development_255_osmos_retain_autorelease_return_value_is_exported() {
+        assert!(FUNCTIONS
+            .iter()
+            .any(|(name, _)| *name == "_objc_retainAutoreleaseReturnValue"));
+    }
 }
 
 pub const FUNCTIONS: FunctionExports = &[
