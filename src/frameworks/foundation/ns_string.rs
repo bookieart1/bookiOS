@@ -43,6 +43,19 @@ use std::iter::Peekable;
 use std::string::FromUtf16Error;
 
 pub type NSStringEncoding = NSUInteger;
+
+fn decode_string_with_coder(env: &mut Environment, coder: id) -> id {
+    let class: Class = msg![env; coder class];
+    let keyed_unarch_class: Class = msg_class![env; NSKeyedUnarchiver class];
+    let nib_archive_class: Class = msg_class![env; _touchHLE_NIBArchiveDecoder class];
+    if env.objc.class_is_subclass_of(class, keyed_unarch_class) {
+        ns_keyed_unarchiver::decode_current_string(env, coder)
+    } else if env.objc.class_is_subclass_of(class, nib_archive_class) {
+        _nib_archive_decoder::decode_current_string(env, coder)
+    } else {
+        unimplemented!()
+    }
+}
 pub type NSStringEncodingConversionOptions = NSUInteger;
 pub const NSStringEncodingConversionAllowLossy: NSStringEncodingConversionOptions = 1;
 pub const NSStringEncodingConversionExternalRepresentation: NSStringEncodingConversionOptions = 2;
@@ -1929,16 +1942,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 // NSCoding implementation
 - (id)initWithCoder:(id)coder {
-    let class: Class = msg![env; coder class];
-    let keyed_unarch_class: Class = msg_class![env; NSKeyedUnarchiver class];
-    let nib_archive_class: Class = msg_class![env; _touchHLE_NIBArchiveDecoder class];
-    let new_str = if env.objc.class_is_subclass_of(class, keyed_unarch_class) {
-        ns_keyed_unarchiver::decode_current_string(env, coder)
-    } else if env.objc.class_is_subclass_of(class, nib_archive_class) {
-        _nib_archive_decoder::decode_current_string(env, coder)
-    } else {
-        unimplemented!();
-    };
+    let new_str = decode_string_with_coder(env, coder);
     release(env, this);
     new_str
 }
@@ -2258,6 +2262,14 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (id)initWithCapacity:(NSUInteger)_capacity {
     // TODO: capacity
     msg![env; this init]
+}
+
+- (id)initWithCoder:(id)coder {
+    let decoded = decode_string_with_coder(env, coder);
+    let value = to_rust_string(env, decoded).into_owned();
+    release(env, decoded);
+    *env.objc.borrow_mut(this) = StringHostObject::Utf8(Cow::Owned(value));
+    this
 }
 
 - (id)initWithBytes:(ConstPtr<u8>)bytes
