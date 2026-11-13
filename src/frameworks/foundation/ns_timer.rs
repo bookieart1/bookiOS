@@ -250,6 +250,14 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 }
 
+- (())setFireDate:(id)fire_date {
+    let delay: NSTimeInterval = msg![env; fire_date timeIntervalSinceNow];
+    let due_by = Instant::now()
+        .checked_add(Duration::from_secs_f64(delay.max(0.0)))
+        .unwrap();
+    env.objc.borrow_mut::<NSTimerHostObject>(this).due_by = Some(due_by);
+}
+
 // TODO: more constructors
 // TODO: more accessors
 
@@ -378,4 +386,31 @@ pub(super) fn handle_timer(env: &mut Environment, timer: id) -> Option<Instant> 
     release(env, pool);
 
     new_due_by
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn development_256_timer_set_fire_date_reschedules_without_changing_interval() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let target: id = msg_class![env; NSObject new];
+        let selector = env.objc.lookup_selector("description").unwrap();
+        let timer: id = msg_class![env; NSTimer timerWithTimeInterval:30.0
+                                                   target:target
+                                                 selector:selector
+                                                 userInfo:nil
+                                                  repeats:true];
+        let date: id = msg_class![env; NSDate dateWithTimeIntervalSinceNow:5.0];
+        let before = Instant::now();
+        () = msg![env; timer setFireDate:date];
+        let host = env.objc.borrow::<NSTimerHostObject>(timer);
+        let due = host.due_by.unwrap();
+        assert!(due >= before.checked_add(Duration::from_secs(4)).unwrap());
+        assert!(due <= Instant::now().checked_add(Duration::from_secs(6)).unwrap());
+        assert_eq!(host.ns_interval, 30.0);
+        release(env, target);
+    }
 }
