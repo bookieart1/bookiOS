@@ -29,6 +29,7 @@ struct NSNumberFormatterHostObject {
     padding_position: NSUInteger,
     lenient: bool,
     generates_decimal_numbers: bool,
+    allows_floats: bool,
     positive_format: id,
     negative_format: id,
     grouping_separator: id,
@@ -63,6 +64,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         padding_position: 0,
         lenient: false,
         generates_decimal_numbers: false,
+        allows_floats: true,
         positive_format: nil,
         negative_format: nil,
         grouping_separator: nil,
@@ -243,6 +245,12 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())setGeneratesDecimalNumbers:(bool)generates {
     env.objc.borrow_mut::<NSNumberFormatterHostObject>(this).generates_decimal_numbers = generates;
 }
+- (bool)allowsFloats {
+    env.objc.borrow::<NSNumberFormatterHostObject>(this).allows_floats
+}
+- (())setAllowsFloats:(bool)allows {
+    env.objc.borrow_mut::<NSNumberFormatterHostObject>(this).allows_floats = allows;
+}
 - (id)minusSign {
     env.objc.borrow::<NSNumberFormatterHostObject>(this).minus_sign
 }
@@ -406,11 +414,11 @@ pub const CLASSES: ClassExports = objc_classes! {
         return nil;
     }
     let (style, lenient, grouping_separator, currency_grouping_separator, multiplier,
-         generates_decimal_numbers, minus_sign) = {
+         generates_decimal_numbers, minus_sign, allows_floats) = {
         let state = env.objc.borrow::<NSNumberFormatterHostObject>(this);
         (state.style, state.lenient, state.grouping_separator,
          state.currency_grouping_separator, state.multiplier,
-         state.generates_decimal_numbers, state.minus_sign)
+         state.generates_decimal_numbers, state.minus_sign, state.allows_floats)
     };
     let mut value = ns_string::to_rust_string(env, string).trim().to_owned();
     let separator = if style == NSNumberFormatterCurrencyStyle
@@ -440,6 +448,9 @@ pub const CLASSES: ClassExports = objc_classes! {
     let Ok(mut parsed) = parsed else {
         return nil;
     };
+    if !allows_floats && parsed.fract() != 0.0 {
+        return nil;
+    }
     if style == NSNumberFormatterPercentStyle {
         parsed /= 100.0;
     }
@@ -834,6 +845,28 @@ mod tests {
         release(env, locale);
         let stored: id = msg![env; formatter locale];
         assert_eq!(ns_string::to_rust_string(env, stored), "en_US");
+        release(env, formatter);
+    }
+
+    #[test]
+    fn development_256_number_formatter_allows_floats_property_controls_parsing() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let formatter: id = msg_class![env; NSNumberFormatter new];
+        let initial: bool = msg![env; formatter allowsFloats];
+        assert!(initial);
+        () = msg![env; formatter setAllowsFloats:false];
+        let stored: bool = msg![env; formatter allowsFloats];
+        assert!(!stored);
+
+        let integer = ns_string::from_rust_string(env, "12".to_owned());
+        let fractional = ns_string::from_rust_string(env, "12.5".to_owned());
+        let integer_number: id = msg![env; formatter numberFromString:integer];
+        let fractional_number: id = msg![env; formatter numberFromString:fractional];
+        assert_ne!(integer_number, nil);
+        assert_eq!(fractional_number, nil);
+        release(env, integer);
+        release(env, fractional);
         release(env, formatter);
     }
 }
