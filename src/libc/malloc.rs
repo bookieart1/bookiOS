@@ -164,6 +164,23 @@ fn malloc_zone_malloc(
     with_zone(env, zone, |mem, heap| mem.alloc_in_heap(heap, size))
 }
 
+// Foundation's historical zone entry points are ABI-compatible aliases of
+// the Darwin malloc-zone surface. They must expose the same stable default
+// zone identity and allocate from the zone supplied by the caller.
+#[allow(non_snake_case)]
+fn NSDefaultMallocZone(env: &mut Environment) -> MutPtr<malloc_zone_t> {
+    malloc_default_zone(env)
+}
+
+#[allow(non_snake_case)]
+fn NSZoneMalloc(
+    env: &mut Environment,
+    zone: MutPtr<malloc_zone_t>,
+    size: GuestUSize,
+) -> MutVoidPtr {
+    malloc_zone_malloc(env, zone, size)
+}
+
 fn malloc_zone_realloc(
     env: &mut Environment,
     zone: MutPtr<malloc_zone_t>,
@@ -244,4 +261,25 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(malloc_zone_size(_, _)),
     export_c_func!(malloc_zone_statistics(_, _)),
     export_c_func!(malloc_set_zone_name(_, _)),
+    export_c_func!(NSDefaultMallocZone()),
+    export_c_func!(NSZoneMalloc(_, _)),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn development_256_foundation_zone_aliases_share_identity_and_allocation() {
+        let mut env = Environment::new_fake_for_test();
+        let zone = NSDefaultMallocZone(&mut env);
+        assert_eq!(zone, NSDefaultMallocZone(&mut env));
+        assert_eq!(zone, malloc_default_zone(&mut env));
+
+        let allocation = NSZoneMalloc(&mut env, zone, 13);
+        assert!(!allocation.is_null());
+        assert!(malloc_zone_size(&mut env, zone, allocation.cast_const()) >= 13);
+        assert_eq!(allocation.to_bits() % 4, 0);
+        malloc_zone_free(&mut env, zone, allocation);
+    }
+}
