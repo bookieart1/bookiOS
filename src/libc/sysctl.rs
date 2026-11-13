@@ -87,7 +87,7 @@ enum SysCtlNamePath {
 // Clippy complains about the type.
 // Below values corresponds to the original iPhone.
 // Reference https://www.mail-archive.com/misc@openbsd.org/msg80988.html
-static SYSCTL_VALUES: [(SysCtlNamePath, &str, SysInfoType); 23] = [
+static SYSCTL_VALUES: [(SysCtlNamePath, &str, SysInfoType); 24] = [
     // Generic CPU, I/O
     (SysCtlNamePath::Length2(CTL_HW, HW_MACHINE), "hw.machine", SysInfoType::String(b"iPhone1,1")),
     (SysCtlNamePath::Length2(CTL_HW, HW_MODEL), "hw.model", SysInfoType::String(b"M68AP")),
