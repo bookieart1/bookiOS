@@ -24,6 +24,7 @@ struct CADisplayLinkHostObject {
     ns_timer: id,
     paused: bool,
     timestamp: NSTimeInterval,
+    frame_interval: NSInteger,
 }
 impl HostObject for CADisplayLinkHostObject {}
 
@@ -53,6 +54,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     host_object.target = target;
     host_object.selector = Some(sel);
     host_object.ns_timer = ns_timer;
+    host_object.frame_interval = 1;
     let diagnostic_detail = format!("create target,selector={},timer,display-link", sel.as_str(&env.mem));
     env.diagnostic_campaign_event(
         "display-link",
@@ -84,6 +86,11 @@ pub const CLASSES: ClassExports = objc_classes! {
     let interval = frameInterval as f64 / 60.0;
     let ns_timer = env.objc.borrow::<CADisplayLinkHostObject>(this).ns_timer;
     set_time_interval(env, ns_timer, interval);
+    env.objc.borrow_mut::<CADisplayLinkHostObject>(this).frame_interval = frameInterval;
+}
+
+- (NSInteger)frameInterval {
+    env.objc.borrow::<CADisplayLinkHostObject>(this).frame_interval
 }
 
 - (())addToRunLoop:(id)run_loop forMode:(NSRunLoopMode)mode {
@@ -143,3 +150,24 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Environment;
+
+    #[test]
+    fn development_256_display_link_exposes_default_and_updated_frame_interval() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let target: id = msg_class![env; NSObject new];
+        let selector = env.objc.lookup_selector("description").unwrap();
+        let link: id = msg_class![env; CADisplayLink displayLinkWithTarget:target selector:selector];
+        let initial: NSInteger = msg![env; link frameInterval];
+        assert_eq!(initial, 1);
+        () = msg![env; link setFrameInterval:3i32];
+        let updated: NSInteger = msg![env; link frameInterval];
+        assert_eq!(updated, 3);
+        release(env, target);
+    }
+}
