@@ -21,6 +21,7 @@ pub struct State {
     main_queue: MutVoidPtr,
     global_queues: HashMap<i32, MutVoidPtr>,
     copied_blocks: HashMap<u32, OwnedBlock>,
+    synchronous_queue_stack: Vec<MutVoidPtr>,
 }
 
 struct OwnedBlock {
@@ -328,6 +329,34 @@ fn dispatch_async(env: &mut Environment, _queue: MutVoidPtr, block: MutPtr<Block
     invoke_block_synchronously(env, block);
 }
 
+fn dispatch_sync(env: &mut Environment, queue: MutVoidPtr, block: MutPtr<BlockLiteral>) {
+    assert!(!queue.is_null());
+    assert_eq!(env.mem.read(queue.cast::<u32>()), QUEUE_MAGIC);
+    assert!(
+        !env
+            .libc_state
+            .dispatch
+            .synchronous_queue_stack
+            .contains(&queue),
+        "dispatch_sync to the currently executing serial queue would deadlock"
+    );
+
+    // The bounded dispatch implementation executes queue work cooperatively
+    // on the calling guest thread. A synchronous block therefore needs no
+    // copy: its stack captures remain valid until this function returns.
+    env.libc_state
+        .dispatch
+        .synchronous_queue_stack
+        .push(queue);
+    invoke_block_synchronously(env, block);
+    let popped = env
+        .libc_state
+        .dispatch
+        .synchronous_queue_stack
+        .pop();
+    assert_eq!(popped, Some(queue));
+}
+
 fn dispatch_group_async(
     env: &mut Environment,
     _group: MutVoidPtr,
@@ -384,6 +413,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(dispatch_retain(_)),
     export_c_func!(dispatch_release(_)),
     export_c_func!(dispatch_async(_, _)),
+    export_c_func!(dispatch_sync(_, _)),
     export_c_func!(dispatch_group_async(_, _, _)),
     export_c_func!(dispatch_once(_, _)),
 ];
@@ -455,5 +485,66 @@ mod tests {
         assert_eq!(try_objc_block_message(&mut env, copied, "release"), Some(false));
         assert_eq!(try_objc_block_message(&mut env, copied, "release"), Some(false));
         assert!(env.libc_state.dispatch.copied_blocks.is_empty());
+    }
+
+    #[test]
+    fn development_256_dispatch_sync_executes_stack_block_without_copying() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let guest_stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = guest_stack.to_bits() + 0x1000;
+        let stack_marker = env.mem.alloc_and_write(0u8).cast();
+        env.objc.set_block_marker(0, stack_marker);
+        let queue = new_queue_object(&mut env, false);
+        let output = env.mem.alloc_and_write(0u32);
+
+        let code = env.mem.alloc(16).cast::<u32>();
+        for (index, word) in [
+            0xe590_1014u32, // ldr r1, [r0, #20] (captured output pointer)
+            0xe590_2018u32, // ldr r2, [r0, #24] (captured value)
+            0xe581_2000u32, // str r2, [r1]
+            0xe12f_ff1eu32, // bx lr
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            env.mem.write(code + index as u32, word);
+        }
+
+        let block = env.mem.alloc(28).cast::<BlockLiteral>();
+        env.mem.write(
+            block,
+            BlockLiteral {
+                _isa: stack_marker.cast(),
+                _flags: 0,
+                _reserved: 0,
+                invoke: GuestFunction::from_addr_with_thumb_bit(code.to_bits()),
+                _descriptor: MutVoidPtr::null(),
+            },
+        );
+        let captures = block.cast::<u32>();
+        env.mem.write(captures + 5, output.to_bits());
+        env.mem.write(captures + 6, 0x2560_0001);
+
+        dispatch_sync(&mut env, queue, block);
+        assert_eq!(env.mem.read(output), 0x2560_0001);
+        assert!(env.libc_state.dispatch.copied_blocks.is_empty());
+        assert!(env
+            .libc_state
+            .dispatch
+            .synchronous_queue_stack
+            .is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "would deadlock")]
+    fn development_256_dispatch_sync_rejects_same_serial_queue_reentry() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let queue = new_queue_object(&mut env, false);
+        env.libc_state
+            .dispatch
+            .synchronous_queue_stack
+            .push(queue);
+        let block = MutPtr::<BlockLiteral>::null();
+        dispatch_sync(&mut env, queue, block);
     }
 }
