@@ -99,6 +99,9 @@ static SYSCTL_VALUES: [(SysCtlNamePath, &str, SysInfoType); 23] = [
     // Darwin reports this maximum as a 32-bit integer. The emulated
     // single-core device has one physical CPU available.
     (SysCtlNamePath::Undefined, "hw.physicalcpu_max", SysInfoType::Int32(1)),
+    // XNU exposes logicalcpu_max as a 32-bit integer. The virtual iPhone1,1
+    // has one logical processor, matching the rest of the emulated topology.
+    (SysCtlNamePath::Undefined, "hw.logicalcpu_max", SysInfoType::Int32(1)),
     // ARM1176JZF-S, used by the original iPhone model reported above, has a
     // 32-byte L1 cache line. Darwin exposes this value as an int.
     (SysCtlNamePath::Undefined, "hw.cachelinesize", SysInfoType::Int32(32)),
@@ -647,6 +650,42 @@ mod tests {
         );
         assert_eq!(env.mem.read(output_len), guest_size_of::<i32>());
         assert_eq!(env.mem.read(output.cast::<i32>()), 1);
+    }
+
+    #[test]
+    fn development_256_logical_cpu_max_reports_one_32_bit_guest_cpu() {
+        let mut env = Environment::new_fake_for_test();
+        let name = env.mem.alloc_and_write_cstr(b"hw.logicalcpu_max");
+        let output_len = env.mem.alloc_and_write(0);
+
+        assert_eq!(
+            sysctlbyname(
+                &mut env,
+                name.cast_const(),
+                Ptr::null(),
+                output_len,
+                Ptr::null(),
+                0,
+            ),
+            0
+        );
+        assert_eq!(env.mem.read(output_len), guest_size_of::<i32>());
+
+        let output = env.mem.alloc_and_write(0x7f7f_7f7fi32);
+        env.mem.write(output_len, guest_size_of::<i32>());
+        assert_eq!(
+            sysctlbyname(
+                &mut env,
+                name.cast_const(),
+                output.cast(),
+                output_len,
+                Ptr::null(),
+                0,
+            ),
+            0
+        );
+        assert_eq!(env.mem.read(output_len), guest_size_of::<i32>());
+        assert_eq!(env.mem.read(output), 1);
     }
 
     #[test]
