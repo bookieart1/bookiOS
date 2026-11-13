@@ -23,6 +23,10 @@ pub struct State {
     /// Dynamic guest loading is not implemented yet, but retaining these
     /// registrations preserves the contract for that future path.
     add_image_callbacks: Vec<GuestFunction>,
+    /// Callbacks registered through `__dyld_register_func_for_remove_image`.
+    /// They apply only to future unloads; unlike add-image registration, no
+    /// callback is made synchronously for images that are already loaded.
+    remove_image_callbacks: Vec<GuestFunction>,
 }
 
 #[allow(non_camel_case_types)]
@@ -252,6 +256,18 @@ fn _dyld_register_func_for_add_image(env: &mut Environment, callback: GuestFunct
     }
 }
 
+fn register_remove_image_callback(env: &mut Environment, callback: GuestFunction) {
+    assert!(!callback.to_ptr().is_null());
+    env.libc_state.dlfcn.remove_image_callbacks.push(callback);
+}
+
+fn _dyld_register_func_for_remove_image(env: &mut Environment, callback: GuestFunction) {
+    // Dynamic guest unloading is not implemented, so there are no current
+    // removals to report. Retain the registration for the future unload path,
+    // matching dyld's future-events-only contract.
+    register_remove_image_callback(env, callback);
+}
+
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(dlopen(_, _)),
     export_c_func!(dlsym(_, _)),
@@ -262,6 +278,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(_dyld_get_image_name(_)),
     export_c_func!(_dyld_get_image_vmaddr_slide(_)),
     export_c_func!(_dyld_register_func_for_add_image(_)),
+    export_c_func!(_dyld_register_func_for_remove_image(_)),
 ];
 
 #[cfg(test)]
@@ -298,5 +315,22 @@ mod tests {
         assert_eq!(notifications[0].0.to_bits(), 0x1234_5000);
         assert_eq!(notifications[0].1, 0);
         assert_eq!(env.libc_state.dlfcn.add_image_callbacks.len(), 1);
+    }
+
+    #[test]
+    fn development_256_dyld_remove_image_registration_is_future_only() {
+        assert!(
+            FUNCTIONS
+                .iter()
+                .any(|(name, _)| *name == "__dyld_register_func_for_remove_image")
+        );
+
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let callback = GuestFunction::from_addr_with_thumb_bit(0x2000);
+        register_remove_image_callback(&mut env, callback);
+
+        // Registration does not replay already-loaded images. It only stores
+        // the callback for an actual later unload.
+        assert_eq!(env.libc_state.dlfcn.remove_image_callbacks, [callback]);
     }
 }
