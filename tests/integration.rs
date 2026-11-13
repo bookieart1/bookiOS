@@ -661,7 +661,8 @@ fn test_app() -> Result<(), Box<dyn Error>> {
     let (tests_dir, owned_compile_args) = prepare_integration_environment()?;
     let extra_compile_args = borrowed_args(&owned_compile_args);
 
-    // Finally, build and run TestApp plus the bounded selector-mutation fixture.
+    // Finally, build and run TestApp plus the bounded selector-mutation
+    // fixture.
     run_test_app(&tests_dir, "TestApp", &extra_compile_args, &[])?;
     run_trenches_selector_mutation_app(&tests_dir, &extra_compile_args)
 }

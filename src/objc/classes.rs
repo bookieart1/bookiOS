@@ -666,7 +666,8 @@ impl ObjC {
                 return class;
             }
 
-            // dyld may already have bound a class relocation to the placeholder.
+            // dyld may already have bound a class relocation to the
+            // placeholder.
             // Upgrade that exact class/metaclass pair in place so both direct
             // relocations and later name lookups observe the intervention.
             let metaclass = Self::read_isa(class, mem);

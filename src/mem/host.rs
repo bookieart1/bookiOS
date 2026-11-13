@@ -120,7 +120,8 @@ fn host_virtual_memory_state() -> String {
     };
     if status == 0 {
         // Some Apple SDK bindings model this C structure as packed. Copy the
-        // fields before formatting so Rust never creates an unaligned reference.
+        // fields before formatting so Rust never creates an unaligned
+        // reference.
         let virtual_size = info.virtual_size;
         let resident_size = info.resident_size;
         let resident_size_max = info.resident_size_max;

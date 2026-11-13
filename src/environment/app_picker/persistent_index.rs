@@ -1,8 +1,8 @@
 //! Disposable cross-process metadata/icon cache for the native iDared picker.
 //!
 //! This cache is never runtime authority. Every selected package is reopened by
-//! `Environment::new` before guest execution; these records only avoid repeating
-//! picker discovery for an unchanged package.
+//! `Environment::new` before guest execution; these records only avoid
+//! repeating picker discovery for an unchanged package.
 
 use super::{AppInfo, LibraryEntryFingerprint};
 use crate::image::Image;
