@@ -280,13 +280,27 @@ pub fn lookup_imp_for_class(
             is_metaclass,
         }) = host_object.as_any().downcast_ref()
         {
-            log!(
-                "Lookup for faked class \"{}\" ({:?}) {} method \"{}\". Behaving as if message was sent to nil.",
-                name,
-                class,
-                if is_metaclass { "class" } else { "instance" },
-                selector.as_str(&env.mem),
-            );
+            let name = name.clone();
+            let occurrence = env.objc.next_fake_lookup_occurrence(class, selector);
+            if occurrence <= 32 || occurrence.is_power_of_two() {
+                if occurrence <= 32 {
+                    log!(
+                        "Lookup for faked class \"{}\" ({:?}) {} method \"{}\". Behaving as if message was sent to nil.",
+                        name,
+                        class,
+                        if is_metaclass { "class" } else { "instance" },
+                        selector.as_str(&env.mem),
+                    );
+                } else {
+                    log!(
+                        "Lookup for faked class \"{}\" ({:?}) {} method \"{}\" (occurrence #{occurrence}; intermediate identical lookups omitted). Behaving as if message was sent to nil.",
+                        name,
+                        class,
+                        if is_metaclass { "class" } else { "instance" },
+                        selector.as_str(&env.mem),
+                    );
+                }
+            }
             return None;
         } else {
             if receiver != nil {
@@ -902,5 +916,34 @@ mod tests {
         // hasPrefix: expects an object argument, not an integer. Discarding
         // its Boolean return must not make this incompatible call acceptable.
         () = msg![&mut env; string hasPrefix:1u32];
+    }
+
+    #[test]
+    fn development_256_fake_lookup_sampling_is_per_method_and_per_guest() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let class = env.objc.get_known_class("NSObject", &mut env.mem);
+        let first = env.objc.lookup_selector("description").unwrap();
+        let second = env.objc.lookup_selector("hash").unwrap();
+
+        let retained = (1..=720_639)
+            .filter(|_| {
+                let occurrence = env.objc.next_fake_lookup_occurrence(class, first);
+                occurrence <= 32 || occurrence.is_power_of_two()
+            })
+            .count();
+        assert_eq!(retained, 46);
+        assert_eq!(env.objc.next_fake_lookup_occurrence(class, second), 1);
+
+        let mut next_guest = Environment::new_fake_for_test_with_thread();
+        let next_class = next_guest
+            .objc
+            .get_known_class("NSObject", &mut next_guest.mem);
+        let next_first = next_guest.objc.lookup_selector("description").unwrap();
+        assert_eq!(
+            next_guest
+                .objc
+                .next_fake_lookup_occurrence(next_class, next_first),
+            1
+        );
     }
 }

@@ -159,6 +159,11 @@ pub struct ObjC {
     /// Cache mapping metaclasses to classes.
     metaclass_classes: HashMap<Class, Class>,
 
+    /// Per-guest counts for stable fake-class method lookups. Repeating the
+    /// same missing service method does not add diagnostic information, but
+    /// each distinct class/selector pair must remain independently visible.
+    fake_lookup_counts: HashMap<(Class, SEL), u64>,
+
     /// GuestFunctions for class+selector combos
     cached_guest_functions: HashMap<(Class, SEL), GuestFunction>,
 
@@ -185,6 +190,7 @@ impl ObjC {
             method_handles: HashMap::new(),
             method_type_cstrings: HashMap::new(),
             metaclass_classes: HashMap::new(),
+            fake_lookup_counts: HashMap::new(),
             cached_guest_functions: HashMap::new(),
             class_name_cstrings: HashMap::new(),
             message_type_info: None,
@@ -194,6 +200,15 @@ impl ObjC {
 
     pub(crate) fn set_block_marker(&mut self, index: usize, marker: Class) {
         self.block_markers[index] = marker;
+    }
+
+    pub(super) fn next_fake_lookup_occurrence(&mut self, class: Class, selector: SEL) -> u64 {
+        let occurrence = self
+            .fake_lookup_counts
+            .entry((class, selector))
+            .or_default();
+        *occurrence = occurrence.saturating_add(1);
+        *occurrence
     }
 
     pub(crate) fn block_marker(&self, index: usize) -> Class {
