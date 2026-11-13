@@ -50,6 +50,21 @@ struct NSUserDefaultsHostObject {
 }
 impl HostObject for NSUserDefaultsHostObject {}
 
+#[cfg(test)]
+pub(crate) fn install_isolated_standard_defaults_for_test(env: &mut Environment) -> id {
+    let defaults: id = msg_class![env; NSUserDefaults alloc];
+    let app: id = msg_class![env; NSMutableDictionary new];
+    let global: id = msg_class![env; NSMutableDictionary new];
+    let registered: id = msg_class![env; NSMutableDictionary new];
+    *env.objc.borrow_mut::<NSUserDefaultsHostObject>(defaults) = NSUserDefaultsHostObject {
+        app_domain_dict: app,
+        global_domain_dict: global,
+        registration_domain_dict: registered,
+    };
+    State::get(env).standard_defaults = Some(defaults);
+    defaults
+}
+
 const NSUserDefaultsDidChangeNotification: &str = "NSUserDefaultsDidChangeNotification";
 pub const CONSTANTS: ConstantExports = &[(
     "_NSUserDefaultsDidChangeNotification",

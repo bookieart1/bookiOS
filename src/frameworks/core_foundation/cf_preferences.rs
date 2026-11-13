@@ -73,10 +73,34 @@ fn CFPreferencesSetAppValue(
     value: CFPropertyListRef,
     app_id: CFStringRef,
 ) {
-    assert!(!value.is_null()); // TODO
     assert!(is_current_application(env, app_id));
     let user_defaults: id = msg_class![env; NSUserDefaults standardUserDefaults];
-    msg![env; user_defaults setObject:value forKey:key]
+    if value == nil {
+        msg![env; user_defaults removeObjectForKey:key]
+    } else {
+        msg![env; user_defaults setObject:value forKey:key]
+    }
+}
+
+fn CFPreferencesSetValue(
+    env: &mut Environment,
+    key: CFStringRef,
+    value: CFPropertyListRef,
+    app_id: CFStringRef,
+    user_name: CFStringRef,
+    host_name: CFStringRef,
+) {
+    let current_user = ns_string::get_static_str(env, kCFPreferencesCurrentUser);
+    let any_host = ns_string::get_static_str(env, kCFPreferencesAnyHost);
+    assert!(key != nil);
+    assert!(is_current_application(env, app_id));
+    assert!(user_name != nil && msg![env; user_name isEqualToString:current_user]);
+    assert!(host_name != nil && msg![env; host_name isEqualToString:any_host]);
+
+    // NSUserDefaults is touchHLE's existing durable store for the current
+    // application's current-user/any-host preferences domain. Do not silently
+    // redirect other CFPreferences domains into that store.
+    CFPreferencesSetAppValue(env, key, value, app_id)
 }
 
 fn CFPreferencesAppSynchronize(env: &mut Environment, app_id: CFStringRef) -> bool {
@@ -150,6 +174,7 @@ pub const CONSTANTS: ConstantExports = &[
 pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFPreferencesCopyAppValue(_, _)),
     export_c_func!(CFPreferencesSetAppValue(_, _, _)),
+    export_c_func!(CFPreferencesSetValue(_, _, _, _, _)),
     export_c_func!(CFPreferencesAppSynchronize(_)),
     export_c_func!(CFPreferencesCopyKeyList(_, _, _)),
 ];
@@ -185,5 +210,44 @@ mod tests {
         let bundle_identifier = env.bundle.bundle_identifier().to_owned();
         let app_id = ns_string::from_rust_string(env, bundle_identifier);
         assert!(is_current_application(env, app_id));
+    }
+
+    #[test]
+    fn development_256_set_value_writes_and_removes_current_domain() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        env.bundle.set_fake_identity_for_test();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        crate::frameworks::foundation::ns_user_defaults::install_isolated_standard_defaults_for_test(env);
+        let key = ns_string::get_static_str(env, "development-256-preferences-key");
+        let value = ns_string::get_static_str(env, "saved");
+        let app = ns_string::get_static_str(env, kCFPreferencesCurrentApplication);
+        let user = ns_string::get_static_str(env, kCFPreferencesCurrentUser);
+        let host = ns_string::get_static_str(env, kCFPreferencesAnyHost);
+
+        CFPreferencesSetValue(env, key, value, app, user, host);
+        let written = CFPreferencesCopyAppValue(env, key, app);
+        assert_ne!(written, nil);
+        assert!(msg![env; written isEqual:value]);
+        release(env, written);
+
+        CFPreferencesSetValue(env, key, nil, app, user, host);
+        let removed = CFPreferencesCopyAppValue(env, key, app);
+        assert_eq!(removed, nil);
+    }
+
+    #[test]
+    #[should_panic]
+    fn development_256_set_value_does_not_redirect_unsupported_host_domain() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        env.bundle.set_fake_identity_for_test();
+        let env = &mut env;
+        let key = ns_string::get_static_str(env, "development-256-domain-key");
+        let value = ns_string::get_static_str(env, "saved");
+        let app = ns_string::get_static_str(env, kCFPreferencesCurrentApplication);
+        let user = ns_string::get_static_str(env, kCFPreferencesCurrentUser);
+        let unsupported_host = ns_string::get_static_str(env, "unsupported-host");
+        CFPreferencesSetValue(env, key, value, app, user, unsupported_host);
     }
 }
