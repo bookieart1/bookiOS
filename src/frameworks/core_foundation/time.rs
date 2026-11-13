@@ -151,6 +151,18 @@ fn CFAbsoluteTimeGetDayOfWeek(env: &mut Environment, at: CFAbsoluteTime, tz: CFT
     CFAbsoluteTimeGetGregorianDate(env, at, tz).day.into()
 }
 
+fn CFAbsoluteTimeGetDayOfYear(env: &mut Environment, at: CFAbsoluteTime, tz: CFTimeZoneRef) -> i32 {
+    assert!(tz.is_null());
+    let date = CFAbsoluteTimeGetGregorianDate(env, at, tz);
+    let first_day = days_from_date(i64::from(date.year), 1, 1);
+    let current_day = days_from_date(
+        i64::from(date.year),
+        i64::from(date.month),
+        i64::from(date.day),
+    );
+    (current_day - first_day + 1).try_into().unwrap()
+}
+
 const DAY_SECONDS: f64 = 86400.0;
 /// Days from 1970-01-01 to the absolute reference date.
 const DAYS_FROM_UNIX_TO_APPLE_EPOCHS: i64 = 11323;
@@ -347,6 +359,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFTimeZoneCopySystem()),
     export_c_func!(CFAbsoluteTimeGetGregorianDate(_, _)),
     export_c_func!(CFAbsoluteTimeGetDayOfWeek(_, _)),
+    export_c_func!(CFAbsoluteTimeGetDayOfYear(_, _)),
     export_c_func!(CFAbsoluteTimeAddGregorianUnits(_, _, _)),
     export_c_func!(CFAbsoluteTimeGetDifferenceAsGregorianUnits(_, _, _, _)),
 ];
@@ -354,6 +367,22 @@ pub const FUNCTIONS: FunctionExports = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn development_256_day_of_year_is_one_based_across_leap_and_negative_time() {
+        let mut env = Environment::new_fake_for_test();
+        let cases = [
+            ((2001, 1, 1), 1),
+            ((2001, 12, 31), 365),
+            ((2004, 2, 29), 60),
+            ((2004, 12, 31), 366),
+            ((2000, 12, 31), 366),
+        ];
+        for ((year, month, day), expected) in cases {
+            let time = absolute_time_from_gregorian(year, month, day, 0, 0, 0.0);
+            assert_eq!(CFAbsoluteTimeGetDayOfYear(&mut env, time, nil), expected);
+        }
+    }
 
     #[test]
     fn absolute_time_constants_are_guest_doubles() {
