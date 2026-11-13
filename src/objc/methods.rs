@@ -83,6 +83,11 @@ pub trait HostIMP: CallFromGuest {
     /// See [MsgSendSignature::type_info].
     fn type_info(&self) -> (TypeId, &'static str);
 
+    /// Whether `sent_type_id` describes the same arguments while discarding
+    /// this method's register return as `void`. This is ABI-safe for scalar
+    /// returns, but never for structure returns with a hidden result pointer.
+    fn accepts_discarded_return(&self, sent_type_id: TypeId) -> bool;
+
     /// An Objective-C style types string
     fn types_string(&self) -> String;
 }
@@ -96,6 +101,11 @@ macro_rules! impl_HostIMP {
         {
             fn type_info(&self) -> (TypeId, &'static str) {
                 <(R, (id, SEL, $($P,)*)) as MsgSendSignature>::type_info()
+            }
+
+            fn accepts_discarded_return(&self, sent_type_id: TypeId) -> bool {
+                R::SIZE_IN_MEM.is_none()
+                    && sent_type_id == TypeId::of::<((), (id, SEL, $($P,)*))>()
             }
 
             fn types_string(&self) -> String {
@@ -116,6 +126,10 @@ macro_rules! impl_HostIMP {
         {
             fn type_info(&self) -> (TypeId, &'static str) {
                 todo!("host-to-host message calls with var-args"); // TODO
+            }
+
+            fn accepts_discarded_return(&self, _sent_type_id: TypeId) -> bool {
+                false
             }
 
             fn types_string(&self) -> String {

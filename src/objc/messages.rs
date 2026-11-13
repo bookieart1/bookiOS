@@ -386,6 +386,17 @@ fn objc_msgSend_inner(
             if let Some((sent_type_id, sent_type_desc)) = message_type_info {
                 let (expected_type_id, expected_type_desc) = host_imp.type_info();
                 if sent_type_id != expected_type_id {
+                    if host_imp.accepts_discarded_return(sent_type_id) {
+                        log_dbg!(
+                            "Discarding the register return from {} with matching arguments",
+                            selector.as_str(&env.mem)
+                        );
+                        host_imp.call_from_guest(env);
+                        if diagnostic_call.is_some() {
+                            env.diagnostic_end(diagnostic_call, host_imp.returns_object());
+                        }
+                        return;
+                    }
                     let msg = format!(
                         "\
 Type mismatch when sending message {} to {:?}!
@@ -864,5 +875,32 @@ mod tests {
             .register_host_selector("initWithContentViewController".to_owned(), &mut env.mem);
         let responds: bool = msg![env; placeholder instancesRespondToSelector:absent];
         assert!(!responds);
+    }
+
+    #[test]
+    fn development_256_objc_message_may_discard_matching_scalar_return() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let string = crate::frameworks::foundation::ns_string::get_static_str(
+            &mut env,
+            "discarded-return",
+        );
+
+        // NSUInteger is returned in r0. A caller that treats the same
+        // no-argument selector as void may safely ignore that register.
+        () = msg![&mut env; string length];
+    }
+
+    #[test]
+    #[should_panic(expected = "Type mismatch when sending message")]
+    fn development_256_objc_discarded_return_does_not_hide_argument_mismatch() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let string = crate::frameworks::foundation::ns_string::get_static_str(
+            &mut env,
+            "argument-check",
+        );
+
+        // hasPrefix: expects an object argument, not an integer. Discarding
+        // its Boolean return must not make this incompatible call acceptable.
+        () = msg![&mut env; string hasPrefix:1u32];
     }
 }
