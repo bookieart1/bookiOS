@@ -422,6 +422,31 @@ pub const FUNCTIONS: FunctionExports = &[
 mod tests {
     use super::*;
 
+    fn with_guest_test(test: impl FnOnce(&mut Environment) + 'static) {
+        use corosensei::{Coroutine, CoroutineResult};
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let stack = env.mem.alloc(0x10000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x10000;
+        env.threads[0].stack = Some(stack.to_bits()..=stack.to_bits() + 0xffff);
+        let mut coroutine = Coroutine::new(move |yielder, mut env: Environment| {
+            env.with_yielder(yielder, move |env| test(env));
+            env
+        });
+        for _ in 0..10_000 {
+            match coroutine.resume(env) {
+                CoroutineResult::Return(_) => return,
+                CoroutineResult::Yield(next) => {
+                    assert!(matches!(
+                        next.threads[0].blocked_by,
+                        ThreadBlock::NotBlocked
+                    ));
+                    env = next;
+                }
+            }
+        }
+        panic!("dispatch guest fixture exceeded its yield budget");
+    }
+
     #[test]
     fn development_255_dispatch_global_queue_lifetime_contract() {
         let mut env = Environment::new_fake_for_test_with_thread();
@@ -489,12 +514,10 @@ mod tests {
 
     #[test]
     fn development_256_dispatch_sync_executes_stack_block_without_copying() {
-        let mut env = Environment::new_fake_for_test_with_thread();
-        let guest_stack = env.mem.alloc(0x1000);
-        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = guest_stack.to_bits() + 0x1000;
+        with_guest_test(|env| {
         let stack_marker = env.mem.alloc_and_write(0u8).cast();
         env.objc.set_block_marker(0, stack_marker);
-        let queue = new_queue_object(&mut env, false);
+        let queue = new_queue_object(env, false);
         let output = env.mem.alloc_and_write(0u32);
 
         let code = env.mem.alloc(16).cast::<u32>();
@@ -525,7 +548,7 @@ mod tests {
         env.mem.write(captures + 5, output.to_bits());
         env.mem.write(captures + 6, 0x2560_0001);
 
-        dispatch_sync(&mut env, queue, block);
+        dispatch_sync(env, queue, block);
         assert_eq!(env.mem.read(output), 0x2560_0001);
         assert!(env.libc_state.dispatch.copied_blocks.is_empty());
         assert!(env
@@ -533,6 +556,7 @@ mod tests {
             .dispatch
             .synchronous_queue_stack
             .is_empty());
+        });
     }
 
     #[test]
