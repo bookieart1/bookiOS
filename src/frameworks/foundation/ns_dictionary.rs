@@ -810,6 +810,25 @@ pub const CLASSES: ClassExports = objc_classes! {
     true
 }
 
+- (id)allKeysForObject:(id)obj {
+    let res: id = msg_class![env; NSMutableArray new];
+
+    let keys: id = msg![env; this allKeys];
+    let count: NSUInteger = msg![env; keys count];
+    for index in 0..count {
+        let key: id = msg![env; keys objectAtIndex:index];
+        let value: id = msg![env; this objectForKey:key];
+        let equal: bool = msg![env; obj isEqual:value];
+        if equal {
+            () = msg![env; res addObject:key];
+        }
+    }
+
+    let res_imm = msg![env; res copy];
+    release(env, res);
+    autorelease(env, res_imm)
+}
+
 // NSDictionary(NSFileAttributes) category
 // TODO: implement categories properly
 - (id)fileCreationDate {
@@ -1241,23 +1260,6 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, res)
 }
 
-- (id)allKeysForObject:(id)obj {
-    let res: id = msg_class![env; NSMutableArray new];
-
-    let host_obj: DictionaryHostObject = std::mem::take(env.objc.borrow_mut(this));
-    host_obj.map.values().flatten().for_each(|&(key, value)| {
-        let equal = msg![env; obj isEqual:value];
-        if equal {
-            () = msg![env; res addObject:key];
-        }
-    });
-    *env.objc.borrow_mut(this) = host_obj;
-
-    let res_imm = msg![env; res copy];
-    release(env, res);
-    autorelease(env, res_imm)
-}
-
 - (id)objectEnumerator { // NSEnumerator*
     let values: id = msg![env; this allValues];
     msg![env; values objectEnumerator]
@@ -1531,6 +1533,26 @@ fn encode_with_coder_inner(env: &mut Environment, dict: id, coder: id) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn development_256_mutable_dictionary_inherits_all_keys_for_object() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let dictionary: id = msg_class![env; NSMutableDictionary dictionary];
+        let key = get_static_str(env, "score");
+        let value = get_static_str(env, "high");
+        () = msg![env; dictionary setObject:value forKey:key];
+        let selector = env.objc.lookup_selector("allKeysForObject:").unwrap();
+        let responds: bool = msg![env; dictionary respondsToSelector:selector];
+        assert!(responds);
+        let keys: id = msg![env; dictionary allKeysForObject:value];
+        let count: NSUInteger = msg![env; keys count];
+        assert_eq!(count, 1);
+        let actual: id = msg![env; keys objectAtIndex:0u32];
+        assert_eq!(actual, key);
+        release(env, pool);
+    }
 
     #[test]
     fn keyed_subscript_reads_the_same_value_as_object_for_key() {
