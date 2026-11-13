@@ -87,7 +87,7 @@ enum SysCtlNamePath {
 // Clippy complains about the type.
 // Below values corresponds to the original iPhone.
 // Reference https://www.mail-archive.com/misc@openbsd.org/msg80988.html
-static SYSCTL_VALUES: [(SysCtlNamePath, &str, SysInfoType); 24] = [
+static SYSCTL_VALUES: [(SysCtlNamePath, &str, SysInfoType); 25] = [
     // Generic CPU, I/O
     (SysCtlNamePath::Length2(CTL_HW, HW_MACHINE), "hw.machine", SysInfoType::String(b"iPhone1,1")),
     (SysCtlNamePath::Length2(CTL_HW, HW_MODEL), "hw.model", SysInfoType::String(b"M68AP")),
@@ -110,6 +110,10 @@ static SYSCTL_VALUES: [(SysCtlNamePath, &str, SysInfoType); 24] = [
     (SysCtlNamePath::Undefined, "hw.l1dcachesize", SysInfoType::Int64(16 * 1024)),
     (SysCtlNamePath::Undefined, "hw.cputype", SysInfoType::Int32(12)),
     (SysCtlNamePath::Undefined, "hw.cpusubtype", SysInfoType::Int32(6)),
+    // XNU exposes this read-only value as an int: zero denotes a process
+    // translated from a foreign CPU type. The guest ARM process executes in
+    // the emulator's ARM CPU model and is therefore native to that model.
+    (SysCtlNamePath::Undefined, "sysctl.proc_native", SysInfoType::Int32(1)),
     (SysCtlNamePath::Length2(CTL_HW, HW_CPU_FREQ), "hw.cpufrequency", SysInfoType::Int64(412000000)),
     (SysCtlNamePath::Length2(CTL_HW, HW_BUS_FREQ), "hw.busfrequency", SysInfoType::Int64(103000000)),
     (SysCtlNamePath::Length2(CTL_HW, HW_PHYSMEM), "hw.physmem", SysInfoType::Int32(121634816)),
@@ -672,6 +676,42 @@ mod tests {
         assert_eq!(env.mem.read(output_len), guest_size_of::<i32>());
 
         let output = env.mem.alloc_and_write(0x7f7f_7f7fi32);
+        env.mem.write(output_len, guest_size_of::<i32>());
+        assert_eq!(
+            sysctlbyname(
+                &mut env,
+                name.cast_const(),
+                output.cast(),
+                output_len,
+                Ptr::null(),
+                0,
+            ),
+            0
+        );
+        assert_eq!(env.mem.read(output_len), guest_size_of::<i32>());
+        assert_eq!(env.mem.read(output), 1);
+    }
+
+    #[test]
+    fn development_256_process_reports_native_32_bit_guest_cpu() {
+        let mut env = Environment::new_fake_for_test();
+        let name = env.mem.alloc_and_write_cstr(b"sysctl.proc_native");
+        let output_len = env.mem.alloc_and_write(0);
+
+        assert_eq!(
+            sysctlbyname(
+                &mut env,
+                name.cast_const(),
+                Ptr::null(),
+                output_len,
+                Ptr::null(),
+                0,
+            ),
+            0
+        );
+        assert_eq!(env.mem.read(output_len), guest_size_of::<i32>());
+
+        let output = env.mem.alloc_and_write(0i32);
         env.mem.write(output_len, guest_size_of::<i32>());
         assert_eq!(
             sysctlbyname(
