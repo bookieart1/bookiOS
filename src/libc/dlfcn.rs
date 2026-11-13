@@ -331,6 +331,12 @@ mod tests {
 
         // Registration does not replay already-loaded images. It only stores
         // the callback for an actual later unload.
-        assert_eq!(env.libc_state.dlfcn.remove_image_callbacks, [callback]);
+        assert_eq!(env.libc_state.dlfcn.remove_image_callbacks.len(), 1);
+        assert_eq!(
+            env.libc_state.dlfcn.remove_image_callbacks[0]
+                .to_ptr()
+                .to_bits(),
+            callback.to_ptr().to_bits()
+        );
     }
 }
