@@ -302,6 +302,23 @@ fn strncasecmp(env: &mut Environment, a: ConstPtr<u8>, b: ConstPtr<u8>, n: Guest
 fn strncat(env: &mut Environment, s1: MutPtr<u8>, s2: ConstPtr<u8>, n: GuestUSize) -> MutPtr<u8> {
     GenericChar::<u8>::strncat(env, s1, s2, n)
 }
+fn __strncat_chk(
+    env: &mut Environment,
+    dest: MutPtr<u8>,
+    src: ConstPtr<u8>,
+    count: GuestUSize,
+    dest_size: GuestUSize,
+) -> MutPtr<u8> {
+    let dest_len = GenericChar::<u8>::strlen(env, dest.cast_const());
+    let src_len = GenericChar::<u8>::strlen(env, src);
+    let copied = src_len.min(count);
+    let required = dest_len
+        .checked_add(copied)
+        .and_then(|len| len.checked_add(1))
+        .expect("strncat size overflow");
+    assert!(required <= dest_size, "Buffer overflow");
+    GenericChar::<u8>::strncat(env, dest, src, count)
+}
 fn strstr(env: &mut Environment, string: ConstPtr<u8>, substring: ConstPtr<u8>) -> ConstPtr<u8> {
     let result = GenericChar::<u8>::strstr(env, string, substring);
     env.diagnostic_string_search(string.to_bits(), substring.to_bits(), result.to_bits());
@@ -379,6 +396,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(strcasecmp(_, _)),
     export_c_func!(strncasecmp(_, _, _)),
     export_c_func!(strncat(_, _, _)),
+    export_c_func!(__strncat_chk(_, _, _, _)),
     export_c_func!(strstr(_, _)),
     export_c_func!(strcasestr(_, _)),
     export_c_func!(strchr(_, _)),
@@ -390,6 +408,32 @@ pub const FUNCTIONS: FunctionExports = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn development_256_fortified_strncat_obeys_count_and_destination_capacity() {
+        let mut env = Environment::new_fake_for_test();
+        let dest = env.mem.alloc(8).cast::<u8>();
+        env.mem.bytes_at_mut(dest, 8).fill(0);
+        env.mem.bytes_at_mut(dest, 3).copy_from_slice(b"ab\0");
+        let src = env.mem.alloc_and_write_cstr(b"cdef");
+
+        assert_eq!(__strncat_chk(&mut env, dest, src.cast_const(), 2, 8), dest);
+        assert_eq!(env.mem.cstr_at(dest.cast_const()), b"abcd");
+
+        let exact = env.mem.alloc(5).cast::<u8>();
+        env.mem.bytes_at_mut(exact, 5).copy_from_slice(b"ab\0\0\0");
+        assert_eq!(__strncat_chk(&mut env, exact, src.cast_const(), 2, 5), exact);
+        assert_eq!(env.mem.cstr_at(exact.cast_const()), b"abcd");
+    }
+
+    #[test]
+    #[should_panic(expected = "Buffer overflow")]
+    fn development_256_fortified_strncat_rejects_overflow() {
+        let mut env = Environment::new_fake_for_test();
+        let dest = env.mem.alloc_and_write_cstr(b"ab");
+        let src = env.mem.alloc_and_write_cstr(b"cdef");
+        let _ = __strncat_chk(&mut env, dest, src.cast_const(), 3, 5);
+    }
 
     #[test]
     fn bcopy_uses_source_first_and_permits_overlap() {
