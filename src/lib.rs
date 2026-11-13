@@ -438,6 +438,19 @@ fn run_app(
         assert!(parse_result == Ok(true));
     }
 
+    if !mem::guest_memory_infrastructure_valid() {
+        let message = "iDared could not reserve guest memory earlier in this process. Later launches are infrastructure-invalid; fully close and restart iDared before testing another game.".to_string();
+        echo!("{}", message);
+        #[cfg(target_os = "ios")]
+        {
+            *window::START_ERROR.lock().unwrap() = Some(message);
+            window::set_picker_return_reason(window::PickerReturnReason::FailedLaunch);
+            return Ok(true);
+        }
+        #[cfg(not(target_os = "ios"))]
+        return Err(message);
+    }
+
     let environment_started = std::time::Instant::now();
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         Environment::new(

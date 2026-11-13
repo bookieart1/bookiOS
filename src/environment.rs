@@ -2783,7 +2783,7 @@ impl Drop for Environment {
             ENVIRONMENT_INSTANCE_EXISTS.store(false, std::sync::atomic::Ordering::SeqCst);
             if time_game_teardown {
                 echo_no_panic!(
-                    "iDared Return Performance: guest Environment teardown completed in {:.3} ms at process t={:.3} ms",
+                    "iDared Return Performance: guest Environment teardown logic completed in {:.3} ms at process t={:.3} ms; field destruction and guest-memory release follow",
                     teardown_started.elapsed().as_secs_f64() * 1000.0,
                     crate::performance_process_elapsed_ms()
                 );
@@ -2810,7 +2810,7 @@ impl Drop for Environment {
         ENVIRONMENT_INSTANCE_EXISTS.store(false, std::sync::atomic::Ordering::Relaxed);
         if time_game_teardown {
             echo_no_panic!(
-                "iDared Return Performance: guest Environment teardown completed in {:.3} ms at process t={:.3} ms",
+                "iDared Return Performance: guest Environment teardown logic completed in {:.3} ms at process t={:.3} ms; field destruction and guest-memory release follow",
                 teardown_started.elapsed().as_secs_f64() * 1000.0,
                 crate::performance_process_elapsed_ms()
             );

@@ -16,6 +16,10 @@
 
 mod allocator;
 mod host;
+
+pub(crate) fn guest_memory_infrastructure_valid() -> bool {
+    host::infrastructure_valid()
+}
 pub(crate) mod object_history;
 
 pub use allocator::{HeapAllocator, VMAllocError};
@@ -257,6 +261,7 @@ pub struct Mem {
     /// fetch, and, unless direct access is disabled, for data outside the
     /// null page.
     bytes: *mut Bytes,
+    host_allocation: host::Allocation,
 
     /// The size of the __PAGE_ZERO segment, where pointer accesses are trapped
     /// to prevent null pointer derefrences.
@@ -285,18 +290,6 @@ pub struct Mem {
     diagnostic_started: std::time::Instant,
 }
 
-impl Drop for Mem {
-    fn drop(&mut self) {
-        unsafe {
-            crate::mem::host::free_memory(
-                self.bytes.cast(),
-                std::mem::size_of::<Bytes>() + HOST_SLACK_SIZE,
-            )
-            .unwrap();
-        }
-    }
-}
-
 impl Mem {
     /// [According to Apple](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/Multithreading/CreatingThreads/CreatingThreads.html)
     /// among others, the iPhone OS main thread stack size is 1MiB.
@@ -315,9 +308,10 @@ impl Mem {
     pub fn new() -> Mem {
         let size = std::mem::size_of::<Bytes>() + HOST_SLACK_SIZE;
 
-        let ptr = unsafe { crate::mem::host::allocate_memory(size) }.unwrap_or_else(|e| {
+        let host_allocation = crate::mem::host::Allocation::new(size).unwrap_or_else(|e| {
             panic!("Couldn't reserve 4 GiB of address space for the emulated device: {e}")
         });
+        let ptr = host_allocation.address();
 
         assert_eq!(
             ptr as usize & PAGE_SIZE_ALIGN_MASK as usize,
@@ -331,6 +325,7 @@ impl Mem {
 
         Mem {
             bytes,
+            host_allocation,
             null_segment_size: 0,
             vm_allocator,
             heap_allocator: None,
@@ -903,5 +898,29 @@ mod diagnostic_write_tests {
             mem.diagnostic_guest_writes_written,
             DIAGNOSTIC_GUEST_WRITES + 4
         );
+    }
+}
+
+#[cfg(test)]
+mod guest_mapping_lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn development_256_repeated_guest_mappings_are_actually_released() {
+        assert_eq!(host::live_mapping_count(), 0);
+        for generation in 1..=40 {
+            let mem = Mem::new();
+            assert_eq!(
+                host::live_mapping_count(),
+                1,
+                "generation {generation} must own exactly one guest mapping"
+            );
+            drop(mem);
+            assert_eq!(
+                host::live_mapping_count(),
+                0,
+                "generation {generation} must confirm its unmap before the next reservation"
+            );
+        }
     }
 }
