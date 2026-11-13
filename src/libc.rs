@@ -25,6 +25,7 @@ pub mod errno;
 pub mod fnmatch;
 pub mod glob;
 pub mod ifaddrs;
+pub mod iconv;
 pub mod keymgr;
 pub mod libkern;
 pub mod mach;
@@ -79,6 +80,7 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
         fnmatch::FUNCTIONS,
         glob::FUNCTIONS,
         ifaddrs::FUNCTIONS,
+        iconv::FUNCTIONS,
         keymgr::FUNCTIONS,
         libkern::os_atomic::FUNCTIONS,
         mach::arm::task::FUNCTIONS,
@@ -141,6 +143,7 @@ pub struct State {
     dirent: dirent::State,
     dlfcn: dlfcn::State,
     pub dispatch: dispatch::State,
+    pub iconv: iconv::State,
     keymgr: keymgr::State,
     math: math::State,
     netdb: netdb::State,
