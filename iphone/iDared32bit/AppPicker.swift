@@ -582,8 +582,8 @@ final class PickerModel: ObservableObject {
                 return compatibility(for: index) == "playable"
             case .needsWork:
                 return compatibility(for: index) == "needsWork"
-            case .crashesIDared:
-                return compatibility(for: index) == "crashesIDared"
+            case .crashes:
+                return compatibility(for: index) == "crashes"
             case .new:
                 return isNew(index)
             }
@@ -1030,7 +1030,7 @@ enum AppFilter: String, CaseIterable, Hashable {
     case all
     case playable
     case needsWork
-    case crashesIDared
+    case crashes
     case new
 
     static var saved: AppFilter {
@@ -1043,7 +1043,7 @@ enum AppFilter: String, CaseIterable, Hashable {
         case .all: return "All Games"
         case .playable: return "Playable"
         case .needsWork: return "Not Working"
-        case .crashesIDared: return "Crashes iDared"
+        case .crashes: return "Crashes"
         case .new: return "New"
         }
     }
@@ -1053,7 +1053,7 @@ enum AppFilter: String, CaseIterable, Hashable {
         case .all: return "square.grid.2x2.fill"
         case .playable: return "checkmark.circle.fill"
         case .needsWork: return "wrench.and.screwdriver.fill"
-        case .crashesIDared: return "exclamationmark.octagon.fill"
+        case .crashes: return "exclamationmark.octagon.fill"
         case .new: return "sparkles"
         }
     }
@@ -1314,11 +1314,11 @@ struct PickerView: View {
                     Button("Mark as Not Playable") {
                         model.setCompatibility("needsWork", for: app)
                     }
-                    Button("Add to Crashes iDared") {
-                        model.setCompatibility("crashesIDared", for: app)
+                    Button("Add to Crashes") {
+                        model.setCompatibility("crashes", for: app)
                     }
-                    if model.compatibility(for: app) == "crashesIDared" {
-                        Button("Remove from Crashes iDared") {
+                    if model.compatibility(for: app) == "crashes" {
+                        Button("Remove from Crashes") {
                             model.setCompatibility("needsWork", for: app)
                         }
                     }

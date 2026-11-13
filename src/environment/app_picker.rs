@@ -198,7 +198,7 @@ fn classify_picker_compatibility(bundle_identifier: &str, display_name: &str) ->
     // Silly Owls and Ski Runner are intentionally absent. Sky Burger's entry
     // is based on its separate Dev 2.32 prompt-triggered host termination, not
     // the later infrastructure-invalid 4 GiB sequence.
-    const CRASHES_IDARED_IDENTIFIERS: &[&str] = &[
+    const CRASHES_IDENTIFIERS: &[&str] = &[
         "com.digitalchocolate.iHouse",
         "com.eeenmachine.SkyBurger",
         "com.gamevil.kamiretro",
@@ -273,8 +273,8 @@ fn classify_picker_compatibility(bundle_identifier: &str, display_name: &str) ->
     ];
 
     let name = display_name.to_uppercase();
-    if CRASHES_IDARED_IDENTIFIERS.contains(&bundle_identifier) {
-        "crashesIDared"
+    if CRASHES_IDENTIFIERS.contains(&bundle_identifier) {
+        "crashes"
     } else if PLAYABLE_IDENTIFIERS.contains(&bundle_identifier)
         || PLAYABLE_NAMES.contains(&name.as_str())
     {
@@ -2953,11 +2953,11 @@ mod tests {
     fn picker_compatibility_is_display_only_and_conservative() {
         assert_eq!(
             picker_compatibility(&test_app("net.skyvu.battlebearsneg1", "Battle Bears -1")),
-            "crashesIDared"
+            "crashes"
         );
         assert_eq!(
             picker_compatibility(&test_app("com.gamevil.kamiretro", "KAMI RETRO")),
-            "crashesIDared"
+            "crashes"
         );
         assert_eq!(
             picker_compatibility(&test_app("com.pinchgames.sillyowls", "Silly Owls")),
