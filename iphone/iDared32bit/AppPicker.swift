@@ -50,7 +50,6 @@ struct PickerInput: Decodable {
     let initialQuickOptionValues: [Int]?
     let branding: String
     let shortVersionText: String
-    let devVersionText: String
     let copyright: String
     let fileManagerURL: String?
     let websiteURL: String
@@ -582,7 +581,9 @@ final class PickerModel: ObservableObject {
             case .playable:
                 return compatibility(for: index) == "playable"
             case .needsWork:
-                return compatibility(for: index) != "playable"
+                return compatibility(for: index) == "needsWork"
+            case .crashesIDared:
+                return compatibility(for: index) == "crashesIDared"
             case .new:
                 return isNew(index)
             }
@@ -1029,6 +1030,7 @@ enum AppFilter: String, CaseIterable, Hashable {
     case all
     case playable
     case needsWork
+    case crashesIDared
     case new
 
     static var saved: AppFilter {
@@ -1040,7 +1042,8 @@ enum AppFilter: String, CaseIterable, Hashable {
         switch self {
         case .all: return "All Games"
         case .playable: return "Playable"
-        case .needsWork: return "Needs Work"
+        case .needsWork: return "Not Working"
+        case .crashesIDared: return "Crashes iDared"
         case .new: return "New"
         }
     }
@@ -1050,6 +1053,7 @@ enum AppFilter: String, CaseIterable, Hashable {
         case .all: return "square.grid.2x2.fill"
         case .playable: return "checkmark.circle.fill"
         case .needsWork: return "wrench.and.screwdriver.fill"
+        case .crashesIDared: return "exclamationmark.octagon.fill"
         case .new: return "sparkles"
         }
     }
@@ -1310,6 +1314,14 @@ struct PickerView: View {
                     Button("Mark as Not Playable") {
                         model.setCompatibility("needsWork", for: app)
                     }
+                    Button("Add to Crashes iDared") {
+                        model.setCompatibility("crashesIDared", for: app)
+                    }
+                    if model.compatibility(for: app) == "crashesIDared" {
+                        Button("Remove from Crashes iDared") {
+                            model.setCompatibility("needsWork", for: app)
+                        }
+                    }
                     if model.compatibilityOverrides[model.input.apps[app].identifier] != nil {
                         Button("Use Built-in Status") {
                             model.setCompatibility(nil, for: app)
@@ -1458,12 +1470,8 @@ struct Header: View {
         ZStack(alignment: .topLeading) {
             model.headerColor.color
                 .place(layout.header)
-            VStack(alignment: .leading, spacing: 0) {
-                Text("v" + model.input.shortVersionText)
-                    .font(.system(size: 15, weight: .semibold))
-                Text(model.input.devVersionText)
-                    .font(.system(size: 10, weight: .medium))
-            }
+            Text("v" + model.input.shortVersionText)
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundColor(model.headerTextColor.color)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)

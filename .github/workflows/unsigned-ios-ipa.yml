@@ -60,7 +60,13 @@ jobs:
           fetch-depth: 1
 
       - name: Verify the exact candidate commit
-        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          development_version="$(sed -n 's/^MARKETING_VERSION = //p' iphone/Config.xcconfig)"
+          test -n "$development_version"
+          test "$(grep -c '^MARKETING_VERSION = ' iphone/Config.xcconfig)" = 1
+          echo "DEVELOPMENT_VERSION=$development_version" >> "$GITHUB_ENV"
 
       - name: Show build tools
         run: |
@@ -198,10 +204,12 @@ jobs:
           APP_PATH="$RUNNER_TEMP/iDared32bit.xcarchive/Products/Applications/iDared 32bit.app"
           ACTUAL_BUNDLE_ID="$(plutil -extract CFBundleIdentifier raw "$APP_PATH/Info.plist")"
           ACTUAL_DISPLAY_NAME="$(plutil -extract CFBundleDisplayName raw "$APP_PATH/Info.plist")"
+          ACTUAL_VERSION="$(plutil -extract CFBundleShortVersionString raw "$APP_PATH/Info.plist")"
 
           test -d "$APP_PATH"
           test "$ACTUAL_BUNDLE_ID" = "$DEV_BUNDLE_ID"
           test "$ACTUAL_DISPLAY_NAME" = "$DEV_DISPLAY_NAME"
+          test "$ACTUAL_VERSION" = "$DEVELOPMENT_VERSION"
           test ! -e "$APP_PATH/embedded.mobileprovision"
 
           if codesign -dv "$APP_PATH" >/dev/null 2>&1; then
@@ -215,17 +223,17 @@ jobs:
 
           (
             cd build
-            /usr/bin/zip -qry iDared32bit-dev-unsigned.ipa Payload
+            /usr/bin/zip -qry "iDared-Dev-$DEVELOPMENT_VERSION.ipa" Payload
           )
 
-          test -s build/iDared32bit-dev-unsigned.ipa
-          shasum -a 256 build/iDared32bit-dev-unsigned.ipa
+          test -s "build/iDared-Dev-$DEVELOPMENT_VERSION.ipa"
+          shasum -a 256 "build/iDared-Dev-$DEVELOPMENT_VERSION.ipa"
 
       - name: Upload the separate unsigned IPA
         uses: actions/upload-artifact@v7
         with:
-          name: iDared32bit-dev-unsigned-${{ github.sha }}
-          path: build/iDared32bit-dev-unsigned.ipa
+          name: iDared-Dev-${{ env.DEVELOPMENT_VERSION }}-${{ github.sha }}
+          path: build/iDared-Dev-${{ env.DEVELOPMENT_VERSION }}.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -243,12 +251,17 @@ jobs:
             find build/native-symbols/dSYMs -name '*.dSYM' -exec dwarfdump --uuid {} \;
           } > build/native-symbols/identity.txt
           cat build/native-symbols/identity.txt
+          (
+            cd build/native-symbols
+            /usr/bin/zip -qry "../iDared-Dev-$DEVELOPMENT_VERSION-native-symbols.zip" .
+          )
+          test -s "build/iDared-Dev-$DEVELOPMENT_VERSION-native-symbols.zip"
 
       - name: Upload native crash symbols
         uses: actions/upload-artifact@v7
         with:
-          name: iDared32bit-native-symbols-${{ github.sha }}
-          path: build/native-symbols/
+          name: iDared-Dev-${{ env.DEVELOPMENT_VERSION }}-native-symbols-${{ github.sha }}
+          path: build/iDared-Dev-${{ env.DEVELOPMENT_VERSION }}-native-symbols.zip
           if-no-files-found: error
           retention-days: 90
 

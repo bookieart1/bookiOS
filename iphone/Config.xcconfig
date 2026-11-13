@@ -15,7 +15,10 @@
 //
 // Don't change them in Xcode's General tab: that writes them into the project
 // file, where they override these.
-MARKETING_VERSION = 1.5.0
+// Development builds use this same canonical value for the picker, the app
+// bundle and delivered artifact names. The hosted packaging gate rejects any
+// disagreement instead of allowing a second independently maintained label.
+MARKETING_VERSION = 2.56
 CURRENT_PROJECT_VERSION = 1
 
 #include? "../Local.xcconfig"

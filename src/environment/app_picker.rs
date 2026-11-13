@@ -189,6 +189,26 @@ struct AppInfo {
 /// picker's optional Playable / Needs Work filter. "Playable" deliberately
 /// includes titles with a useful gameplay path but a known later defect.
 fn classify_picker_compatibility(bundle_identifier: &str, display_name: &str) -> &'static str {
+    // Conservative exact-identity seed: every member has an explicit
+    // whole-host termination or unserviceable-host observation in the
+    // cumulative corpus. A managed guest crash that returns to the picker, a
+    // hang, an ordinary compatibility failure, and an infrastructure-invalid
+    // launch after a 4 GiB reservation failure do not qualify. This category
+    // is picker-only and manually reversible.
+    // Silly Owls and Ski Runner are intentionally absent. Sky Burger's entry
+    // is based on its separate Dev 2.32 prompt-triggered host termination, not
+    // the later infrastructure-invalid 4 GiB sequence.
+    const CRASHES_IDARED_IDENTIFIERS: &[&str] = &[
+        "com.digitalchocolate.iHouse",
+        "com.eeenmachine.SkyBurger",
+        "com.gamevil.kamiretro",
+        "com.krome.BoomerangBlast",
+        "com.miniclip.Fragger",
+        "com.mixelweb.hillbillygreen",
+        "com.teamphobic.gravbot",
+        "com.wb.Scribblenauts",
+        "net.skyvu.battlebearsneg1",
+    ];
     const PLAYABLE_IDENTIFIERS: &[&str] = &[
         "CW-Gunner",
         "com.BaneGames.FlickBuddies",
@@ -253,7 +273,10 @@ fn classify_picker_compatibility(bundle_identifier: &str, display_name: &str) ->
     ];
 
     let name = display_name.to_uppercase();
-    if PLAYABLE_IDENTIFIERS.contains(&bundle_identifier) || PLAYABLE_NAMES.contains(&name.as_str())
+    if CRASHES_IDARED_IDENTIFIERS.contains(&bundle_identifier) {
+        "crashesIDared"
+    } else if PLAYABLE_IDENTIFIERS.contains(&bundle_identifier)
+        || PLAYABLE_NAMES.contains(&name.as_str())
     {
         "playable"
     } else {
@@ -811,55 +834,40 @@ fn inspect_app_package(
     )
 }
 
-const DEV_249_TEST_BUNDLE_IDENTIFIERS: &[&str] = &[
-    "COMTOBIAPPSHUNDREDROOMS",
-    "COMGEEKBEACHAMONSTERATEMYHOMEWORK",
-    "COMGAMEVILAIRPENGUIN",
-    "COMKROMEBOOMERANGBLAST",
-    "COMBABYNINJABABYNINJA",
+/// Development 2.56 physical-validation manifest. Every retained Campaign 3
+/// correction is represented by exact package identity, followed by three
+/// explicit controls. A later Development campaign must replace this manifest
+/// rather than append to it.
+const DEVELOPMENT_256_VALIDATION_BUNDLE_IDENTIFIERS: &[&str] = &[
+    "COMNEXTFLOOR1MINUTERPG",
+    "COMPLAYTONIQAQUABALLER",
     "NETSKYVUBATTLEBEARSNEG1",
-    "COMMAJESTICSOFTWAREBLOT",
-    "COMTURNERBRINGMESANDWICHES",
-    "COMDIGITALPRUNESBUNGEEBALL2PRO",
-    "COMXMGSTUDIOCANNONCADETS",
-    "COMCONTINUITYGAMECONTINUITY2",
-    "COMTINKERHOUSEGAMESCURRENT",
-    "COMPHOSPHORPACTGAME",
-    "COMGALCONIDYNAMITEJACK",
-    "FIELDRUNNERS2IPHONE",
-    "COMROBTOPMAGEGAME",
-    "COMMINICLIPFRAGGER",
-    "COMNAMCONETWORKSGALARG",
-    "COMBATTERYACIDHIGHWAYRIDER",
-    "COMMIXELWEBHILLBILLYGREEN",
-    "COMIUGOIMPLODE",
-    "COMPROFUSIONSTUDIOSISTUNTPRO",
-    "JPCOCAPCOMMONHUNIPUS",
-    "COMMEDUSAODDYSMOGFINAL",
-    "COMPLAYERXPANG",
-    "COMPOPCAPPEGGLE",
-    "COMCHILLINGOROGUESKY",
-    "COMJOYSTICKGENERALSSTACTIONPIG",
-    "COMSEGASPINBALL",
-    "COMMTVNSPONGEBOBDINERDASH",
-    "COMCHILLINGOSPOING",
-    "COMTOUCHFOOSWORDIGO",
-    "COMDIGITALCHOCOLATEIHOUSE",
-    "COMUNIVERSOMOTRENCHBUILD",
-    "COMSEGAVIRTUAFIGHTER2",
-    "COMKONAMIEUOPEWIREWAY",
-    "9X8UEF6RBGCOMGRUMPYFACEWISPIN",
-    "COMIUGOZOMBIES2",
-    "COMGAMEDRSZS",
+    "COMPIXOWLDOODLEGRUB",
+    "COMBOOYAHBIRDSWITHFRIENDS",
+    "COMFINGERWAYFINGEROLYMPICFULL",
+    "COMTEAMPHOBICGRAVBOT",
+    "COMRAVENOUSGAMESLEAGUEOFEVIL",
+    "COMROCKETCATMAGEGAUNTLET",
+    "COMLIMBICSOFTWARETOWERMADNESS",
+    "COMMINICLIPMINERUSH",
+    "COMCRESCENTMOONGAMESSIEGECRAFT",
+    "ISTAPCATSNABBIT",
+    "COMCAPYBARAGAMESSWORDANDSWORCERY",
+    "COMFSWIMP",
     "COMPOPCAPIOSZUMAHD",
+    // Explicit controls: input/orientation, GLES1, and a known functional
+    // audio/gameplay/lifecycle path respectively.
+    "COMEASPYMOUSEBV",
+    "COMCHILLINGOSPOING",
+    "NETSKYVUBATTLEBEARS1",
 ];
 
 fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
-    // Put the current focused device-test batch first, in alphabetical order,
+    // Put the current build's validation manifest first, in alphabetical order,
     // so a full round can be exercised without repeatedly paging through the
     // library. Everything else remains alphabetical.
     // Exact bundle identifiers avoid prefix collisions such as Glyder/Glyder 2
-    // and keep the focused device-test batch deterministic even when filenames
+    // and keep the validation set deterministic even when filenames
     // or localized display names differ.
     let started = Instant::now();
     apps.sort_by_key(|app| {
@@ -870,11 +878,9 @@ fn sort_picker_apps(apps: &mut [AppInfo], timing: &mut LibraryTiming) {
                 .collect()
         };
         let bundle_identifier = normalized(&app.bundle_identifier);
-        let rank = DEV_249_TEST_BUNDLE_IDENTIFIERS
-            .iter()
-            .position(|&identifier| bundle_identifier == identifier)
-            .unwrap_or(usize::MAX);
-        (rank, app.display_name.to_uppercase())
+        let validation =
+            DEVELOPMENT_256_VALIDATION_BUNDLE_IDENTIFIERS.contains(&bundle_identifier.as_str());
+        (!validation, app.display_name.to_uppercase())
     });
     timing.sorting = started.elapsed();
 }
@@ -1713,16 +1719,7 @@ fn app_picker_inner(
     {
         let mut font_size: CGFloat = 12.0;
         let mut font: id = msg_class![env; UIFont systemFontOfSize:font_size];
-        let full_text = format!(
-            "iDared 32bit {}{}{} · Development 2.51 · Universal Contracts",
-            crate::branding(),
-            if crate::branding().is_empty() {
-                ""
-            } else {
-                " "
-            },
-            crate::DISPLAY_VERSION
-        );
+        let full_text = format!("v{}", crate::DISPLAY_VERSION);
         // Devices with a Dynamic Island or notch have a taller safe area inset
         // than just a status bar: 59+ and 44–50 points respectively.
         let device_safe_top = safe_top / env.window().screen_scale();
@@ -2955,6 +2952,22 @@ mod tests {
     #[test]
     fn picker_compatibility_is_display_only_and_conservative() {
         assert_eq!(
+            picker_compatibility(&test_app("net.skyvu.battlebearsneg1", "Battle Bears -1")),
+            "crashesIDared"
+        );
+        assert_eq!(
+            picker_compatibility(&test_app("com.gamevil.kamiretro", "KAMI RETRO")),
+            "crashesIDared"
+        );
+        assert_eq!(
+            picker_compatibility(&test_app("com.pinchgames.sillyowls", "Silly Owls")),
+            "needsWork"
+        );
+        assert_eq!(
+            picker_compatibility(&test_app("com.mtvn.skirunner", "Ski Runner")),
+            "needsWork"
+        );
+        assert_eq!(
             picker_compatibility(&test_app("com.chillingo.spoing", "Spoing")),
             "playable"
         );
@@ -2989,47 +3002,26 @@ mod tests {
     }
 
     #[test]
-    fn dev_249_test_batch_is_first_in_exact_alphabetical_order() {
+    fn development_256_validation_manifest_is_first_in_exact_alphabetical_order() {
         let campaign = [
-            ("com.tobiapps.hundred-rooms", "100 Floors"),
-            ("com.geekbeach.amonsteratemyhomework", "A Monster Ate My Homework"),
-            ("com.gamevil.airpenguin", "Air Penguin"),
-            ("com.krome.boomerangblast", "B'Blast"),
-            ("com.babyninja.babyninja", "Baby Ninja"),
+            ("com.NextFloor.1MinuteRPG", "1 Minute RPG"),
+            ("com.playtoniq.aquaballer", "aqua baller"),
+            ("net.skyvu.battlebears1", "Battle Bears"),
             ("net.skyvu.battlebearsneg1", "Battle Bears -1"),
-            ("com.majesticsoftware.blot", "Blot"),
-            ("com.turner.bringmesandwiches", "Bring Me Sandwiches"),
-            ("com.digitalprunes.bungeeball2pro", "Bungee Ball"),
-            ("com.xmgstudio.cannoncadets", "Cannon Cadets"),
-            ("com.continuitygame.continuity2", "Continuity 2"),
-            ("com.tinkerhousegames.current", "Current"),
-            ("com.phosphor.pactgame", "Dark Meadow"),
-            ("com.galcon.idynamitejack", "Dynamite Jack"),
-            ("fieldrunners2.iphone", "Fieldrunners 2"),
-            ("com.robtop.magegame", "Forlorn"),
-            ("com.miniclip.fragger", "Fragger"),
-            ("com.namconetworks.galarg", "Galaga Remix"),
-            ("com.batteryacid.highwayrider", "Highway Rider"),
-            ("com.mixelweb.hillbillygreen", "Hill Billy"),
-            ("com.iugo.Implode", "Implode!"),
-            ("com.profusionstudios.istuntpro", "iStunt Reloaded Pro"),
-            ("jp.co.capcom.monhunipus", "Monster Hunter"),
-            ("com.medusa.oddysmogfinal", "Oddy Smog"),
-            ("com.playerx.pang", "Pang"),
-            ("com.popcap.Peggle", "Peggle"),
-            ("com.chillingo.roguesky", "Rogue Sky"),
-            ("com.joystickgenerals.STActionPig", "S.T. ActionPig"),
-            ("com.sega.spinball", "Sonic Spinball"),
-            ("com.mtvn.spongebobdinerdash", "SpongeBob Diner Dash"),
+            ("com.pixowl.doodlegrub", "Doodle Grub"),
+            ("com.booyah.birdswithfriends", "Early Bird"),
+            ("com.fingerway.fingerolympicfull", "Finger Olympic"),
+            ("com.teamphobic.gravbot", "GravBot"),
+            ("com.ravenousgames.leagueofevil", "League of Evil"),
+            ("com.limbicsoftware.towermadness", "Madness"),
+            ("com.rocketcat.MageGauntlet", "Mage Gauntlet"),
+            ("com.miniclip.minerush", "Rail Rush"),
+            ("com.crescentmoongames.siegecraft", "Siegecraft"),
+            ("is.tapcat.snabbit", "Snabbit"),
             ("com.chillingo.spoing", "Spoing"),
-            ("com.touchfoo.swordigo", "Swordigo"),
-            ("com.digitalchocolate.iHouse", "Tower Blocks"),
-            ("com.universomo.TrenchBuild", "Trench Run"),
-            ("com.sega.virtuafighter2", "Virtua Fighter 2"),
-            ("com.konami-euope.wireway", "Wire Way"),
-            ("9X8UEF6RBG.com.GrumpyFace.Wispin", "Wispin"),
-            ("com.iugo.zombies2", "ZA! 2ndWave"),
-            ("com.gamedrs.zs", "ZombieSmash"),
+            ("com.ea.spymouse.bv", "Spy Mouse"),
+            ("com.capybaragames.swordandsworcery", "Sword & Sworcery"),
+            ("com.fs.wimp", "Wimp"),
             ("com.popcap.ios.ZumaHD", "Zuma HD"),
         ];
         let mut apps: Vec<AppInfo> = campaign

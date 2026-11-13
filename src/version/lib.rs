@@ -33,3 +33,11 @@ pub fn branding() -> &'static str {
         "UNOFFICIAL"
     }
 }
+
+#[cfg(test)]
+mod development_version_tests {
+    #[test]
+    fn development_256_display_uses_canonical_delivered_version() {
+        assert_eq!(super::DISPLAY_VERSION, "2.56");
+    }
+}
