@@ -363,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn gai_strerror_uses_darwin_eai_namespace_and_stable_storage() {
+    fn development_256_gai_strerror_uses_darwin_eai_namespace_and_stable_storage() {
         let mut env = Environment::new_fake_for_test();
 
         let fail = gai_strerror(&mut env, EAI_FAIL);
