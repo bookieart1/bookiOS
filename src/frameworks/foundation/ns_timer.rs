@@ -396,17 +396,15 @@ mod tests {
     fn development_256_timer_set_fire_date_reschedules_without_changing_interval() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
-        let target: id = msg_class![env; NSObject new];
-        let selector = env.objc.lookup_selector("description").unwrap();
         let date: id = msg_class![env; NSDate alloc];
         let date: id = msg![env; date initWithTimeIntervalSinceNow:5.0];
-        let timer: id = msg_class![env; NSTimer alloc];
-        let timer: id = msg![env; timer initWithFireDate:date
-                                              interval:30.0
-                                                target:target
-                                              selector:selector
-                                              userInfo:nil
-                                               repeats:true];
+        let timer: id = msg_class![env; NSTimer new];
+        {
+            let host = env.objc.borrow_mut::<NSTimerHostObject>(timer);
+            host.ns_interval = 30.0;
+            host.rust_interval = Duration::from_secs(30);
+            host.repeats = true;
+        }
         let before = Instant::now();
         () = msg![env; timer setFireDate:date];
         let host = env.objc.borrow::<NSTimerHostObject>(timer);
@@ -416,6 +414,5 @@ mod tests {
         assert_eq!(host.ns_interval, 30.0);
         release(env, timer);
         release(env, date);
-        release(env, target);
     }
 }
