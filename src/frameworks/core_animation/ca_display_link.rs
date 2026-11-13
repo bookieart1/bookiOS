@@ -160,6 +160,7 @@ mod tests {
     fn development_256_display_link_exposes_default_and_updated_frame_interval() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
         let target: id = msg_class![env; NSObject new];
         let selector = env.objc.lookup_selector("description").unwrap();
         let link: id = msg_class![env; CADisplayLink displayLinkWithTarget:target selector:selector];
@@ -168,6 +169,7 @@ mod tests {
         () = msg![env; link setFrameInterval:3i32];
         let updated: NSInteger = msg![env; link frameInterval];
         assert_eq!(updated, 3);
+        release(env, pool);
         release(env, target);
     }
 }
