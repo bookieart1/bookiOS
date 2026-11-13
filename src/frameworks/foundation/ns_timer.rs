@@ -396,6 +396,7 @@ mod tests {
     fn development_256_timer_set_fire_date_reschedules_without_changing_interval() {
         let mut env = Environment::new_fake_for_test_with_thread();
         let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
         let target: id = msg_class![env; NSObject new];
         let selector = env.objc.lookup_selector("description").unwrap();
         let timer: id = msg_class![env; NSTimer timerWithTimeInterval:30.0
@@ -411,6 +412,7 @@ mod tests {
         assert!(due >= before.checked_add(Duration::from_secs(4)).unwrap());
         assert!(due <= Instant::now().checked_add(Duration::from_secs(6)).unwrap());
         assert_eq!(host.ns_interval, 30.0);
+        release(env, pool);
         release(env, target);
     }
 }
