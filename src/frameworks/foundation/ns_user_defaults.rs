@@ -21,6 +21,7 @@ use crate::objc::{
 };
 
 use crate::Environment;
+use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct State {
@@ -47,6 +48,9 @@ struct NSUserDefaultsHostObject {
     /// Used if not found in other dictionaries.
     /// `NSMutableDictionary *`
     registration_domain_dict: id,
+    /// Additional application suites addressed through CFPreferences.
+    /// Values are owned mutable dictionaries and persist as separate plists.
+    named_domain_dicts: HashMap<String, id>,
 }
 impl HostObject for NSUserDefaultsHostObject {}
 
@@ -60,6 +64,7 @@ pub(crate) fn install_isolated_standard_defaults_for_test(env: &mut Environment)
         app_domain_dict: app,
         global_domain_dict: global,
         registration_domain_dict: registered,
+        named_domain_dicts: HashMap::new(),
     };
     State::get(env).standard_defaults = Some(defaults);
     defaults
@@ -108,6 +113,7 @@ pub const CLASSES: ClassExports = objc_classes! {
         global_domain_dict: nil,
         app_domain_dict: nil,
         registration_domain_dict: nil,
+        named_domain_dicts: HashMap::new(),
     });
     env.objc.alloc_object(this, host_object, &mut env.mem)
 }
@@ -176,6 +182,15 @@ pub const CLASSES: ClassExports = objc_classes! {
     release(env, global_domain_dict);
     let registration_domain_dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).registration_domain_dict;
     release(env, registration_domain_dict);
+    let named_domains = std::mem::take(
+        &mut env
+            .objc
+            .borrow_mut::<NSUserDefaultsHostObject>(this)
+            .named_domain_dicts,
+    );
+    for (_, domain) in named_domains {
+        release(env, domain);
+    }
 
     env.objc.dealloc_object(this, &mut env.mem);
 }
@@ -204,8 +219,30 @@ pub const CLASSES: ClassExports = objc_classes! {
         && name == env.bundle.bundle_identifier()
     {
         env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict
+    } else if let Some(&dict) = env
+        .objc
+        .borrow::<NSUserDefaultsHostObject>(this)
+        .named_domain_dicts
+        .get(&name)
+    {
+        dict
     } else {
-        nil
+        let plist_file_path_buf = env.fs.home_directory()
+            .join("Library")
+            .join("Preferences")
+            .join(format!("{}.plist", name));
+        let plist_file_path =
+            ns_string::from_rust_string(env, plist_file_path_buf.as_str().to_string());
+        let loaded: id = msg_class![env; NSDictionary dictionaryWithContentsOfFile:plist_file_path];
+        if loaded == nil {
+            return nil;
+        }
+        let mutable: id = msg![env; loaded mutableCopy];
+        env.objc
+            .borrow_mut::<NSUserDefaultsHostObject>(this)
+            .named_domain_dicts
+            .insert(name, mutable);
+        mutable
     };
     if dict == nil {
         return nil;
@@ -216,6 +253,36 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
     let copy: id = msg![env; dict copy];
     autorelease(env, copy)
+}
+
+- (())setPersistentDomain:(id)domain forName:(id)domain_name { // NSDictionary *, NSString *
+    assert!(domain != nil && domain_name != nil);
+    let name = to_rust_string(env, domain_name);
+    assert!(name != "NSGlobalDomain");
+    let mutable: id = msg![env; domain mutableCopy];
+    let previous = env
+        .objc
+        .borrow_mut::<NSUserDefaultsHostObject>(this)
+        .named_domain_dicts
+        .insert(name, mutable);
+    if let Some(previous) = previous {
+        release(env, previous);
+    }
+    post_did_change_notification(env, this);
+}
+
+- (())removePersistentDomainForName:(id)domain_name { // NSString *
+    assert!(domain_name != nil);
+    let name = to_rust_string(env, domain_name);
+    if let Some(previous) = env
+        .objc
+        .borrow_mut::<NSUserDefaultsHostObject>(this)
+        .named_domain_dicts
+        .remove(&name)
+    {
+        release(env, previous);
+        post_did_change_notification(env, this);
+    }
 }
 
 - (id)valueForKey:(id)key { // NSString*
@@ -432,7 +499,6 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (bool)synchronize {
-    // Note: only app domain dict gets synchronized!
     let plist_file_path_dir = env.fs.home_directory()
         .join("Library")
         .join("Preferences");
@@ -442,7 +508,22 @@ pub const CLASSES: ClassExports = objc_classes! {
     let plist_file_path_buf = plist_file_path_dir.join(plist_file_name);
     let plist_file_path = ns_string::from_rust_string(env, plist_file_path_buf.as_str().to_string());
     let dict = env.objc.borrow::<NSUserDefaultsHostObject>(this).app_domain_dict;
-    msg![env; dict writeToFile:plist_file_path atomically:true]
+    let mut success: bool = msg![env; dict writeToFile:plist_file_path atomically:true];
+
+    let named_domains: Vec<(String, id)> = env
+        .objc
+        .borrow::<NSUserDefaultsHostObject>(this)
+        .named_domain_dicts
+        .iter()
+        .map(|(name, &dict)| (name.clone(), dict))
+        .collect();
+    for (name, dict) in named_domains {
+        let path = plist_file_path_dir.join(format!("{}.plist", name));
+        let path = ns_string::from_rust_string(env, path.as_str().to_string());
+        let written: bool = msg![env; dict writeToFile:path atomically:true];
+        success &= written;
+    }
+    success
 }
 
 @end
@@ -471,6 +552,7 @@ mod tests {
             app_domain_dict: app,
             global_domain_dict: global,
             registration_domain_dict: registered,
+            named_domain_dicts: HashMap::new(),
         };
         let key = ns_string::get_static_str(env, "trpg/gcID");
         let missing = ns_string::get_static_str(env, "absent");
@@ -523,6 +605,7 @@ mod tests {
             app_domain_dict: app,
             global_domain_dict: global,
             registration_domain_dict: nil,
+            named_domain_dicts: HashMap::new(),
         };
         let domain = ns_string::get_static_str(env, "NSGlobalDomain");
         let snapshot: id = msg![env; defaults persistentDomainForName:domain];
@@ -551,6 +634,7 @@ mod tests {
             app_domain_dict: app,
             global_domain_dict: global,
             registration_domain_dict: registered,
+            named_domain_dicts: HashMap::new(),
         };
         let notifications: id = msg_class![env; NSMutableArray new];
         let center: id = msg_class![env; NSNotificationCenter defaultCenter];
@@ -603,6 +687,7 @@ mod tests {
             app_domain_dict: app,
             global_domain_dict: global,
             registration_domain_dict: registered,
+            named_domain_dicts: HashMap::new(),
         };
         let key = ns_string::get_static_str(env, "rfq-root");
         let source: id = msg_class![env; NSMutableDictionary new];
@@ -633,6 +718,7 @@ mod tests {
             app_domain_dict: app,
             global_domain_dict: global,
             registration_domain_dict: registered,
+            named_domain_dicts: HashMap::new(),
         };
 
         let defaults_key = ns_string::get_static_str(env, "rfq-root");
@@ -754,6 +840,7 @@ mod tests {
             app_domain_dict: app,
             global_domain_dict: global,
             registration_domain_dict: registered,
+            named_domain_dicts: HashMap::new(),
         };
         let notifications: id = msg_class![env; NSMutableArray new];
         let center: id = msg_class![env; NSNotificationCenter defaultCenter];
@@ -804,6 +891,7 @@ mod tests {
             app_domain_dict: app,
             global_domain_dict: global,
             registration_domain_dict: registered,
+            named_domain_dicts: HashMap::new(),
         };
 
         let invalid_defaults_key = ns_string::get_static_str(env, "invalid-graph");
@@ -886,6 +974,7 @@ mod tests {
             app_domain_dict: app,
             global_domain_dict: global,
             registration_domain_dict: registered,
+            named_domain_dicts: HashMap::new(),
         };
         let defaults_key = ns_string::get_static_str(env, "performance-graph");
 
@@ -973,6 +1062,7 @@ mod tests {
             app_domain_dict: app,
             global_domain_dict: global,
             registration_domain_dict: registered,
+            named_domain_dicts: HashMap::new(),
         };
         let defaults_key = ns_string::get_static_str(env, "stability-graph");
         let child_key = ns_string::get_static_str(env, "child");

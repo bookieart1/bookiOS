@@ -73,12 +73,28 @@ fn CFPreferencesSetAppValue(
     value: CFPropertyListRef,
     app_id: CFStringRef,
 ) {
-    assert!(is_current_application(env, app_id));
+    assert!(app_id != nil);
     let user_defaults: id = msg_class![env; NSUserDefaults standardUserDefaults];
-    if value == nil {
-        msg![env; user_defaults removeObjectForKey:key]
+    if is_current_application(env, app_id) {
+        if value == nil {
+            msg![env; user_defaults removeObjectForKey:key]
+        } else {
+            msg![env; user_defaults setObject:value forKey:key]
+        }
     } else {
-        msg![env; user_defaults setObject:value forKey:key]
+        let existing: id = msg![env; user_defaults persistentDomainForName:app_id];
+        let domain: id = if existing == nil {
+            msg_class![env; NSMutableDictionary new]
+        } else {
+            msg![env; existing mutableCopy]
+        };
+        if value == nil {
+            () = msg![env; domain removeObjectForKey:key];
+        } else {
+            () = msg![env; domain setObject:value forKey:key];
+        }
+        () = msg![env; user_defaults setPersistentDomain:domain forName:app_id];
+        crate::objc::release(env, domain);
     }
 }
 
@@ -93,7 +109,7 @@ fn CFPreferencesSetValue(
     let current_user = ns_string::get_static_str(env, kCFPreferencesCurrentUser);
     let any_host = ns_string::get_static_str(env, kCFPreferencesAnyHost);
     assert!(key != nil);
-    assert!(is_current_application(env, app_id));
+    assert!(app_id != nil);
     assert!(user_name != nil && msg![env; user_name isEqualToString:current_user]);
     assert!(host_name != nil && msg![env; host_name isEqualToString:any_host]);
 
@@ -104,7 +120,7 @@ fn CFPreferencesSetValue(
 }
 
 fn CFPreferencesAppSynchronize(env: &mut Environment, app_id: CFStringRef) -> bool {
-    assert!(is_current_application(env, app_id));
+    assert!(app_id != nil);
     let user_defaults: id = msg_class![env; NSUserDefaults standardUserDefaults];
     msg![env; user_defaults synchronize]
 }
@@ -235,6 +251,72 @@ mod tests {
         CFPreferencesSetValue(env, key, nil, app, user, host);
         let removed = CFPreferencesCopyAppValue(env, key, app);
         assert_eq!(removed, nil);
+    }
+
+    #[test]
+    fn development_256_named_application_domain_isolated_relaunch_and_removal() {
+        let host_root = std::env::temp_dir().join(format!(
+            "idared-development-256-cfpreferences-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&host_root).unwrap();
+        let domain_name = "com.example.legacy-preferences-suite";
+
+        {
+            let mut env = Environment::new_fake_for_test_with_thread();
+            *env.fs = crate::fs::Fs::new_fake_fs_with_writable_host_root(&host_root);
+            env.bundle.set_fake_identity_for_test();
+            env.options.preferred_languages = Some(vec!["en".to_owned()]);
+            let env = &mut env;
+            let stack = env.mem.alloc(0x1000);
+            env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+            let key = ns_string::get_static_str(env, "named-domain-key");
+            let value = ns_string::get_static_str(env, "saved");
+            let app = ns_string::get_static_str(env, domain_name);
+            let user = ns_string::get_static_str(env, kCFPreferencesCurrentUser);
+            let host = ns_string::get_static_str(env, kCFPreferencesAnyHost);
+
+            CFPreferencesSetValue(env, key, value, app, user, host);
+            let current_app = ns_string::get_static_str(env, kCFPreferencesCurrentApplication);
+            assert_eq!(CFPreferencesCopyAppValue(env, key, current_app), nil);
+            assert!(CFPreferencesAppSynchronize(env, app));
+        }
+
+        {
+            let mut env = Environment::new_fake_for_test_with_thread();
+            *env.fs = crate::fs::Fs::new_fake_fs_with_writable_host_root(&host_root);
+            env.bundle.set_fake_identity_for_test();
+            env.options.preferred_languages = Some(vec!["en".to_owned()]);
+            let env = &mut env;
+            let stack = env.mem.alloc(0x1000);
+            env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+            let key = ns_string::get_static_str(env, "named-domain-key");
+            let value = ns_string::get_static_str(env, "saved");
+            let app = ns_string::get_static_str(env, domain_name);
+            let user = ns_string::get_static_str(env, kCFPreferencesCurrentUser);
+            let host = ns_string::get_static_str(env, kCFPreferencesAnyHost);
+
+            let reloaded = CFPreferencesCopyAppValue(env, key, app);
+            assert_ne!(reloaded, nil);
+            assert!(msg![env; reloaded isEqual:value]);
+            release(env, reloaded);
+            CFPreferencesSetValue(env, key, nil, app, user, host);
+            assert!(CFPreferencesAppSynchronize(env, app));
+        }
+
+        {
+            let mut env = Environment::new_fake_for_test_with_thread();
+            *env.fs = crate::fs::Fs::new_fake_fs_with_writable_host_root(&host_root);
+            env.bundle.set_fake_identity_for_test();
+            env.options.preferred_languages = Some(vec!["en".to_owned()]);
+            let env = &mut env;
+            let stack = env.mem.alloc(0x1000);
+            env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+            let key = ns_string::get_static_str(env, "named-domain-key");
+            let app = ns_string::get_static_str(env, domain_name);
+            assert_eq!(CFPreferencesCopyAppValue(env, key, app), nil);
+        }
     }
 
     #[test]
