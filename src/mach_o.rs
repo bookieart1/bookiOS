@@ -196,6 +196,19 @@ fn get_sym_by_idx<'a>(
     iter.next()
 }
 
+fn indirect_symbol_name(sym: Option<Symbol<'_>>) -> Option<String> {
+    match sym {
+        Some(Symbol::Undefined { name: Some(name), .. })
+        | Some(Symbol::Prebound { name: Some(name), .. })
+        | Some(Symbol::Defined { name: Some(name), .. }) => Some(name.to_owned()),
+        // STAB/debug symbols do not describe a runtime definition or import.
+        // Legacy binaries may nevertheless leave their indices in an indirect
+        // table, in which case the corresponding slot remains unbound.
+        Some(Symbol::Debug { .. }) | None => None,
+        _ => panic!("Unexpected symbol kind {sym:?}"),
+    }
+}
+
 /// Parsed relocation entry
 #[derive(Debug)]
 enum Reloc {
@@ -525,17 +538,7 @@ impl MachO {
                             is_64bit,
                             &mut cursor,
                         );
-                        indirect_undef_symbols.push(match sym {
-                            // apparently used in apps?
-                            Some(Symbol::Undefined { name: Some(n), .. }) => Some(String::from(n)),
-                            // apparently used in libraries?
-                            Some(Symbol::Prebound { name: Some(n), .. }) => Some(String::from(n)),
-                            // apparently used within libstdc++ for linking to
-                            // itself, e.g. to "__Znwm". might be a PIC thing
-                            Some(Symbol::Defined { name: Some(n), .. }) => Some(String::from(n)),
-                            None => None,
-                            _ => panic!("Unexpected symbol kind {sym:?}"),
-                        })
+                        indirect_undef_symbols.push(indirect_symbol_name(sym))
                     }
 
                     let extrels = &bytes[extreloff as usize..][..nextrel as usize * 8];
@@ -592,6 +595,8 @@ impl MachO {
                                 into_mem.write(ptr_ptr, 0); // Clear prebinding.
                                 external_relocations.push((addr, String::from(n)));
                             }
+                            // Debug/STAB entries have no runtime binding.
+                            Some(Symbol::Debug { .. }) => {}
                             _ => panic!("Unexpected symbol kind {sym:?}"),
                         };
                     }
@@ -797,5 +802,52 @@ impl MachO {
     /// Get a section by its name (`&str`) or type ([SectionType]).
     pub fn get_section<P: SectionPredicate>(&self, by: P) -> Option<&Section> {
         self.sections.iter().find(|section| by.test(section))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn development_256_wimp_debug_indirect_symbol_is_nonbinding() {
+        let debug = Symbol::Debug {
+            name: Some("CFStringGetCStringPtr"),
+            section: None,
+            desc: 0,
+            addr: 138,
+        };
+        assert_eq!(indirect_symbol_name(Some(debug)), None);
+
+        let undefined = Symbol::Undefined {
+            name: Some("ordinary_import"),
+            external: true,
+            desc: 0,
+        };
+        let defined = Symbol::Defined {
+            name: Some("internal_pic_target"),
+            external: false,
+            section: None,
+            desc: 0,
+            entry: 0x1234,
+        };
+        let prebound = Symbol::Prebound {
+            name: Some("legacy_prebound_import"),
+            external: true,
+            desc: 0,
+        };
+        assert_eq!(
+            indirect_symbol_name(Some(undefined)).as_deref(),
+            Some("ordinary_import")
+        );
+        assert_eq!(
+            indirect_symbol_name(Some(defined)).as_deref(),
+            Some("internal_pic_target")
+        );
+        assert_eq!(
+            indirect_symbol_name(Some(prebound)).as_deref(),
+            Some("legacy_prebound_import")
+        );
+        assert_eq!(indirect_symbol_name(None), None);
     }
 }
