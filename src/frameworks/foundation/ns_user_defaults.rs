@@ -212,7 +212,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     if domain_name == nil {
         return nil;
     }
-    let name = to_rust_string(env, domain_name);
+    let name = to_rust_string(env, domain_name).into_owned();
     let dict = if name == "NSGlobalDomain" {
         env.objc.borrow::<NSUserDefaultsHostObject>(this).global_domain_dict
     } else if !env.bundle.bundle_path().as_str().is_empty()
@@ -257,7 +257,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())setPersistentDomain:(id)domain forName:(id)domain_name { // NSDictionary *, NSString *
     assert!(domain != nil && domain_name != nil);
-    let name = to_rust_string(env, domain_name);
+    let name = to_rust_string(env, domain_name).into_owned();
     assert!(name != "NSGlobalDomain");
     let mutable: id = msg![env; domain mutableCopy];
     let previous = env
@@ -273,7 +273,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (())removePersistentDomainForName:(id)domain_name { // NSString *
     assert!(domain_name != nil);
-    let name = to_rust_string(env, domain_name);
+    let name = to_rust_string(env, domain_name).into_owned();
     if let Some(previous) = env
         .objc
         .borrow_mut::<NSUserDefaultsHostObject>(this)
