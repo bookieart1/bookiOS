@@ -125,6 +125,25 @@ fn CFPreferencesAppSynchronize(env: &mut Environment, app_id: CFStringRef) -> bo
     msg![env; user_defaults synchronize]
 }
 
+fn CFPreferencesSynchronize(
+    env: &mut Environment,
+    app_id: CFStringRef,
+    user_name: CFStringRef,
+    host_name: CFStringRef,
+) -> bool {
+    let current_user = ns_string::get_static_str(env, kCFPreferencesCurrentUser);
+    let any_host = ns_string::get_static_str(env, kCFPreferencesAnyHost);
+    if app_id == nil
+        || user_name == nil
+        || host_name == nil
+        || !msg![env; user_name isEqualToString:current_user]
+        || !msg![env; host_name isEqualToString:any_host]
+    {
+        return false;
+    }
+    CFPreferencesAppSynchronize(env, app_id)
+}
+
 fn CFPreferencesCopyKeyList(
     env: &mut Environment,
     app_id: CFStringRef,
@@ -192,6 +211,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(CFPreferencesSetAppValue(_, _, _)),
     export_c_func!(CFPreferencesSetValue(_, _, _, _, _)),
     export_c_func!(CFPreferencesAppSynchronize(_)),
+    export_c_func!(CFPreferencesSynchronize(_, _, _)),
     export_c_func!(CFPreferencesCopyKeyList(_, _, _)),
 ];
 
@@ -280,7 +300,14 @@ mod tests {
             CFPreferencesSetValue(env, key, value, app, user, host);
             let current_app = ns_string::get_static_str(env, kCFPreferencesCurrentApplication);
             assert_eq!(CFPreferencesCopyAppValue(env, key, current_app), nil);
-            assert!(CFPreferencesAppSynchronize(env, app));
+            assert!(CFPreferencesSynchronize(env, app, user, host));
+            let unsupported_host = ns_string::get_static_str(env, "unsupported-host");
+            assert!(!CFPreferencesSynchronize(
+                env,
+                app,
+                user,
+                unsupported_host
+            ));
         }
 
         {
@@ -302,7 +329,7 @@ mod tests {
             assert!(msg![env; reloaded isEqual:value]);
             release(env, reloaded);
             CFPreferencesSetValue(env, key, nil, app, user, host);
-            assert!(CFPreferencesAppSynchronize(env, app));
+            assert!(CFPreferencesSynchronize(env, app, user, host));
         }
 
         {
