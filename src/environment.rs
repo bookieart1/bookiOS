@@ -49,6 +49,33 @@ pub type ThreadId = usize;
 
 pub type HostContext = Coroutine<Environment, Environment, Environment>;
 
+const MAX_STACK_TRACE_FRAMES: usize = 256;
+
+#[derive(Debug, PartialEq, Eq)]
+enum StackTraceWalkStop {
+    OutsideStack,
+    RepeatedFramePointer,
+    FrameLimit,
+}
+
+fn stack_trace_walk_stop(
+    stack_range: &std::ops::RangeInclusive<u32>,
+    frame_pointer: u32,
+    visited: &mut HashSet<u32>,
+    frames_emitted: usize,
+) -> Option<StackTraceWalkStop> {
+    if frames_emitted >= MAX_STACK_TRACE_FRAMES {
+        return Some(StackTraceWalkStop::FrameLimit);
+    }
+    if !stack_range.contains(&frame_pointer) {
+        return Some(StackTraceWalkStop::OutsideStack);
+    }
+    if !visited.insert(frame_pointer) {
+        return Some(StackTraceWalkStop::RepeatedFramePointer);
+    }
+    None
+}
+
 /// Bookkeeping for a thread.
 pub struct Thread {
     /// The current running state of the thread. See [ThreadState].
@@ -1230,10 +1257,30 @@ impl Environment {
         }
         let mut i = 2;
         let mut fp: mem::ConstPtr<u8> = mem::Ptr::from_bits(regs[abi::FRAME_POINTER]);
+        let mut visited_frame_pointers = HashSet::new();
         loop {
-            if !stack_range.contains(&fp.to_bits()) {
-                echo_no_panic!("Next FP ({:?}) is outside the stack.", fp);
-                break;
+            match stack_trace_walk_stop(
+                &stack_range,
+                fp.to_bits(),
+                &mut visited_frame_pointers,
+                i,
+            ) {
+                Some(StackTraceWalkStop::OutsideStack) => {
+                    echo_no_panic!("Next FP ({:?}) is outside the stack.", fp);
+                    break;
+                }
+                Some(StackTraceWalkStop::RepeatedFramePointer) => {
+                    echo_no_panic!("Stopping stack trace at repeated FP {:?}.", fp);
+                    break;
+                }
+                Some(StackTraceWalkStop::FrameLimit) => {
+                    echo_no_panic!(
+                        "Stopping stack trace after {} frames (bounded limit).",
+                        MAX_STACK_TRACE_FRAMES
+                    );
+                    break;
+                }
+                None => {}
             }
             lr = self.mem.read((fp + 4).cast());
             fp = self.mem.read(fp.cast());
@@ -2773,7 +2820,30 @@ impl Drop for Environment {
 
 #[cfg(test)]
 mod memory_fault_diagnostic_tests {
-    use super::{decode_arm_direct_global_getter, decode_arm_pc_relative_literal_load};
+    use super::{
+        decode_arm_direct_global_getter, decode_arm_pc_relative_literal_load,
+        stack_trace_walk_stop, StackTraceWalkStop, MAX_STACK_TRACE_FRAMES,
+    };
+
+    #[test]
+    fn development_256_stack_trace_walk_is_bounded_and_rejects_frame_pointer_cycles() {
+        let stack = 0x1000..=0x2000;
+        let mut visited = std::collections::HashSet::new();
+
+        assert_eq!(stack_trace_walk_stop(&stack, 0x1800, &mut visited, 2), None);
+        assert_eq!(
+            stack_trace_walk_stop(&stack, 0x1800, &mut visited, 3),
+            Some(StackTraceWalkStop::RepeatedFramePointer)
+        );
+        assert_eq!(
+            stack_trace_walk_stop(&stack, 0x3000, &mut visited, 4),
+            Some(StackTraceWalkStop::OutsideStack)
+        );
+        assert_eq!(
+            stack_trace_walk_stop(&stack, 0x1804, &mut visited, MAX_STACK_TRACE_FRAMES),
+            Some(StackTraceWalkStop::FrameLimit)
+        );
+    }
 
     #[test]
     fn indirect_literal_chain_reconstructs_slot_and_rejects_overwritten_register() {
