@@ -27,6 +27,13 @@ on:
         description: Bypass Cargo cache restore/save for a diagnostic cold run
         type: boolean
         default: false
+      artifact_role:
+        description: Artifact role when build_ipa is enabled
+        type: choice
+        options:
+          - replacement
+          - lifecycle-diagnostic
+        default: replacement
 
 # A newer ordinary development commit supersedes every job from an older one,
 # including queued/running preflight, IPA, Windows and Android work. Manual and
@@ -461,3 +468,4 @@ jobs:
     uses: ./.github/workflows/unsigned-ios-ipa.yml
     with:
       cold_cargo_cache: ${{ inputs.cold_cargo_cache || false }}
+      artifact_role: ${{ inputs.artifact_role || 'replacement' }}

@@ -14,6 +14,11 @@ on:
         required: false
         type: boolean
         default: false
+      artifact_role:
+        description: Distinguish a lifecycle diagnostic from a replacement candidate
+        required: false
+        type: string
+        default: replacement
   workflow_dispatch:
     inputs:
       cold_cargo_cache:
@@ -21,6 +26,14 @@ on:
         required: false
         type: boolean
         default: false
+      artifact_role:
+        description: Artifact role
+        required: false
+        type: choice
+        options:
+          - replacement
+          - lifecycle-diagnostic
+        default: replacement
 
 # This workflow only needs to read the repository and upload its build artifact.
 permissions:
@@ -66,7 +79,14 @@ jobs:
           development_version="$(sed -n 's/^MARKETING_VERSION = //p' iphone/Config.xcconfig)"
           test -n "$development_version"
           test "$(grep -c '^MARKETING_VERSION = ' iphone/Config.xcconfig)" = 1
+          artifact_role="${{ inputs.artifact_role }}"
+          case "$artifact_role" in
+            replacement) artifact_suffix="" ;;
+            lifecycle-diagnostic) artifact_suffix="-4GiB-lifecycle-diagnostic" ;;
+            *) echo "Unsupported artifact role: $artifact_role" >&2; exit 1 ;;
+          esac
           echo "DEVELOPMENT_VERSION=$development_version" >> "$GITHUB_ENV"
+          echo "ARTIFACT_SUFFIX=$artifact_suffix" >> "$GITHUB_ENV"
 
       - name: Show build tools
         run: |
@@ -223,17 +243,17 @@ jobs:
 
           (
             cd build
-            /usr/bin/zip -qry "iDared-Dev-$DEVELOPMENT_VERSION.ipa" Payload
+            /usr/bin/zip -qry "iDared-Dev-$DEVELOPMENT_VERSION$ARTIFACT_SUFFIX.ipa" Payload
           )
 
-          test -s "build/iDared-Dev-$DEVELOPMENT_VERSION.ipa"
-          shasum -a 256 "build/iDared-Dev-$DEVELOPMENT_VERSION.ipa"
+          test -s "build/iDared-Dev-$DEVELOPMENT_VERSION$ARTIFACT_SUFFIX.ipa"
+          shasum -a 256 "build/iDared-Dev-$DEVELOPMENT_VERSION$ARTIFACT_SUFFIX.ipa"
 
       - name: Upload the separate unsigned IPA
         uses: actions/upload-artifact@v7
         with:
-          name: iDared-Dev-${{ env.DEVELOPMENT_VERSION }}-${{ github.sha }}
-          path: build/iDared-Dev-${{ env.DEVELOPMENT_VERSION }}.ipa
+          name: iDared-Dev-${{ env.DEVELOPMENT_VERSION }}${{ env.ARTIFACT_SUFFIX }}-${{ github.sha }}
+          path: build/iDared-Dev-${{ env.DEVELOPMENT_VERSION }}${{ env.ARTIFACT_SUFFIX }}.ipa
           if-no-files-found: error
           retention-days: 14
 
@@ -253,15 +273,15 @@ jobs:
           cat build/native-symbols/identity.txt
           (
             cd build/native-symbols
-            /usr/bin/zip -qry "../iDared-Dev-$DEVELOPMENT_VERSION-native-symbols.zip" .
+            /usr/bin/zip -qry "../iDared-Dev-$DEVELOPMENT_VERSION$ARTIFACT_SUFFIX-native-symbols.zip" .
           )
-          test -s "build/iDared-Dev-$DEVELOPMENT_VERSION-native-symbols.zip"
+          test -s "build/iDared-Dev-$DEVELOPMENT_VERSION$ARTIFACT_SUFFIX-native-symbols.zip"
 
       - name: Upload native crash symbols
         uses: actions/upload-artifact@v7
         with:
-          name: iDared-Dev-${{ env.DEVELOPMENT_VERSION }}-native-symbols-${{ github.sha }}
-          path: build/iDared-Dev-${{ env.DEVELOPMENT_VERSION }}-native-symbols.zip
+          name: iDared-Dev-${{ env.DEVELOPMENT_VERSION }}${{ env.ARTIFACT_SUFFIX }}-native-symbols-${{ github.sha }}
+          path: build/iDared-Dev-${{ env.DEVELOPMENT_VERSION }}${{ env.ARTIFACT_SUFFIX }}-native-symbols.zip
           if-no-files-found: error
           retention-days: 90
 
