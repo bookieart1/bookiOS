@@ -12,6 +12,7 @@ pub mod ui_bar_button_item;
 
 pub struct UIBarItemHostObject {
     pub title: id,
+    pub image: id,
     pub enabled: bool,
     pub tag: NSInteger,
 }
@@ -22,6 +23,7 @@ impl Default for UIBarItemHostObject {
     fn default() -> Self {
         Self {
             title: nil,
+            image: nil,
             enabled: true,
             tag: 0,
         }
@@ -44,6 +46,17 @@ pub const CLASSES: ClassExports = objc_classes! {
     retain(env, title);
     release(env, old);
     env.objc.borrow_mut::<UIBarItemHostObject>(this).title = title;
+}
+
+- (id)image {
+    env.objc.borrow::<UIBarItemHostObject>(this).image
+}
+
+- (())setImage:(id)image {
+    let old = env.objc.borrow::<UIBarItemHostObject>(this).image;
+    retain(env, image);
+    release(env, old);
+    env.objc.borrow_mut::<UIBarItemHostObject>(this).image = image;
 }
 
 - (bool)isEnabled {

@@ -10,7 +10,9 @@ use crate::frameworks::core_graphics::{CGFloat, CGPoint, CGRect, CGSize};
 use crate::frameworks::foundation::ns_string::{get_static_str, to_rust_string};
 use crate::frameworks::foundation::NSInteger;
 use crate::frameworks::uikit::ui_font::UITextAlignmentCenter;
-use crate::frameworks::uikit::ui_view::ui_control::UIControlEventTouchUpInside;
+use crate::frameworks::uikit::ui_view::ui_control::{
+    UIControlEventTouchUpInside, UIControlStateNormal,
+};
 use crate::objc::{
     id, impl_HostObject_with_superclass, msg, msg_class, msg_super, nil, objc_classes, release,
     retain, ClassExports, NSZonePtr, SEL,
@@ -227,6 +229,58 @@ pub const CLASSES: ClassExports = objc_classes! {
     msg_super![env; this init]
 }
 
+- (id)initWithImage:(id)image
+                style:(UIBarButtonItemStyle)style
+                target:(id)target
+                action:(SEL)action
+{
+    log_dbg!(
+        "[(UIBarButtonItem*){:?} initWithImage:{:?} style:{:?} target:{:?} action:{:?}]",
+        this,
+        image,
+        style,
+        target,
+        action
+    );
+
+    let image_size: CGSize = if image == nil {
+        CGSize { width: 0.0, height: 0.0 }
+    } else {
+        msg![env; image size]
+    };
+    let frame = CGRect {
+        origin: CGPoint { x: 0.0, y: 0.0 },
+        size: image_size,
+    };
+    let custom_view: id = msg_class![env; UIButton alloc];
+    let custom_view: id = msg![env; custom_view initWithFrame:frame];
+    () = msg![env; custom_view setImage:image forState:UIControlStateNormal];
+    if target != nil {
+        () = msg![env; custom_view addTarget:target
+                                      action:action
+                            forControlEvents:UIControlEventTouchUpInside];
+    }
+
+    {
+        let host = env.objc.borrow_mut::<UIBarButtonItemHostObject>(this);
+        host.superclass.image = image;
+        host.style = style;
+        host.target = target;
+        host.action = Some(action);
+        host.custom_view = custom_view;
+    }
+
+    if image != nil {
+        retain(env, image);
+    }
+    if target != nil {
+        retain(env, target);
+    }
+    retain(env, custom_view);
+
+    msg_super![env; this init]
+}
+
 - (id)initWithBarButtonSystemItem:(UIBarButtonSystemItem)system_item
                             target:(id)target
                             action:(SEL)action
@@ -414,6 +468,7 @@ forControlEvents:(crate::frameworks::foundation::NSUInteger)events {
     );
 
     release(env, superclass.title);
+    release(env, superclass.image);
     release(env, target);
     release(env, custom_view);
     msg_super![env; this dealloc]
@@ -469,6 +524,39 @@ mod tests {
         let style: UIBarButtonItemStyle = msg![env; item style];
         assert_eq!(to_rust_string(env, title), "Cancel");
         assert_eq!(style, UIBarButtonItemStylePlain);
+        release(env, item);
+        release(env, target);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack);
+    }
+
+    #[test]
+    fn development_256_image_item_preserves_style_target_and_action() {
+        let mut env = crate::Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = stack.to_bits() + 0x1000;
+        let target: id = msg_class![env; NSObject new];
+        let action = env
+            .objc
+            .register_host_selector("showMenu:".to_owned(), &mut env.mem);
+        let item: id = msg_class![env; UIBarButtonItem alloc];
+        let item: id = msg![env; item initWithImage:nil
+                                         style:UIBarButtonItemStyleBordered
+                                         target:target
+                                         action:action];
+
+        let stored_image: id = msg![env; item image];
+        let stored_style: UIBarButtonItemStyle = msg![env; item style];
+        let stored_target: id = msg![env; item target];
+        let stored_action: SEL = msg![env; item action];
+        let custom_view: id = msg![env; item customView];
+        assert_eq!(stored_image, nil);
+        assert_eq!(stored_style, UIBarButtonItemStyleBordered);
+        assert_eq!(stored_target, target);
+        assert_eq!(stored_action, action);
+        assert_ne!(custom_view, nil);
+
         release(env, item);
         release(env, target);
         env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
