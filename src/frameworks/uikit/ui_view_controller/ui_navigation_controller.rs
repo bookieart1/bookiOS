@@ -58,6 +58,44 @@ mod tests {
         // synthetic environment discard it with `nav` instead of invoking
         // UIView's registered-view teardown contract on an unregistered view.
     }
+
+    #[test]
+    fn development_256_pop_to_root_returns_popped_controllers_in_stack_order() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let nav: id = msg_class![env; UINavigationController alloc];
+        let bar: id = msg_class![env; UINavigationBar alloc];
+        env.objc
+            .borrow_mut::<UINavigationControllerHostObject>(nav)
+            .navigation_bar = bar;
+
+        let root: id = msg_class![env; UIViewController new];
+        let middle: id = msg_class![env; UIViewController new];
+        let top: id = msg_class![env; UIViewController new];
+        for controller in [root, middle, top] {
+            retain(env, controller);
+            super::super::set_navigation_controller(env, controller, nav);
+            env.objc
+                .borrow_mut::<UINavigationControllerHostObject>(nav)
+                .navigation_stack
+                .push(controller);
+        }
+
+        let popped: id = msg![env; nav popToRootViewControllerAnimated:false];
+        let count: NSUInteger = msg![env; popped count];
+        assert_eq!(count, 2);
+        let first: id = msg![env; popped objectAtIndex:0u32];
+        let second: id = msg![env; popped objectAtIndex:1u32];
+        assert_eq!((first, second), (top, middle));
+        let remaining: id = msg![env; nav topViewController];
+        assert_eq!(remaining, root);
+        let middle_navigation: id = msg![env; middle navigationController];
+        let top_navigation: id = msg![env; top navigationController];
+        assert_eq!((middle_navigation, top_navigation), (nil, nil));
+
+        let none: id = msg![env; nav popToRootViewControllerAnimated:false];
+        assert_eq!(none, nil);
+    }
 }
 
 // TODO: navigation bar and toolbar
@@ -236,6 +274,35 @@ pub const CLASSES: ClassExports = objc_classes! {
     let navigation_bar: id = msg![env; this navigationBar];
     let _: id = msg![env; navigation_bar popNavigationItemAnimated:false];
     autorelease(env, controller)
+}
+
+- (id)popToRootViewControllerAnimated:(bool)animated {
+    if env
+        .objc
+        .borrow::<UINavigationControllerHostObject>(this)
+        .navigation_stack
+        .len()
+        <= 1
+    {
+        return nil;
+    }
+
+    let mut popped = Vec::new();
+    while env
+        .objc
+        .borrow::<UINavigationControllerHostObject>(this)
+        .navigation_stack
+        .len()
+        > 1
+    {
+        let controller: id = msg![env; this popViewControllerAnimated:animated];
+        // popViewControllerAnimated: balances the stack's ownership with an
+        // autorelease. Retain once for the returned NSArray's ownership.
+        retain(env, controller);
+        popped.push(controller);
+    }
+    let popped = ns_array::from_vec(env, popped);
+    autorelease(env, popped)
 }
 
 - (id)viewControllers {
