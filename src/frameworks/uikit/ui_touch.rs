@@ -45,6 +45,33 @@ pub(super) struct UITouchHostObject {
 }
 impl HostObject for UITouchHostObject {}
 
+fn convert_touch_location(
+    env: &mut Environment,
+    screen_location: CGPoint,
+    touch_window: id,
+    target_view: id,
+) -> (CGPoint, CGPoint) {
+    let location_in_window: CGPoint =
+        msg![env; touch_window convertPoint:screen_location fromWindow:nil];
+    if target_view == nil {
+        return (location_in_window, location_in_window);
+    }
+
+    // A touch keeps the window in which it began, while application code is
+    // allowed to rearrange or detach views before the sequence finishes.  A
+    // target that is still in that window can use the ordinary shared-tree
+    // conversion.  Otherwise convert from the screen coordinate space: asking
+    // CALayer to bridge two disconnected trees has no defined common ancestor
+    // and must not be used as a substitute for UITouch's retained location.
+    let target_window: id = msg![env; target_view window];
+    let converted = if target_window == touch_window {
+        msg![env; target_view convertPoint:location_in_window fromView:touch_window]
+    } else {
+        msg![env; target_view convertPoint:screen_location fromView:nil]
+    };
+    (location_in_window, converted)
+}
+
 pub const CLASSES: ClassExports = objc_classes! {
 
 (env, this, _cmd);
@@ -72,12 +99,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (CGPoint)locationInView:(id)that_view { // UIView*
     let &UITouchHostObject { location, window, .. } = env.objc.borrow(this);
-    let location_in_window: CGPoint = msg![env; window convertPoint:location fromWindow:nil];
-    let converted = if that_view == nil {
-        location_in_window
-    } else {
-        msg![env; that_view convertPoint:location_in_window fromView:window]
-    };
+    let (location_in_window, converted) =
+        convert_touch_location(env, location, window, that_view);
     if env.bundle.bundle_identifier_optional() == Some("com.iugo.Implode") {
         let sequence = {
             let state = &mut env.framework_state.uikit.ui_touch;
@@ -120,12 +143,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 - (CGPoint)previousLocationInView:(id)that_view { // UIView*
     let &UITouchHostObject { previous_location, window, .. } = env.objc.borrow(this);
-    let location_in_window: CGPoint = msg![env; window convertPoint:previous_location fromWindow:nil];
-    if that_view == nil {
-        location_in_window
-    } else {
-        msg![env; that_view convertPoint:location_in_window fromView:window]
-    }
+    convert_touch_location(env, previous_location, window, that_view).1
 }
 
 - (id)view {
@@ -577,7 +595,11 @@ fn handle_touches_up(env: &mut Environment, map: HashMap<FingerId, Coords>) {
             .current_touches
             .remove(&finger_id);
         env.diagnostic_touch_event(
-            if view == nil { "ended-without-view" } else { "ended-delivered" },
+            if view == nil {
+                "ended-without-view"
+            } else {
+                "ended-delivered"
+            },
             touch,
             view,
             env.framework_state.uikit.ui_touch.current_touches.len(),
@@ -602,4 +624,65 @@ fn handle_touches_up(env: &mut Environment, map: HashMap<FingerId, Coords>) {
     }
 
     release(env, pool);
+}
+
+#[cfg(test)]
+mod development_256_tests {
+    use super::*;
+    use crate::frameworks::core_graphics::CGSize;
+
+    #[test]
+    fn development_256_uitouch_converts_locations_after_target_view_is_detached() {
+        let mut env = crate::Environment::new_fake_for_test_with_thread();
+        env.bundle.set_fake_identity_for_test();
+        let env = &mut env;
+        let stack = env.mem.alloc(0x1000).cast::<u8>();
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = (stack + 0x1000).to_bits();
+
+        let window_frame = CGRect {
+            origin: CGPoint { x: 0.0, y: 0.0 },
+            size: CGSize {
+                width: 320.0,
+                height: 480.0,
+            },
+        };
+        let view_frame = CGRect {
+            origin: CGPoint { x: 10.0, y: 20.0 },
+            size: CGSize {
+                width: 100.0,
+                height: 100.0,
+            },
+        };
+        let window: id = msg_class![env; UIWindow alloc];
+        let window: id = msg![env; window initWithFrame:window_frame];
+        let view: id = msg_class![env; UIView alloc];
+        let view: id = msg![env; view initWithFrame:view_frame];
+        () = msg![env; window addSubview:view];
+
+        let touch: id = msg_class![env; UITouch alloc];
+        retain(env, window);
+        retain(env, view);
+        *env.objc.borrow_mut::<UITouchHostObject>(touch) = UITouchHostObject {
+            view,
+            window,
+            location: CGPoint { x: 25.0, y: 36.0 },
+            previous_location: CGPoint { x: 24.0, y: 34.0 },
+            timestamp: 1.0,
+            phase: UITouchPhaseEnded,
+        };
+
+        () = msg![env; view removeFromSuperview];
+        let detached_window: id = msg![env; view window];
+        assert_eq!(detached_window, nil);
+        let current: CGPoint = msg![env; touch locationInView:view];
+        let previous: CGPoint = msg![env; touch previousLocationInView:view];
+        assert_eq!(current, CGPoint { x: 15.0, y: 16.0 });
+        assert_eq!(previous, CGPoint { x: 14.0, y: 14.0 });
+
+        release(env, touch);
+        release(env, view);
+        release(env, window);
+        env.cpu.regs_mut()[crate::cpu::Cpu::SP] = 0;
+        env.mem.free(stack.cast());
+    }
 }
