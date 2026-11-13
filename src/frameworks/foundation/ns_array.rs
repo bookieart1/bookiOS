@@ -504,6 +504,12 @@ pub const CLASSES: ClassExports = objc_classes! {
     autorelease(env, new)
 }
 
+- (id)sortedArrayUsingDescriptors:(id)descriptors { // NSArray<NSSortDescriptor*>*
+    let new = msg![env; this mutableCopy];
+    () = msg![env; new sortUsingDescriptors:descriptors];
+    autorelease(env, new)
+}
+
 @end
 
 // NSMutableArray is an abstract class. A subclass must provide everything
@@ -736,12 +742,6 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
     let res = from_vec(env, tmp);
     autorelease(env, res)
-}
-
-- (id)sortedArrayUsingDescriptors:(id)descriptors { // NSArray<NSSortDescriptor*>*
-    let new = msg![env; this mutableCopy];
-    () = msg![env; new sortUsingDescriptors:descriptors];
-    autorelease(env, new)
 }
 
 @end
@@ -1365,6 +1365,25 @@ fn collect_nil_terminated_objects(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn development_256_mutable_array_inherits_sorted_array_using_descriptors() {
+        let mut env = Environment::new_fake_for_test_with_thread();
+        let env = &mut env;
+        let pool: id = msg_class![env; NSAutoreleasePool new];
+        let array: id = msg_class![env; NSMutableArray array];
+        let descriptors: id = msg_class![env; NSArray array];
+        let selector = env
+            .objc
+            .lookup_selector("sortedArrayUsingDescriptors:")
+            .unwrap();
+        let responds: bool = msg![env; array respondsToSelector:selector];
+        assert!(responds);
+        let sorted: id = msg![env; array sortedArrayUsingDescriptors:descriptors];
+        let count: NSUInteger = msg![env; sorted count];
+        assert_eq!(count, 0);
+        release(env, pool);
+    }
     use crate::cpu::Cpu;
     use crate::frameworks::foundation::ns_string::to_rust_string;
     use crate::mem::ConstVoidPtr;
