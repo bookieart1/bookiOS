@@ -248,4 +248,16 @@ fn development_256_repeated_log_call_sites_are_bounded_and_sampled() {
         .filter(|&count| should_emit_occurrence(count, ECHO_SITE_INITIAL_BURST))
         .count();
     assert_eq!(emitted_direct_output_through_same_count, 267);
+
+    let flooded_site = ("test-log", "test-module", "log-volume-test.rs", 1);
+    let independent_terminal_site = ("test-log", "test-module", "log-volume-test.rs", 2);
+    for expected in 1..=720_639 {
+        assert_eq!(next_output_site_occurrence(flooded_site), expected);
+    }
+    let terminal_occurrence = next_output_site_occurrence(independent_terminal_site);
+    assert_eq!(terminal_occurrence, 1);
+    assert!(should_emit_occurrence(
+        terminal_occurrence,
+        LOG_SITE_INITIAL_BURST
+    ));
 }
