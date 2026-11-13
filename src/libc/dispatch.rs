@@ -328,6 +328,29 @@ fn dispatch_async(env: &mut Environment, _queue: MutVoidPtr, block: MutPtr<Block
     invoke_block_synchronously(env, block);
 }
 
+fn dispatch_sync(env: &mut Environment, queue: MutVoidPtr, block: MutPtr<BlockLiteral>) {
+    let main_queue = get_main_queue(env);
+    let queue_kind = if queue == main_queue {
+        "main"
+    } else if env
+        .libc_state
+        .dispatch
+        .global_queues
+        .values()
+        .any(|candidate| *candidate == queue)
+    {
+        "global"
+    } else if !queue.is_null() && env.mem.read(queue.cast::<u32>()) == QUEUE_MAGIC {
+        "created"
+    } else {
+        "invalid"
+    };
+    panic!(
+        "Development 2.56 dispatch_sync preflight: queue={queue_kind} block_kind={:?}",
+        block_kind(env, block)
+    );
+}
+
 fn dispatch_group_async(
     env: &mut Environment,
     _group: MutVoidPtr,
@@ -384,6 +407,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(dispatch_retain(_)),
     export_c_func!(dispatch_release(_)),
     export_c_func!(dispatch_async(_, _)),
+    export_c_func!(dispatch_sync(_, _)),
     export_c_func!(dispatch_group_async(_, _, _)),
     export_c_func!(dispatch_once(_, _)),
 ];
