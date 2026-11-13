@@ -52,6 +52,7 @@ pub struct State {
     address_list: Option<MutPtr<MutPtr<u8>>>,
     h_errno: Option<MutPtr<i32>>,
     error_strings: HashMap<i32, MutPtr<u8>>,
+    gai_error_strings: HashMap<i32, MutPtr<u8>>,
 }
 
 fn h_errno_ptr(env: &mut Environment) -> MutPtr<i32> {
@@ -89,6 +90,44 @@ fn hstrerror(env: &mut Environment, error: i32) -> MutPtr<u8> {
         .mem
         .alloc_and_write_cstr(h_error_text(error).as_bytes());
     env.libc_state.netdb.error_strings.insert(error, pointer);
+    pointer
+}
+
+fn gai_error_text(error: i32) -> &'static str {
+    // Darwin's historical EAI values and strings come from the BSD
+    // getaddrinfo contract. Keep this namespace separate from h_errno: the
+    // numeric values overlap but describe different classes of error.
+    match error {
+        0 => "Success",
+        1 => "Address family for hostname not supported",
+        2 => "Name could not be resolved at this time",
+        3 => "Flags parameter had an invalid value",
+        EAI_FAIL => "Non-recoverable failure in name resolution",
+        5 => "Address family not recognized",
+        6 => "Memory allocation failure",
+        7 => "No address associated with hostname",
+        8 => "Name does not resolve",
+        9 => "Service was not recognized for socket type",
+        10 => "Intended socket type was not recognized",
+        11 => "System error returned in errno",
+        12 => "Invalid value for hints",
+        13 => "Resolved protocol is unknown",
+        14 => "Argument buffer overflow",
+        _ => "Unknown error",
+    }
+}
+
+fn gai_strerror(env: &mut Environment, error: i32) -> MutPtr<u8> {
+    if let Some(&pointer) = env.libc_state.netdb.gai_error_strings.get(&error) {
+        return pointer;
+    }
+    let pointer = env
+        .mem
+        .alloc_and_write_cstr(gai_error_text(error).as_bytes());
+    env.libc_state
+        .netdb
+        .gai_error_strings
+        .insert(error, pointer);
     pointer
 }
 
@@ -268,6 +307,7 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(gethostent()),
     export_c_func!(__h_errno()),
     export_c_func!(hstrerror(_)),
+    export_c_func!(gai_strerror(_)),
     export_c_func!(herror(_)),
 ];
 
@@ -319,6 +359,32 @@ mod tests {
         assert_eq!(
             env.mem.cstr_at_utf8(error_text.cast_const()),
             Ok("Unknown host")
+        );
+    }
+
+    #[test]
+    fn gai_strerror_uses_darwin_eai_namespace_and_stable_storage() {
+        let mut env = Environment::new_fake_for_test();
+
+        let fail = gai_strerror(&mut env, EAI_FAIL);
+        assert_eq!(
+            env.mem.cstr_at_utf8(fail.cast_const()),
+            Ok("Non-recoverable failure in name resolution")
+        );
+        assert_eq!(gai_strerror(&mut env, EAI_FAIL), fail);
+
+        // h_errno value 4 has a different meaning and must not alias EAI_FAIL.
+        let no_data = hstrerror(&mut env, NO_DATA);
+        assert_ne!(fail, no_data);
+        assert_eq!(
+            env.mem.cstr_at_utf8(no_data.cast_const()),
+            Ok("No address associated with name")
+        );
+
+        let unknown = gai_strerror(&mut env, -1);
+        assert_eq!(
+            env.mem.cstr_at_utf8(unknown.cast_const()),
+            Ok("Unknown error")
         );
     }
 }
