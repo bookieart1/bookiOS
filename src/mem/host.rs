@@ -106,6 +106,37 @@ pub(super) fn infrastructure_valid() -> bool {
     GUEST_MEMORY_INFRASTRUCTURE_VALID.load(Ordering::SeqCst)
 }
 
+pub(super) fn relieve_allocator_pressure_after_guest() {
+    let live = live_mapping_count();
+    assert_eq!(
+        live, 0,
+        "host allocator pressure relief must follow confirmed guest unmap"
+    );
+
+    #[cfg(target_vendor = "apple")]
+    {
+        let before = host_virtual_memory_state();
+        // Passing a null zone examines every malloc zone; a zero goal asks
+        // libmalloc for maximal relief. Apple documents this API as releasing
+        // allocator caches with a best-effort series of munmap operations.
+        let released = unsafe { malloc_zone_pressure_relief(std::ptr::null_mut(), 0) };
+        let after = host_virtual_memory_state();
+        echo_no_panic!(
+            "Guest lifecycle allocator pressure relief: live_mapping_count={} released_bytes={} host_vm_before={} host_vm_after={}",
+            live,
+            released,
+            before,
+            after
+        );
+    }
+}
+
+#[cfg(target_vendor = "apple")]
+unsafe extern "C" {
+    /// Apple libmalloc, available on iOS 4.3 and later.
+    fn malloc_zone_pressure_relief(zone: *mut core::ffi::c_void, goal: usize) -> usize;
+}
+
 #[cfg(target_vendor = "apple")]
 fn host_virtual_memory_state() -> String {
     let mut info: libc::mach_task_basic_info = unsafe { std::mem::zeroed() };

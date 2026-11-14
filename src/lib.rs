@@ -533,6 +533,10 @@ fn run_app(
     );
     echo!("=== End iDared Game Launch Performance ===");
     let result = env.run();
+    // Environment::run consumes `env`, so all of its fields (including Mem)
+    // have been destroyed and the guest unmap result is known here. Relieve
+    // Apple allocator caches only at this verified process-lifecycle boundary.
+    mem::finish_guest_memory_lifecycle();
     echo!(
         "iDared Return Performance: guest run and Environment teardown returned at process t={:.3} ms",
         performance_process_elapsed_ms()

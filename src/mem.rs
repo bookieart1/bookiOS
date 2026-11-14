@@ -20,6 +20,18 @@ mod host;
 pub(crate) fn guest_memory_infrastructure_valid() -> bool {
     host::infrastructure_valid()
 }
+
+/// Complete the process-lifecycle boundary after a guest has been destroyed.
+///
+/// This must run only after [`Environment`](crate::Environment) field
+/// destruction has released the guest mapping. Apple malloc intentionally
+/// retains some freed pages for reuse, which is useful inside one application
+/// but harmful between iDared guests: the next guest needs a new 4 GiB virtual
+/// reservation. Return those allocator caches to iOS only after confirming
+/// that no guest mapping is still live.
+pub(crate) fn finish_guest_memory_lifecycle() {
+    host::relieve_allocator_pressure_after_guest();
+}
 pub(crate) mod object_history;
 
 pub use allocator::{HeapAllocator, VMAllocError};
@@ -921,6 +933,7 @@ mod guest_mapping_lifecycle_tests {
                 0,
                 "generation {generation} must confirm its unmap before the next reservation"
             );
+            finish_guest_memory_lifecycle();
         }
     }
 }
